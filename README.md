@@ -2,7 +2,7 @@
 
 > **Enduring software:** software that continues to meet the needs of institutions over time.
 
-**es-lab** - *Enduring Software Laboratory* - is a collection of isolated mini-projects for exploring how to build secure, configurable, full-stack systems that can run anywhere: laptop, on-premises, or public cloud.
+**es-lab** - *Enduring Software Laboratory* - is a collection of isolated mini-projects for building secure, configurable, full-stack systems that can run anywhere: laptop, on-premises, or public cloud.
 
 The purpose is not to collect tools. The purpose is to prove architectural ideas through working software.
 
@@ -54,11 +54,11 @@ Configuration should make business variation cheaper. It should not make unsafe 
 
 ### Portable
 
-It is not trapped in one hosting environment, one cloud provider, or one vendor’s product suite.
+It is not trapped in one hosting environment, one cloud provider, or one vendor's product suite.
 
-The same application architecture should work on a laptop, in an on-premises data center, or in a public cloud.
+The same application architecture should work on a laptop, in an on-premises data centre, or in a public cloud.
 
-### Observable and recoverable
+### Operable
 
 It can be monitored, alerted, diagnosed, audited, restored, and rebuilt.
 
@@ -98,7 +98,7 @@ Bounded contexts provide strategic separation. Vertical slices keep features und
 
 The aim is simple: one feature should be understandable end to end.
 
-### 4. Treat products as replaceable implementations
+### 4. Treat products as adapters
 
 The system depends on architectural roles, not permanent product choices.
 
@@ -143,23 +143,23 @@ The long-term target includes:
 * vertical slices
 * event sourcing
 * CQRS projections
-* Cache
-* Message broker
+* cache
+* message broker
 * S3-compatible object storage
-* OIDC - BFF with PKCE
+* OIDC login using a BFF with PKCE
 * machine-to-machine OAuth
 * fine-grained authorisation
-* Secrets, PKI, and key management
-* Configurable forms
-* Configurable workflows
-* Configurable business rules
+* secrets, PKI, and key management
+* configurable forms
+* configurable workflows
+* configurable business rules
 * SSE for live updates
-* Payments
-* Email sending
-* Observability
+* payments
+* email sending
+* observability
 * IaC
 * CI/CD
-* Cloud and on-prem deployment patterns
+* cloud and on-prem deployment patterns
 
 The tools are not the point.
 
@@ -347,9 +347,9 @@ It remains secure, understandable, adaptable, operable, portable, and economical
 
 This work is influenced by ideas from:
 
-* *Domain-Driven Design* - Eric Evans
-* *Implementing Domain-Driven Design* - Vaughn Vernon
-* *Secure by Design* - Dan Bergh Johnsson, Daniel Deogun, Daniel Sawano
-* The Reactive Manifesto
-* The Twelve-Factor App
-* the Clojure community's preference for simple, composable systems
+* [*Domain-Driven Design* - Eric Evans](https://www.dddcommunity.org/book/evans_2003/)
+* [*Implementing Domain-Driven Design* - Vaughn Vernon](https://www.dddcommunity.org/book/implementing-domain-driven-design-by-vaughn-vernon/)
+* [*Secure by Design* - Dan Bergh Johnsson, Daniel Deogun, Daniel Sawano](https://www.manning.com/books/secure-by-design)
+* [The Reactive Manifesto](https://www.reactivemanifesto.org/)
+* [The Twelve-Factor App](https://12factor.net/)
+* [Clojure's emphasis on simple, coherent, composable systems](https://clojure.org/)
