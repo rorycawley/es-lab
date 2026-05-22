@@ -171,29 +171,30 @@ Production-grade projects may define measurable targets such as latency, through
 
 The long-term target includes:
 
-* SPA frontends
-* backend
+* web frontends
+* application backend
 * modular monolith architecture
-* DDD bounded contexts
+* bounded contexts
 * vertical slices
-* event sourcing
-* CQRS projections
-* cache
-* message broker
-* S3-compatible object storage
-* OIDC login using a BFF with PKCE
-* machine-to-machine OAuth
+* event-sourced state
+* read-model projections
+* caching
+* asynchronous messaging
+* object storage for files and documents
+* federated identity
+* browser-token-free session authentication
+* authenticated service-to-service communication
 * fine-grained authorisation
-* secrets, PKI, and key management
+* secrets, certificates, and key management
 * configurable forms
 * configurable workflows
 * configurable business rules
-* SSE for live updates
-* payments
-* email sending
+* server-pushed live updates
+* payment processing
+* email notifications
 * observability
-* IaC
-* CI/CD
+* reproducible infrastructure provisioning
+* automated build, test, and delivery
 * cloud and on-prem deployment patterns
 
 The tools are not the point.
