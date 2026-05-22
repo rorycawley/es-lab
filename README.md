@@ -130,6 +130,41 @@ No environment is the only real one.
 
 ---
 
+## Quality attributes
+
+**es-lab** focuses on architectural qualities that matter for long-lived institutional software.
+
+Each project should make one or more of these qualities visible and testable.
+
+| Quality attribute | What it means here                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------- |
+| Security          | Unsafe behaviour should be hard to express, easy to detect, and contained by defence in depth.      |
+| Changeability     | Forms, workflows, rules, APIs, events, and integrations should evolve through explicit versioning.  |
+| Maintainability   | A feature should be understandable end to end without requiring knowledge of the entire system.     |
+| Configurability   | Business variation should be achievable through safe, versioned configuration where appropriate.    |
+| Portability       | The same application architecture should run on laptop, on-premises, and public cloud environments. |
+| Operability       | The system should be observable, diagnosable, recoverable, and safe to operate.                     |
+| Resilience        | The system should tolerate failure, support recovery, and avoid single points of catastrophic loss. |
+| Performance       | The architecture should support predictable response times and scale where needed.                  |
+| Auditability      | Important commands, decisions, events, and configuration changes should be explainable later.       |
+| Evolvability      | Core technology choices should be replaceable without rewriting the domain model.                   |
+
+These are not abstract aspirations. Each project should define lightweight fitness criteria that show which architectural claims it proves.
+
+For example:
+
+```text
+A new form field can be added by changing configuration, not backend code.
+A historical submission renders using the form version active at submission time.
+A protected API endpoint rejects unauthenticated requests.
+A command creates an audit event.
+The app runs with docker compose up.
+```
+
+Production-grade projects may define measurable targets such as latency, throughput, availability, RTO, RPO, deployment frequency, or restore success criteria where those targets are relevant.
+
+---
+
 ## What this repository demonstrates
 
 **es-lab** demonstrates a path toward a secure, configurable, portable full-stack reference architecture.
@@ -224,16 +259,24 @@ Every project should explain itself using the same basic structure:
 
 ## What to look at
 
+## Quality attributes demonstrated
+
+## Fitness criteria
+
 ## Security design notes
 
 ## Configuration and evolution notes
 
 ## Production notes
 
+## What is not proven yet
+
 ## What I learned
 ```
 
 Each project should prove one or more architectural claims through working software.
+
+The `Fitness criteria` section should make those claims concrete and testable.
 
 ---
 
