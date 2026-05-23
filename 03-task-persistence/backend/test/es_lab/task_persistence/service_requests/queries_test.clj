@@ -1,30 +1,38 @@
 (ns es-lab.task-persistence.service-requests.queries-test
   (:require [clojure.test :refer [deftest is]]
-            [es-lab.task-persistence.service-requests.commands :as commands]
+            [es-lab.task-persistence.service-requests.port :as sr]
             [es-lab.task-persistence.service-requests.queries :as queries]
-            [es-lab.task-persistence.test-support :as support]))
+            [spy.protocol :as protocol]))
 
-(deftest returns-empty-list-when-no-requests
-  (let [ctx  (support/make-ports)
-        resp ((queries/list-service-requests-handler ctx) {})]
+(defn- make-ctx [requests]
+  {:service-request-port (protocol/mock sr/ServiceRequestPort
+                           (list-all [_] requests))})
+
+(defn- list-requests [ctx]
+  ((queries/list-service-requests-handler ctx) {}))
+
+(def ^:private stub-request
+  {:request_id   "01955f3d-0000-7000-8000-000000000001"
+   :submitted_by "demo-user"
+   :title        "Fix door"
+   :description  "Room 101"
+   :status       "submitted"
+   :created_at   "2026-01-01T00:00:00Z"
+   :updated_at   "2026-01-01T00:00:00Z"})
+
+(deftest returns-200-with-empty-list
+  (let [resp (list-requests (make-ctx []))]
     (is (= 200 (:status resp)))
     (is (= [] (get-in resp [:body :requests])))))
 
 (deftest returns-submitted-requests
-  (let [ctx (support/make-ports)
-        _   ((commands/submit-service-request-handler ctx)
-             {:body-params {:title "Fix door" :description "Room 101"} :headers {}})
-        resp ((queries/list-service-requests-handler ctx) {})]
+  (let [resp (list-requests (make-ctx [stub-request]))]
     (is (= 200 (:status resp)))
     (is (= 1 (count (get-in resp [:body :requests]))))
     (is (= "Fix door" (get-in resp [:body :requests 0 :title])))))
 
-(deftest returns-all-requests-newest-first
-  (let [ctx (support/make-ports)
-        submit #((commands/submit-service-request-handler ctx)
-                 {:body-params {:title % :description "desc"} :headers {}})]
-    (submit "First")
-    (submit "Second")
-    (let [resp ((queries/list-service-requests-handler ctx) {})
-          titles (mapv :title (get-in resp [:body :requests]))]
-      (is (= 2 (count titles))))))
+(deftest returns-all-requests
+  (let [r1   (assoc stub-request :request_id "01955f3d-0000-7000-8000-000000000001" :title "First")
+        r2   (assoc stub-request :request_id "01955f3d-0000-7000-8000-000000000002" :title "Second")
+        resp (list-requests (make-ctx [r1 r2]))]
+    (is (= 2 (count (get-in resp [:body :requests]))))))

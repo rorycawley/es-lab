@@ -1,5 +1,5 @@
 CREATE TABLE audit_events (
-    audit_event_id UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    audit_event_id UUID        PRIMARY KEY,
     actor          TEXT        NOT NULL,
     action         TEXT        NOT NULL,
     subject_id     UUID        NOT NULL,

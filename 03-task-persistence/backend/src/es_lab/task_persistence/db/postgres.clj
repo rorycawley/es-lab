@@ -1,6 +1,7 @@
 (ns es-lab.task-persistence.db.postgres
   (:require [es-lab.task-persistence.audit.port :as audit]
             [es-lab.task-persistence.service-requests.port :as sr]
+            [es-lab.task-persistence.uuid :as uuid]
             [jsonista.core :as json]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]))
@@ -17,9 +18,9 @@
   sr/ServiceRequestPort
   (save! [_ {:keys [submitted-by title description]}]
     (-> (jdbc/execute-one! ds
-          ["INSERT INTO service_requests (submitted_by, title, description)
-            VALUES (?, ?, ?) RETURNING *"
-           submitted-by title description]
+          ["INSERT INTO service_requests (request_id, submitted_by, title, description)
+            VALUES (?, ?, ?, ?) RETURNING *"
+           (uuid/uuid7) submitted-by title description]
           {:builder-fn rs/as-unqualified-lower-maps})
         ->response))
   (list-all [_]
@@ -32,6 +33,7 @@
   audit/AuditPort
   (record! [_ {:keys [actor action subject-id metadata]}]
     (jdbc/execute-one! ds
-      ["INSERT INTO audit_events (actor, action, subject_id, metadata)
-        VALUES (?, ?, ?::uuid, ?::jsonb)"
-       actor action (str subject-id) (json/write-value-as-string metadata)])))
+      ["INSERT INTO audit_events (audit_event_id, actor, action, subject_id, metadata)
+        VALUES (?, ?, ?, ?::uuid, ?::jsonb)"
+       (uuid/uuid7) actor action (str subject-id) (json/write-value-as-string metadata)])
+    nil))
