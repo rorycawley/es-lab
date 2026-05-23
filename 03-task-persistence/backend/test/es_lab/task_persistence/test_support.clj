@@ -1,5 +1,6 @@
 (ns es-lab.task-persistence.test-support
-  (:require [es-lab.task-persistence.audit.port :as audit]
+  (:require [clojure.string :as str]
+            [es-lab.task-persistence.audit.port :as audit]
             [es-lab.task-persistence.service-requests.port :as sr]))
 
 (defrecord InMemoryServiceRequestPort [!store]
@@ -15,7 +16,15 @@
       (swap! !store conj record)
       record))
   (list-all [_]
-    @!store))
+    (vec (rseq @!store)))
+  (search [_ query]
+    (let [needle  (str/lower-case query)
+          in?     (fn [text] (str/includes? (str/lower-case text) needle))
+          title?  (fn [{:keys [title]}] (in? title))]
+      (->> @!store
+           (filter (fn [{:keys [title description]}] (or (in? title) (in? description))))
+           (sort-by (fn [r] (if (title? r) 0 1)))
+           vec))))
 
 (defrecord InMemoryAuditPort [!store]
   audit/AuditPort

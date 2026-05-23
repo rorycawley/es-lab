@@ -2,4 +2,5 @@
 
 (defprotocol ServiceRequestPort
   (save!    [port request])
-  (list-all [port]))
+  (list-all [port])
+  (search   [port query]))

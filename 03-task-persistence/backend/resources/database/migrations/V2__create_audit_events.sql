@@ -4,5 +4,8 @@ CREATE TABLE audit_events (
     action         TEXT        NOT NULL,
     subject_id     UUID        NOT NULL,
     occurred_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    metadata       JSONB
+    metadata       JSONB,
+    CONSTRAINT audit_events_subject_id_fkey
+        FOREIGN KEY (subject_id)
+        REFERENCES service_requests (request_id)
 );

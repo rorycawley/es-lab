@@ -2,9 +2,10 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
-import { AppComponent } from './app.component';
+import { AppComponent, SEARCH_DEBOUNCE_MS } from './app.component';
 
 const QUERY_URL = '/api/queries/list-service-requests';
+const SEARCH_URL = '/api/queries/search-service-requests';
 const COMMAND_URL = '/api/commands/submit-service-request';
 
 const stubRequest = {
@@ -28,6 +29,7 @@ describe('AppComponent', () => {
         provideZonelessChangeDetection(),
         provideHttpClient(),
         provideHttpClientTesting(),
+        { provide: SEARCH_DEBOUNCE_MS, useValue: 0 },
       ],
     }).compileComponents();
 
@@ -62,6 +64,59 @@ describe('AppComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('submitted');
   });
 
+  it('searches requests after the search query changes', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    fixture.componentInstance.setSearchQuery('printer');
+    await fixture.whenStable();
+    const req = httpMock.expectOne(SEARCH_URL);
+    expect(req.request.body).toEqual({ query: 'printer' });
+    req.flush({ requests: [stubRequest] });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Broken printer');
+  });
+
+  it('returns to the full list when the search query is cleared', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
+    await fixture.whenStable();
+
+    fixture.componentInstance.setSearchQuery('printer');
+    await fixture.whenStable();
+    httpMock.expectOne(SEARCH_URL).flush({ requests: [stubRequest] });
+    await fixture.whenStable();
+
+    fixture.componentInstance.setSearchQuery('   ');
+    await fixture.whenStable();
+    httpMock.expectOne(QUERY_URL).flush({ requests: [stubRequest] });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Broken printer');
+  });
+
+  it('shows search empty state when no matching requests are found', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
+    await fixture.whenStable();
+
+    fixture.componentInstance.setSearchQuery('printer');
+    await fixture.whenStable();
+    httpMock.expectOne(SEARCH_URL).flush({ requests: [] });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('No matching requests');
+  });
+
   it('shows submitting state while command is in flight', async () => {
     fixture.detectChanges();
     await fixture.whenStable();
@@ -93,6 +148,34 @@ describe('AppComponent', () => {
 
     httpMock.expectOne(QUERY_URL).flush({ requests: [stubRequest] });
     await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Request submitted successfully');
+    expect(fixture.nativeElement.textContent).toContain('Broken printer');
+  });
+
+  it('clears active search and reloads full list after successful submit', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
+    await fixture.whenStable();
+
+    fixture.componentInstance.setSearchQuery('printer');
+    await fixture.whenStable();
+    httpMock.expectOne(SEARCH_URL).flush({ requests: [] });
+    await fixture.whenStable();
+
+    fixture.componentInstance.submitForm.title().value.set('Fix door');
+    fixture.componentInstance.submitForm.description().value.set('Door 201 is stuck');
+    fixture.componentInstance.submit();
+    await fixture.whenStable();
+
+    httpMock.expectOne(COMMAND_URL).flush({});
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.searchQuery()).toBe('');
+    httpMock.expectOne(QUERY_URL).flush({ requests: [stubRequest] });
+    await fixture.whenStable();
+    fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('Request submitted successfully');
     expect(fixture.nativeElement.textContent).toContain('Broken printer');
@@ -134,5 +217,63 @@ describe('AppComponent', () => {
     await fixture.whenStable();
 
     httpMock.expectNone(COMMAND_URL);
+  });
+
+  it('does not submit when description is blank', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
+    await fixture.whenStable();
+
+    fixture.componentInstance.submitForm.title().value.set('Fix door');
+    fixture.componentInstance.submit();
+    await fixture.whenStable();
+
+    httpMock.expectNone(COMMAND_URL);
+  });
+
+  it('clears success message after 3 seconds', async () => {
+    // jest.useFakeTimers fakes ALL setTimeout calls, including Angular's internal
+    // 0ms zoneless scheduler, which deadlocks fixture.whenStable(). Instead, capture
+    // only the 3-second auto-clear callback via a targeted spy so Angular's scheduler
+    // continues to use real setTimeout.
+    let successClearCallback: (() => void) | undefined;
+    const origSetTimeout = window.setTimeout.bind(window);
+    jest.spyOn(window, 'setTimeout').mockImplementation((handler, timeout, ...args: unknown[]) => {
+      if (timeout === 3000 && typeof handler === 'function') {
+        successClearCallback = () => handler(...args);
+        return 0;
+      }
+      return origSetTimeout(handler, timeout, ...args);
+    });
+    try {
+      fixture.detectChanges();
+      await fixture.whenStable();
+      httpMock.expectOne(QUERY_URL).flush({ requests: [] });
+      await fixture.whenStable();
+
+      fixture.componentInstance.submitForm.title().value.set('Fix door');
+      fixture.componentInstance.submitForm.description().value.set('Door 201 is stuck');
+      fixture.componentInstance.submit();
+      await fixture.whenStable();
+
+      httpMock.expectOne(COMMAND_URL).flush({});
+      await fixture.whenStable();
+
+      httpMock.expectOne(QUERY_URL).flush({ requests: [] });
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.textContent).toContain('Request submitted successfully');
+      expect(fixture.componentInstance.submitState()).toBe('success');
+
+      successClearCallback!();
+
+      expect(fixture.componentInstance.submitState()).toBe('idle');
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).not.toContain('Request submitted successfully');
+    } finally {
+      jest.restoreAllMocks();
+    }
   });
 });

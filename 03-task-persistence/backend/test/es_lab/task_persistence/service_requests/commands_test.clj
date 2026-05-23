@@ -19,10 +19,10 @@
   ([] (make-ctx stub-saved))
   ([saved]
    (let [sr-port    (protocol/mock sr/ServiceRequestPort
-                      (save! [_ _] saved)
-                      (list-all [_] []))
+                                   (save! [_ _] saved)
+                                   (list-all [_] []))
          audit-port (protocol/mock audit/AuditPort
-                      (record! [_ _] nil))]
+                                   (record! [_ _] nil))]
      {:service-request-port sr-port
       :audit-port           audit-port
       :transact!            (fn [f] (f {:service-request-port sr-port
@@ -31,11 +31,11 @@
 (defn- handle [ctx req]
   ((commands/submit-service-request-handler ctx) req))
 
-(deftest returns-200-with-saved-request
+(deftest returns-201-with-saved-request
   (let [ctx  (make-ctx)
         resp (handle ctx {:body-params {:title "Fix door" :description "Room 101 handle broken"}
                           :headers     {}})]
-    (is (= 200 (:status resp)))
+    (is (= 201 (:status resp)))
     (is (= "Fix door" (get-in resp [:body :title])))
     (is (= "demo-user" (get-in resp [:body :submitted_by])))
     (is (string? (get-in resp [:body :request_id])))))

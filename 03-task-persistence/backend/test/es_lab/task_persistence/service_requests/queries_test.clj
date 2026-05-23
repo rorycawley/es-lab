@@ -6,11 +6,16 @@
 
 (defn- make-ctx [requests]
   {:service-request-port (protocol/mock sr/ServiceRequestPort
-                           (save! [_ _] nil)
-                           (list-all [_] requests))})
+                                        (save! [_ _] nil)
+                                        (list-all [_] requests)
+                                        (search [_ query]
+                                                (filterv #(= query (:title %)) requests)))})
 
 (defn- list-requests [ctx]
   ((queries/list-service-requests-handler ctx) {}))
+
+(defn- search-requests [ctx body]
+  ((queries/search-service-requests-handler ctx) {:body-params body}))
 
 (def ^:private stub-request
   {:request_id   "01955f3d-0000-7000-8000-000000000001"
@@ -37,3 +42,28 @@
         r2   (assoc stub-request :request_id "01955f3d-0000-7000-8000-000000000002" :title "Second")
         resp (list-requests (make-ctx [r1 r2]))]
     (is (= 2 (count (get-in resp [:body :requests]))))))
+
+(deftest search-returns-matching-requests
+  (let [resp (search-requests (make-ctx [stub-request]) {:query "Fix door"})]
+    (is (= 200 (:status resp)))
+    (is (= "Fix door" (get-in resp [:body :requests 0 :title])))))
+
+(deftest search-trims-query-before-calling-port
+  (let [resp (search-requests (make-ctx [stub-request]) {:query "  Fix door  "})]
+    (is (= 200 (:status resp)))
+    (is (= 1 (count (get-in resp [:body :requests]))))))
+
+(deftest search-rejects-missing-query
+  (let [resp (search-requests (make-ctx []) {})]
+    (is (= 422 (:status resp)))
+    (is (= "query must be a string" (get-in resp [:body :error])))))
+
+(deftest search-rejects-non-string-query
+  (let [resp (search-requests (make-ctx []) {:query 123})]
+    (is (= 422 (:status resp)))
+    (is (= "query must be a string" (get-in resp [:body :error])))))
+
+(deftest search-rejects-blank-query
+  (let [resp (search-requests (make-ctx []) {:query "  "})]
+    (is (= 422 (:status resp)))
+    (is (= "query cannot be blank" (get-in resp [:body :error])))))

@@ -7,35 +7,49 @@
             [next.jdbc.result-set :as rs]))
 
 (defn- ->response [record]
-  (cond-> record
-    (:request_id record)  (update :request_id str)
-    (:created_at record)  (update :created_at #(-> % .toInstant .toString))
-    (:updated_at record)  (update :updated_at #(-> % .toInstant .toString))
-    (:subject_id record)  (update :subject_id str)
-    (:occurred_at record) (update :occurred_at #(-> % .toInstant .toString))))
+  (-> record
+      (dissoc :rank :search_vector)
+      (cond-> (:request_id record) (update :request_id str)
+              (:created_at record) (update :created_at #(-> % .toInstant .toString))
+              (:updated_at record) (update :updated_at #(-> % .toInstant .toString)))))
+
+(def ^:private service-request-columns
+  "request_id, submitted_by, title, description, status, created_at, updated_at")
 
 (defrecord PostgresServiceRequestPort [ds]
   sr/ServiceRequestPort
   (save! [_ {:keys [submitted-by title description]}]
     (-> (jdbc/execute-one! ds
-          ["INSERT INTO service_requests (request_id, submitted_by, title, description)
+                           ["INSERT INTO service_requests (request_id, submitted_by, title, description)
             VALUES (?, ?, ?, ?) RETURNING *"
-           (uuid/uuid7) submitted-by title description]
-          {:builder-fn rs/as-unqualified-lower-maps})
+                            (uuid/uuid7) submitted-by title description]
+                           {:builder-fn rs/as-unqualified-lower-maps})
         ->response))
   (list-all [_]
     (mapv ->response
           (jdbc/execute! ds
-            ["SELECT * FROM service_requests ORDER BY created_at DESC"]
-            {:builder-fn rs/as-unqualified-lower-maps}))))
+                         [(str "SELECT " service-request-columns
+                               " FROM service_requests"
+                               " ORDER BY created_at DESC")]
+                         {:builder-fn rs/as-unqualified-lower-maps})))
+  (search [_ query]
+    (mapv ->response
+          (jdbc/execute! ds
+                         [(str "SELECT " service-request-columns ", "
+                               "ts_rank(search_vector, plainto_tsquery('english', ?)) AS rank "
+                               "FROM service_requests "
+                               "WHERE search_vector @@ plainto_tsquery('english', ?) "
+                               "ORDER BY rank DESC, created_at DESC")
+                          query query]
+                         {:builder-fn rs/as-unqualified-lower-maps}))))
 
 (defrecord PostgresAuditPort [ds]
   audit/AuditPort
   (record! [_ {:keys [actor action subject-id metadata]}]
     (jdbc/execute-one! ds
-      ["INSERT INTO audit_events (audit_event_id, actor, action, subject_id, metadata)
+                       ["INSERT INTO audit_events (audit_event_id, actor, action, subject_id, metadata)
         VALUES (?, ?, ?, ?::uuid, ?::jsonb)"
-       (uuid/uuid7) actor action (str subject-id) (json/write-value-as-string metadata)])
+                        (uuid/uuid7) actor action (str subject-id) (json/write-value-as-string metadata)])
     nil))
 
 (defn transact!

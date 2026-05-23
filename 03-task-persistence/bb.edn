@@ -1,12 +1,21 @@
 {:paths ["."]
  :tasks
  {:requires ([babashka.process :refer [shell]]
+             [clojure.string :as str]
              [clojure.test :as t])
 
-  :init (defn sh [& args]
-          (binding [*out* *err*]
-            (apply println "+" (remove map? args)))
-          (apply shell args))
+  :init (do
+          (defn sh [& args]
+            (binding [*out* *err*]
+              (apply println "+" (remove map? args)))
+            (apply shell args))
+
+          (defn assert-no-running-containers! []
+            (let [result (shell {:out :string}
+                                "docker" "compose" "ps" "--services" "--filter" "status=running")]
+              (when-not (str/blank? (:out result))
+                (throw (ex-info "docker compose still has running containers"
+                                {:containers (:out result)}))))))
 
   help
   {:doc              "Show setup prerequisites and available tasks"
@@ -17,9 +26,8 @@
                          (println "  2. Run: mise install   (installs bb and node; only needed once to bootstrap)")
                          (println "")
                          (println "Then:")
-                         (println "  bb all               (trust config + install tools + run all tests)")
-                         (println "  bb playwright:install  (install Playwright browser binaries)")
-                         (println "  bb tasks             (list all available tasks)")
+                         (println "  bb all    (trust config + install tools + install browsers + run all tests)")
+                         (println "  bb tasks  (list all available tasks)")
                          (println "")
                          (println "After bb up, the stack is available at:")
                          (println "  http://localhost:4200              Angular app")
@@ -47,12 +55,12 @@
   {:doc  "Trust mise.toml, install tools, install npm packages, and install Playwright browsers"
    :task (do (sh "mise" "trust")
              (sh "mise" "install")
-             (sh {:dir "frontend"} "npm" "install")
-             (sh {:dir "frontend"} "npx" "playwright" "install" "chromium"))}
+             (sh {:dir "frontend"} "mise" "exec" "--" "npm" "ci")
+             (sh {:dir "frontend"} "env" "-u" "NO_COLOR" "mise" "exec" "--" "npx" "playwright" "install" "chromium"))}
 
   playwright:install
   {:doc  "Install Playwright browser binaries"
-   :task (sh {:dir "frontend"} "npx" "playwright" "install" "chromium")}
+   :task (sh {:dir "frontend"} "env" "-u" "NO_COLOR" "mise" "exec" "--" "npx" "playwright" "install" "chromium")}
 
   db:up
   {:doc  "Start a local Postgres container for backend development (no build)"
@@ -60,7 +68,8 @@
 
   db:down
   {:doc  "Stop and remove the local Postgres container"
-   :task (sh "docker" "compose" "down" "postgres")}
+   :task (do (sh "docker" "compose" "stop" "postgres")
+             (sh "docker" "compose" "rm" "-f" "postgres"))}
 
   up
   {:doc  "Build and start the full stack"
@@ -74,30 +83,58 @@
              (println ""))}
 
   down
-  {:doc  "Stop the full stack"
-   :task (sh "docker" "compose" "down")}
+  {:doc  "Stop the full stack and remove the Postgres data volume"
+   :task (sh "docker" "compose" "down" "-v")}
+
+  reset
+  {:doc  "Alias for down: stop the stack and remove the Postgres data volume"
+   :task (sh "docker" "compose" "down" "-v")}
 
   clean
   {:doc  "Remove build artefacts"
    :task (sh "rm" "-rf" "backend/target" "backend/.cpcache" "frontend/dist" "frontend/.angular" "frontend/playwright-report" "frontend/test-results")}
 
-  lint
+  lint:backend
   {:doc  "Lint backend with clj-kondo"
-   :task (sh "clj-kondo" "--parallel" "--lint" "backend/src:backend/test")}
+   :task (sh "mise" "exec" "--" "clj-kondo" "--parallel" "--lint" "backend/src:backend/test")}
+
+  lint:frontend
+  {:doc  "Lint frontend with ESLint"
+   :task (sh {:dir "frontend"} "mise" "exec" "--" "npm" "run" "lint")}
+
+  lint
+  {:doc     "Lint backend and frontend"
+   :depends [lint:backend lint:frontend]}
+
+  fmt:backend:check
+  {:doc  "Check backend formatting with cljfmt"
+   :task (sh "mise" "exec" "--" "cljfmt" "check" "backend/src" "backend/test")}
+
+  fmt:frontend:check
+  {:doc  "Check frontend formatting with Prettier"
+   :task (sh {:dir "frontend"} "mise" "exec" "--" "npm" "run" "format:check")}
 
   fmt:check
-  {:doc  "Check backend formatting with cljfmt"
-   :task (sh "cljfmt" "check" "backend/src" "backend/test")}
+  {:doc     "Check backend and frontend formatting"
+   :depends [fmt:backend:check fmt:frontend:check]}
+
+  fmt:backend:fix
+  {:doc  "Reformat backend with cljfmt"
+   :task (sh "mise" "exec" "--" "cljfmt" "fix" "backend/src" "backend/test")}
+
+  fmt:frontend:fix
+  {:doc  "Reformat frontend with Prettier"
+   :task (sh {:dir "frontend"} "mise" "exec" "--" "npm" "run" "format")}
 
   fmt:fix
-  {:doc  "Reformat backend with cljfmt"
-   :task (sh "cljfmt" "fix" "backend/src" "backend/test")}
+  {:doc     "Reformat backend and frontend"
+   :depends [fmt:backend:fix fmt:frontend:fix]}
 
   test:backend
   {:doc  "Run backend unit, integration, and adapter tests (adapter tests require Docker)"
    :task (let [docker-host (System/getenv "DOCKER_HOST")
                host-ip     (or (System/getenv "TESTCONTAINERS_HOST_OVERRIDE")
-                               (try (clojure.string/trim
+                               (try (str/trim
                                       (:out (clojure.java.shell/sh "rdctl" "info" "--field" "ip-address")))
                                     (catch Exception _ nil)))]
            ; Only forward DOCKER_HOST if already set — otherwise let ~/.testcontainers.properties drive discovery.
@@ -111,7 +148,7 @@
 
   test:frontend
   {:doc  "Run frontend unit tests with Jest"
-   :task (sh {:dir "frontend"} "npm" "test")}
+   :task (sh {:dir "frontend"} "mise" "exec" "--" "npm" "test")}
 
   test:acceptance
   {:doc  "Run acceptance tests against the live stack"
@@ -122,11 +159,13 @@
 
   test:e2e
   {:doc  "Run Playwright E2E tests against the live stack"
-   :task (do (sh "docker" "compose" "up" "-d" "--build" "--wait")
+   :task (do (sh "docker" "compose" "down" "-v")
+             (sh "docker" "compose" "up" "-d" "--build" "--wait")
              (try
-               (sh {:dir "frontend"} "npx" "playwright" "test")
+               (sh {:dir "frontend"} "env" "-u" "NO_COLOR" "mise" "exec" "--" "npx" "playwright" "test")
                (finally
-                 (sh "docker" "compose" "down"))))}
+                 (sh "docker" "compose" "down" "-v")
+                 (assert-no-running-containers!))))}
 
   test
   {:doc     "Run all tests"

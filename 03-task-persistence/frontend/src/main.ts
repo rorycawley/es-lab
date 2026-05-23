@@ -4,8 +4,5 @@ import { provideHttpClient } from '@angular/common/http';
 import { AppComponent } from './app/app.component';
 
 bootstrapApplication(AppComponent, {
-  providers: [
-    provideZonelessChangeDetection(),
-    provideHttpClient(),
-  ],
+  providers: [provideZonelessChangeDetection(), provideHttpClient()],
 }).catch(console.error);

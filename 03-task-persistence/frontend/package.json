@@ -4,7 +4,10 @@
   "scripts": {
     "start": "ng serve",
     "build": "ng build --configuration=production",
-    "test": "jest"
+    "test": "jest",
+    "lint": "eslint .",
+    "format": "prettier --write \"src/**/*.{ts,html,css}\" \"e2e/**/*.ts\" \"*.{js,ts,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,html,css}\" \"e2e/**/*.ts\" \"*.{js,ts,json}\""
   },
   "dependencies": {
     "@angular/common": "^21.0.0",
@@ -23,13 +26,19 @@
     "@playwright/test": "^1.45.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.4",
+    "@typescript-eslint/parser": "^8.59.4",
+    "angular-eslint": "^21.4.0",
     "autoprefixer": "^10.4.0",
+    "eslint": "^10.4.0",
     "jest": "^30.0.0",
     "jest-environment-jsdom": "^30.0.0",
     "jest-preset-angular": "^16.0.0",
     "postcss": "^8.4.0",
+    "prettier": "^3.8.3",
     "tailwindcss": "^3.4.0",
     "ts-node": "^10.9.0",
-    "typescript": "~5.9.0"
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.59.4"
   }
 }

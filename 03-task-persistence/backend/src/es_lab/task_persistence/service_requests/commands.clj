@@ -17,16 +17,16 @@
           body    (:body-params request)]
       (if-let [err (validate body)]
         err
-        {:status 200
+        {:status 201
          :body   (transact!
-                   (fn [{:keys [service-request-port audit-port]}]
-                     (let [saved (sr/save! service-request-port
-                                           {:submitted-by user-id
-                                            :title        (:title body)
-                                            :description  (:description body)})]
-                       (audit/record! audit-port
-                                      {:actor      user-id
-                                       :action     "submit-service-request"
-                                       :subject-id (:request_id saved)
-                                       :metadata   {:title (:title body)}})
-                       saved)))}))))
+                  (fn [{:keys [service-request-port audit-port]}]
+                    (let [saved (sr/save! service-request-port
+                                          {:submitted-by user-id
+                                           :title        (:title body)
+                                           :description  (:description body)})]
+                      (audit/record! audit-port
+                                     {:actor      user-id
+                                      :action     "submit-service-request"
+                                      :subject-id (:request_id saved)
+                                      :metadata   {:title (:title body)}})
+                      saved)))}))))

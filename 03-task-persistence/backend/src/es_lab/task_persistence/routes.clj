@@ -20,6 +20,46 @@
                 :created_at   {:type "string" :format "date-time"}
                 :updated_at   {:type "string" :format "date-time"}}})
 
+(def ^:private validation-error-schema
+  {:type       "object"
+   :properties {:error {:type "string"}}})
+
+(def ^:private requests-response-schema
+  {:type       "object"
+   :properties {:requests {:type  "array"
+                           :items service-request-schema}}})
+
+(def ^:private submit-service-request-example
+  {:title       "Broken printer"
+   :description "Paper jam on floor 2"})
+
+(def ^:private empty-query-example {})
+
+(def ^:private search-service-requests-example
+  {:query "printer"})
+
+(def ^:private submit-service-request-body
+  {:required true
+   :content  {"application/json"
+              {:schema  {:type       "object"
+                         :required   ["title" "description"]
+                         :properties {:title       {:type "string" :minLength 1}
+                                      :description {:type "string" :minLength 1}}}
+               :example submit-service-request-example}}})
+
+(def ^:private list-service-requests-body
+  {:content {"application/json"
+             {:schema  {:type "object"}
+              :example empty-query-example}}})
+
+(def ^:private search-service-requests-body
+  {:required true
+   :content  {"application/json"
+              {:schema  {:type       "object"
+                         :required   ["query"]
+                         :properties {:query {:type "string" :minLength 1}}}
+               :example search-service-requests-example}}})
+
 (defn make-router [ctx]
   (ring/ring-handler
    (ring/router
@@ -30,34 +70,37 @@
                              :handler (openapi/create-openapi-handler)}}]
      ["/health" {:get {:summary   "Health check"
                        :tags      ["ops"]
-                       :responses {200 {:description "Service is healthy"}}
+                       :openapi   {:responses {200 {:description "Service is healthy"}}}
                        :handler   health-handler}}]
      ["/api/commands/submit-service-request"
       {:post {:summary      "Submit a service request"
               :tags         ["service-requests"]
-              :request-body {:required true
-                             :content  {"application/json"
-                                        {:schema {:type       "object"
-                                                  :required   ["title" "description"]
-                                                  :properties {:title       {:type "string" :minLength 1}
-                                                               :description {:type "string" :minLength 1}}}}}}
-              :responses    {200 {:description "Request submitted"
-                                  :content     {"application/json" {:schema service-request-schema}}}
-                             422 {:description "Validation error"
-                                  :content     {"application/json"
-                                                {:schema {:type       "object"
-                                                          :properties {:error {:type "string"}}}}}}}
+              :openapi      {:requestBody submit-service-request-body
+                             :responses   {201 {:description "Request submitted"
+                                                :content     {"application/json" {:schema service-request-schema}}}
+                                           422 {:description "Validation error"
+                                                :content     {"application/json"
+                                                              {:schema validation-error-schema}}}}}
               :handler      (commands/submit-service-request-handler ctx)}}]
      ["/api/queries/list-service-requests"
       {:post {:summary      "List all service requests"
               :tags         ["service-requests"]
-              :request-body {:content {"application/json" {:schema {:type "object"}}}}
-              :responses    {200 {:description "List of requests"
-                                  :content     {"application/json"
-                                                {:schema {:type       "object"
-                                                          :properties {:requests {:type  "array"
-                                                                                  :items service-request-schema}}}}}}}
-              :handler      (queries/list-service-requests-handler ctx)}}]]
+              :openapi      {:requestBody list-service-requests-body
+                             :responses   {200 {:description "List of requests"
+                                                :content     {"application/json"
+                                                              {:schema requests-response-schema}}}}}
+              :handler      (queries/list-service-requests-handler ctx)}}]
+     ["/api/queries/search-service-requests"
+      {:post {:summary      "Search service requests"
+              :tags         ["service-requests"]
+              :openapi      {:requestBody search-service-requests-body
+                             :responses   {200 {:description "Matching requests"
+                                                :content     {"application/json"
+                                                              {:schema requests-response-schema}}}
+                                           422 {:description "Validation error"
+                                                :content     {"application/json"
+                                                              {:schema validation-error-schema}}}}}
+              :handler      (queries/search-service-requests-handler ctx)}}]]
     {:data    {:muuntaja   m/instance
                :middleware [muuntaja/format-middleware]}
      :plugins [openapi/openapi-feature]})

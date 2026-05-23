@@ -6,9 +6,15 @@
             [clojure.test :refer [deftest is use-fixtures]]))
 
 (defn stack-fixture [f]
+  (shell "docker compose down -v")
   (shell "docker compose up -d --build --wait")
   (try (f)
-       (finally (shell "docker compose down"))))
+       (finally
+         (shell "docker compose down -v")
+         (let [running (:out (shell {:out :string}
+                                    "docker compose ps --services --filter status=running"))]
+           (is (str/blank? running)
+               (str "expected no running compose services, found: " running))))))
 
 (use-fixtures :once stack-fixture)
 
@@ -17,12 +23,14 @@
 (defn- post [path body]
   (http/post (str "http://localhost:8080" path)
              {:headers json-headers
-              :body    (json/generate-string body)}))
+              :body    (json/generate-string body)
+              :throw   false}))
 
 (defn- post-via-proxy [path body]
   (http/post (str "http://localhost:4200" path)
              {:headers json-headers
-              :body    (json/generate-string body)}))
+              :body    (json/generate-string body)
+              :throw   false}))
 
 (deftest frontend-returns-200
   (is (= 200 (:status (http/get "http://localhost:4200/")))))
@@ -41,10 +49,10 @@
   (let [body (-> (http/get "http://localhost:8080/health") :body (json/parse-string true))]
     (is (= "ok" (:status body)))))
 
-(deftest submit-command-returns-200
+(deftest submit-command-returns-201
   (let [resp (post "/api/commands/submit-service-request"
                    {:title "Broken window" :description "Window on 2nd floor is cracked"})]
-    (is (= 200 (:status resp)))))
+    (is (= 201 (:status resp)))))
 
 (deftest submit-command-returns-request-id
   (let [body (-> (post "/api/commands/submit-service-request"
@@ -66,8 +74,29 @@
   (let [requests (-> (post "/api/queries/list-service-requests" {}) :body (json/parse-string true) :requests)]
     (is (some #(= "Noisy boiler" (:title %)) requests))))
 
-(deftest submit-via-proxy-returns-200
-  (is (= 200 (:status (post-via-proxy "/api/commands/submit-service-request"
+(deftest submit-then-search-roundtrip
+  (post "/api/commands/submit-service-request"
+        {:title "Searchable radiator fault" :description "Radiator in library is cold"})
+  (let [requests (-> (post "/api/queries/search-service-requests" {:query "radiator"})
+                     :body
+                     (json/parse-string true)
+                     :requests)]
+    (is (some #(= "Searchable radiator fault" (:title %)) requests))))
+
+(deftest search-query-rejects-blank-query
+  (let [resp (post "/api/queries/search-service-requests" {:query " "})]
+    (is (= 422 (:status resp)))))
+
+(deftest submitted-request-survives-database-restart
+  (post "/api/commands/submit-service-request"
+        {:title "Persistent lift fault" :description "Lift B stops between floors"})
+  (shell "docker compose restart postgres backend")
+  (shell "docker compose up -d --wait")
+  (let [requests (-> (post "/api/queries/list-service-requests" {}) :body (json/parse-string true) :requests)]
+    (is (some #(= "Persistent lift fault" (:title %)) requests))))
+
+(deftest submit-via-proxy-returns-201
+  (is (= 201 (:status (post-via-proxy "/api/commands/submit-service-request"
                                       {:title "Flickering light" :description "Light in corridor flickers"})))))
 
 (deftest list-via-proxy-returns-200
