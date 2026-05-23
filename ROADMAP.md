@@ -46,7 +46,7 @@ The first milestone is to prove the smallest useful vertical slice:
 
 This is not the full architecture. It is the first proof that the architecture can be built incrementally, end to end, on a laptop.
 
-The first milestone uses **one** frontend. The target architecture later expands this into separate customer and backoffice portals (introduced in project 05). Likewise, real OIDC BFF PKCE authentication arrives in Phase 3; the first milestone is satisfied by any user-context or session mechanism sufficient to scope the task to a user and produce an audit trail.
+The first milestone uses **one** frontend. The target architecture later expands this into separate customer and backoffice portals (introduced in project 04). Likewise, real OIDC BFF PKCE authentication arrives in Phase 3; the first milestone is satisfied by any user-context or session mechanism sufficient to scope the task to a user and produce an audit trail.
 
 Everything else in this roadmap builds outward from that proof.
 
@@ -64,6 +64,28 @@ Not every replacement has the same cost. The roadmap distinguishes four levels:
 | Level 4 | Data migration or architectural change | Replacing the Postgres event store with a different event store; existing events must be migrated and replay paths re-validated. |
 
 The goal is **not** to make every substitution free. The goal is to keep substitutions away from core domain code where possible, and to know in advance which substitutions are cheap and which are expensive.
+
+---
+
+## API design conventions
+
+All project APIs use a single convention: **POST with JSON for both commands and queries.** There are no `GET`, `PUT`, `PATCH`, or `DELETE` endpoints in es-lab projects.
+
+This is not REST. It is an intentful API: every endpoint is named after the operation it performs, not the resource it acts on.
+
+| Type | Path pattern | Example |
+|---|---|---|
+| Command | `POST /api/commands/<verb-noun>` | `POST /api/commands/submit-service-request` |
+| Query | `POST /api/queries/<verb-noun>` | `POST /api/queries/list-service-requests` |
+
+**Why POST for queries?**
+
+- Queries carry structured filter parameters in a JSON body without URL encoding or length limits
+- The URL is always the operation name — consistent with intentful design regardless of operation type
+- Authentication, audit logging, and rate limiting apply uniformly to all operations
+- The HTTP method carries no semantic weight that caching layers, proxies, or frameworks can misinterpret
+
+This is a deliberate departure from REST conventions, established in project 03 and applied to all projects from that point forward.
 
 ---
 
@@ -217,97 +239,96 @@ The roadmap names the architectural claim each project proves. The detailed fitn
 
 | # | Status | Project | Proves out |
 |---|---|---|---|
-| 01 | planned | `hello-backend` | A minimal Clojure backend serves a single endpoint and can be run with `docker compose up`. |
-| 02 | planned | `hello-frontend` | A minimal Angular SPA renders a single page and can be run with `docker compose up`. |
-| 03 | planned | `frontend-calls-backend` | The SPA calls a backend endpoint and renders the result. End-to-end toolchain proven. |
-| 04 | planned | `postgres-persistence` | The backend reads and writes Postgres via a clean adapter; data survives container restart. |
-| 05 | planned | `dual-portal-basics` | Two SPAs (customer and backoffice) call distinct backend endpoints from the same backend. |
-| 06 | planned | `ports-and-adapters` | Domain logic is decoupled from infrastructure; swapping the persistence implementation changes only adapters. |
-| 07 | planned | `modular-monolith` | Multiple bounded contexts live in one deployable while remaining strictly isolated. |
-| 08 | planned | `event-sourcing-basics` | Domain events are the source of truth; state is derivable by replay; optimistic concurrency prevents lost updates. |
-| 09 | planned | `aggregate-evolution-upcasting` | Old events still replay correctly when aggregates evolve, via upcasters. History is never rewritten. |
-| 10 | planned | `event-schema-versioning` | Additive event changes are backward-compatible; breaking changes produce a new event type while old versions remain valid forever. |
-| 11 | planned | `cqrs-projections` | Read and write models evolve independently. The read store can always be rebuilt from the event store. |
-| 12 | planned | `read-model-rebuild` | A projection can be retired, replaced, or rebuilt by replaying the event store. |
-| 13 | planned | `vertical-slice-architecture` | Within a bounded context, organising by use case is more maintainable than organising by technical layer. |
+| 01 | complete | `hello-backend` | A minimal Clojure backend serves a single endpoint and runs with `docker compose up`. |
+| 02 | complete | `hello-frontend` | An Angular 21 SPA calls the Clojure backend through nginx and renders the result. Proves the full end-to-end toolchain: Docker Compose, nginx proxy, Angular, Jest, Playwright. *(Also subsumed the original project 03, frontend-calls-backend.)* |
+| 03 | in progress | `task-persistence` | A user submits a service request through the frontend. The backend validates it, persists it to Postgres via a Migratus migration, and reads it back. Proves durable state and round-trip data flow. Introduces the intentful POST-only API (commands and queries), the ports-and-adapters boundary at persistence, and a simple audit log alongside the domain table. A fixed demo-user header (`X-User-Id`) stands in for real auth. |
+| 04 | planned | `dual-portal-basics` | Two SPAs (customer and backoffice) share one backend; distinct command and query endpoints prove segregated API surfaces without a gateway. |
+| 05 | planned | `ports-and-adapters` | The persistence adapter introduced in 03 is extracted behind a Clojure protocol and swapped for a second implementation, proving the domain is fully isolated from infrastructure. |
+| 06 | planned | `modular-monolith` | Multiple bounded contexts live in one deployable while remaining strictly isolated from each other. |
+| 07 | planned | `event-sourcing-basics` | Domain events are the source of truth; state is derivable by replay; optimistic concurrency prevents lost updates. |
+| 08 | planned | `aggregate-evolution-upcasting` | Old events still replay correctly when aggregates evolve, via upcasters. History is never rewritten. |
+| 09 | planned | `event-schema-versioning` | Additive event changes are backward-compatible; breaking changes produce a new event type while old versions remain valid forever. |
+| 10 | planned | `cqrs-projections` | Read and write models evolve independently. The read store can always be rebuilt from the event store. |
+| 11 | planned | `read-model-rebuild` | A projection can be retired, replaced, or rebuilt by replaying the event store. |
+| 12 | planned | `vertical-slice-architecture` | Within a bounded context, organising by use case is more maintainable than organising by technical layer. |
 
 ### Phase 2 — Reliability and messaging
 
 | # | Status | Project | Proves out |
 |---|---|---|---|
-| 14 | planned | `redis-cache-and-sessions` | Redis used safely for both ephemeral caching and durable-enough session storage. |
-| 15 | planned | `rabbitmq-integration-events` | Bounded contexts communicate asynchronously via integration events; multiple instances compete safely on the same queue. |
-| 16 | planned | `integration-event-contracts` | Cross-module event contracts are explicit and versioned in Git; producers can publish multiple versions during transition. |
-| 17 | planned | `transactional-outbox-inbox` | Events persisted and published atomically (outbox); consumers handle duplicates safely (inbox). |
-| 18 | planned | `database-migrations` | Schema changes ship as a separate, idempotent, repeatable artifact independent of the app. |
-| 19 | planned | `realtime-sse` | SSE works end-to-end from Clojure to Angular, including through edge protection. *(Risk-first: proving early avoids architectural surprise.)* |
+| 13 | planned | `redis-cache-and-sessions` | Redis used safely for both ephemeral caching and durable-enough session storage. |
+| 14 | planned | `rabbitmq-integration-events` | Bounded contexts communicate asynchronously via integration events; multiple instances compete safely on the same queue. |
+| 15 | planned | `integration-event-contracts` | Cross-module event contracts are explicit and versioned in Git; producers can publish multiple versions during transition. |
+| 16 | planned | `transactional-outbox-inbox` | Events persisted and published atomically (outbox); consumers handle duplicates safely (inbox). |
+| 17 | planned | `database-migrations` | Schema changes ship as a separate, idempotent, repeatable artifact independent of the app. |
+| 18 | planned | `realtime-sse` | SSE works end-to-end from Clojure to Angular, including through edge protection. *(Risk-first: proving early avoids architectural surprise.)* |
 
 ### Phase 3 — Identity, auth, and security
 
 | # | Status | Project | Proves out |
 |---|---|---|---|
-| 20 | planned | `dual-bff-oidc-pkce` | Customer portal authenticates via broker-federated public OIDC; backoffice portal authenticates via local realm. Two distinct sessions, two distinct cookies, both BFF-PKCE. |
-| 21 | planned | `csrf-and-sessions` | Cookie auth is CSRF-safe via double-submit tokens; sessions enforce idle and absolute timeouts independent of JWT lifetime. |
-| 22 | planned | `google-signin-federation` | The identity broker can add or replace external IdPs without changing the application. |
-| 23 | planned | `m2m-oauth` | Service-to-service auth uses the same identity infrastructure; no shared secrets in code. |
-| 24 | planned | `openfga-fine-grained-authz` | Authorisation decisions externalised into a relationship graph supporting per-resource rules. |
-| 25 | planned | `openbao-secrets` | No secrets in Git, config, or images; injected at runtime from a central audited store. |
-| 26 | planned | `cert-manager-mtls` | Every internal connection is mutually authenticated, encrypted, and rotated automatically. |
+| 19 | planned | `dual-bff-oidc-pkce` | Customer portal authenticates via broker-federated public OIDC; backoffice portal authenticates via local realm. Two distinct sessions, two distinct cookies, both BFF-PKCE. |
+| 20 | planned | `csrf-and-sessions` | Cookie auth is CSRF-safe via double-submit tokens; sessions enforce idle and absolute timeouts independent of JWT lifetime. |
+| 21 | planned | `google-signin-federation` | The identity broker can add or replace external IdPs without changing the application. |
+| 22 | planned | `m2m-oauth` | Service-to-service auth uses the same identity infrastructure; no shared secrets in code. |
+| 23 | planned | `openfga-fine-grained-authz` | Authorisation decisions externalised into a relationship graph supporting per-resource rules. |
+| 24 | planned | `openbao-secrets` | No secrets in Git, config, or images; injected at runtime from a central audited store. |
+| 25 | planned | `cert-manager-mtls` | Every internal connection is mutually authenticated, encrypted, and rotated automatically. |
 
 ### Phase 4 — Storage, files, and workflow
 
 | # | Status | Project | Proves out |
 |---|---|---|---|
-| 27 | planned | `minio-object-storage` | Large files handled via pre-signed URLs, encrypted at rest with a KMS-managed key. |
-| 28 | planned | `clamav-malware-scan` | Uploaded files are quarantined and scanned asynchronously; no malicious content reaches consumers. |
-| 29 | planned | `gdpr-crypto-shredding` | Subject-scoped key destruction renders selected data unreadable without rewriting the event store. Must be validated against audit, backup, and retention requirements. |
-| 30 | planned | `flowable-workflow` | Business analysts can define forms and workflows; Angular renders forms dynamically without backend code changes. |
-| 31 | planned | `workflow-evolution` | In-flight workflow instances continue on their original BPMN version; new instances use the new version. |
-| 32 | planned | `forms-evolution` | Forms can add, rename, or remove fields without breaking historical submissions. |
-| 33 | planned | `business-rules-evolution` | Decision tables are versioned; historical decisions can always be re-explained. |
+| 26 | planned | `minio-object-storage` | Large files handled via pre-signed URLs, encrypted at rest with a KMS-managed key. |
+| 27 | planned | `clamav-malware-scan` | Uploaded files are quarantined and scanned asynchronously; no malicious content reaches consumers. |
+| 28 | planned | `gdpr-crypto-shredding` | Subject-scoped key destruction renders selected data unreadable without rewriting the event store. Must be validated against audit, backup, and retention requirements. |
+| 29 | planned | `flowable-workflow` | Business analysts can define forms and workflows; Angular renders forms dynamically without backend code changes. |
+| 30 | planned | `workflow-evolution` | In-flight workflow instances continue on their original BPMN version; new instances use the new version. |
+| 31 | planned | `forms-evolution` | Forms can add, rename, or remove fields without breaking historical submissions. |
+| 32 | planned | `business-rules-evolution` | Decision tables are versioned; historical decisions can always be re-explained. |
 
 ### Phase 5 — Integrations
 
 | # | Status | Project | Proves out |
 |---|---|---|---|
-| 34 | planned | `sendgrid-email` | Outbound third-party calls follow a consistent connector pattern with retries, timeouts, and credentials from the secrets manager. |
-| 35 | planned | `stripe-payments` | Inbound webhooks are cryptographically verified at the edge, deduplicated, processed reliably via the inbox pattern. |
-| 36 | planned | `docusign-envelopes` | Long-running external interactions orchestrated by the workflow engine; webhook callbacks resume workflow state. |
-| 37 | planned | `api-first-openapi` | Public API documented, versioned, and consumable by third parties; generated from code. |
-| 38 | planned | `api-versioning` | Public APIs evolve via URL versioning and deprecation headers; old versions persist until usage drops to zero. |
+| 33 | planned | `sendgrid-email` | Outbound third-party calls follow a consistent connector pattern with retries, timeouts, and credentials from the secrets manager. |
+| 34 | planned | `stripe-payments` | Inbound webhooks are cryptographically verified at the edge, deduplicated, processed reliably via the inbox pattern. |
+| 35 | planned | `docusign-envelopes` | Long-running external interactions orchestrated by the workflow engine; webhook callbacks resume workflow state. |
+| 36 | planned | `api-first-openapi` | Public API documented, versioned, and consumable by third parties; generated from code. |
+| 37 | planned | `api-versioning` | Public APIs evolve via URL versioning and deprecation headers; old versions persist until usage drops to zero. |
 
 ### Phase 6 — Edge, gateway, and observability
 
 | # | Status | Project | Proves out |
 |---|---|---|---|
-| 39 | planned | `apisix-gateway` | Single ingress enforces JWT validation, rate limiting, and webhook signature checking. *(Introduced after the concerns it manages are understood in isolation.)* |
-| 40 | planned | `api-surface-segregation` | Public, backoffice, and internal endpoints isolated at the gateway and verified at the backend. |
-| 41 | planned | `nginx-ha-load-balancer` | A load balancer HA pair provides a stable VIP in front of stateless gateway instances. |
-| 42 | planned | `cloudflare-edge` | Origin has no publicly reachable IP; all traffic flows through an outbound tunnel with WAF, DDoS protection, and security headers. |
-| 43 | planned | `grafana-lgtm-observability` | Logs, metrics, and traces from every component flow into a single pane of glass. |
-| 44 | planned | `grafana-faro-ui-telemetry` | Frontend errors, performance, and user journeys observable alongside backend telemetry. |
+| 38 | planned | `apisix-gateway` | Single ingress enforces JWT validation, rate limiting, and webhook signature checking. *(Introduced after the concerns it manages are understood in isolation.)* |
+| 39 | planned | `api-surface-segregation` | Public, backoffice, and internal endpoints isolated at the gateway and verified at the backend. |
+| 40 | planned | `nginx-ha-load-balancer` | A load balancer HA pair provides a stable VIP in front of stateless gateway instances. |
+| 41 | planned | `cloudflare-edge` | Origin has no publicly reachable IP; all traffic flows through an outbound tunnel with WAF, DDoS protection, and security headers. |
+| 42 | planned | `grafana-lgtm-observability` | Logs, metrics, and traces from every component flow into a single pane of glass. |
+| 43 | planned | `grafana-faro-ui-telemetry` | Frontend errors, performance, and user journeys observable alongside backend telemetry. |
 
 ### Phase 7 — Production-grade deployment
 
 | # | Status | Project | Proves out |
 |---|---|---|---|
-| 45 | planned | `kubernetes-helm` | The whole stack runs on Kubernetes locally with the same manifests that will run in production. |
-| 46 | planned | `network-policies-and-psa` | Compromised pods cannot reach pods they shouldn't, run as root, or escalate privileges. |
-| 47 | planned | `supply-chain-security` | Only signed, scanned images deploy; admission control blocks anything not built by the pipeline. |
-| 48 | planned | `github-actions-cicd` | Every commit produces a reproducible, signed, scanned artifact. |
-| 49 | planned | `argocd-gitops` | Deployed state matches Git; drift is detected and corrected; rollback is a `git revert`. |
-| 50 | planned | `postgres-patroni-ha` | Database survives node failure with automatic failover; writes to primary, reads correctly. |
-| 51 | planned | `pgbackrest-pitr` | Database can be restored to any point in time from object storage backups; restore has been tested, not just configured. |
+| 44 | planned | `kubernetes-helm` | The whole stack runs on Kubernetes locally with the same manifests that will run in production. |
+| 45 | planned | `network-policies-and-psa` | Compromised pods cannot reach pods they shouldn't, run as root, or escalate privileges. |
+| 46 | planned | `supply-chain-security` | Only signed, scanned images deploy; admission control blocks anything not built by the pipeline. |
+| 47 | planned | `github-actions-cicd` | Every commit produces a reproducible, signed, scanned artifact. |
+| 48 | planned | `argocd-gitops` | Deployed state matches Git; drift is detected and corrected; rollback is a `git revert`. |
+| 49 | planned | `postgres-patroni-ha` | Database survives node failure with automatic failover; writes to primary, reads correctly. |
+| 50 | planned | `pgbackrest-pitr` | Database can be restored to any point in time from object storage backups; restore has been tested, not just configured. |
 
 ### Phase 8 — Cloud-agnostic deployment
 
 | # | Status | Project | Proves out |
 |---|---|---|---|
-| 52 | planned | `opentofu-hetzner` | Entire infrastructure (network, Kubernetes, DNS, storage) reproducible from code. |
-| 53 | planned | `opnsense-and-cloudflare-tunnel` | On-prem network refuses any traffic not from the edge protection; even a discovered origin IP cannot be reached. |
-| 54 | planned | `private-backoffice-routing` | Backoffice traffic never traverses the internet; split-horizon DNS, corp VPN, and private subnets. |
-| 55 | planned | `disaster-recovery-drill` | Complete datacenter loss recovered in a measurable, documented RTO and RPO using only Git, backups, and IaC. |
-| 56 | planned | `public-cloud-deployment-substitution` | The "runs anywhere" claim holds: the same application deployed to a public cloud (AWS or Azure) with managed services substituted, no domain code changes. The choice of cloud is itself part of the substitution exercise. |
+| 51 | planned | `opentofu-hetzner` | Entire infrastructure (network, Kubernetes, DNS, storage) reproducible from code. |
+| 52 | planned | `opnsense-and-cloudflare-tunnel` | On-prem network refuses any traffic not from the edge protection; even a discovered origin IP cannot be reached. |
+| 53 | planned | `private-backoffice-routing` | Backoffice traffic never traverses the internet; split-horizon DNS, corp VPN, and private subnets. |
+| 54 | planned | `disaster-recovery-drill` | Complete datacenter loss recovered in a measurable, documented RTO and RPO using only Git, backups, and IaC. |
+| 55 | planned | `public-cloud-deployment-substitution` | The "runs anywhere" claim holds: the same application deployed to a public cloud (AWS or Azure) with managed services substituted, no domain code changes. The choice of cloud is itself part of the substitution exercise. |
 
 ---
 

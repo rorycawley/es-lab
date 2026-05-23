@@ -128,6 +128,14 @@ The same architecture should then be deployable to Docker Compose, Kubernetes, o
 
 No environment is the only real one.
 
+### 8. Express intent in every API call
+
+All API operations are named after what they do, not what they act on.
+
+Commands and queries are both expressed as `POST` with a JSON body. The URL is the operation name. There are no `GET`, `PUT`, `PATCH`, or `DELETE` endpoints.
+
+This is a deliberate departure from REST. It makes every operation explicitly nameable, consistently authenticated, uniformly auditable, and free from the semantic assumptions HTTP verbs carry. The intent of every call is visible in its URL.
+
 ---
 
 ## Quality attributes
@@ -173,6 +181,7 @@ The long-term target includes:
 
 * web frontends
 * application backend
+* intentful POST-only API design (commands and queries)
 * modular monolith architecture
 * bounded contexts
 * vertical slices
@@ -334,11 +343,9 @@ A possible journey is:
 ```text
 basic frontend + backend
         ↓
-persistence
+persistence + task-based API design
         ↓
 secure domain modelling
-        ↓
-task-based API design
         ↓
 configurable forms
         ↓
