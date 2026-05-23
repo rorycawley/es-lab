@@ -1,0 +1,33 @@
+<div class="min-h-screen bg-gray-50 flex items-center justify-center">
+  <div class="bg-white rounded-xl shadow-md p-10 text-center space-y-6">
+    <h1 class="text-3xl font-bold text-gray-800">es-lab</h1>
+
+    <form (submit)="$event.preventDefault(); check()">
+      <div class="flex items-center justify-center gap-2">
+        <label for="endpoint" class="sr-only">Health endpoint path</label>
+        <input id="endpoint" [formField]="endpointForm.path" type="text"
+               class="border rounded-lg px-3 py-2 text-sm font-mono text-gray-700 w-44" />
+        <button type="submit"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+          Check
+        </button>
+      </div>
+    </form>
+
+    <div aria-live="polite" aria-atomic="true">
+      @if (healthy() === null) {
+        <p class="text-gray-500">Checking&hellip;</p>
+      } @else if (healthy()) {
+        <div class="flex items-center justify-center gap-2">
+          <span class="block h-3 w-3 rounded-full bg-green-500"></span>
+          <p class="text-green-700 font-semibold">Project is confirmed to be healthy</p>
+        </div>
+      } @else {
+        <div class="flex items-center justify-center gap-2">
+          <span class="block h-3 w-3 rounded-full bg-red-500"></span>
+          <p class="text-red-700 font-semibold">Project not healthy</p>
+        </div>
+      }
+    </div>
+  </div>
+</div>

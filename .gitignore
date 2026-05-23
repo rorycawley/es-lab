@@ -39,5 +39,13 @@ checkouts/
 .claude/settings.local.json
 
 # wget download artefacts (from manual endpoint testing)
-index.html
 swagger-ui
+
+# Node / frontend
+node_modules/
+dist/
+.angular/
+
+# Playwright
+test-results/
+playwright-report/
