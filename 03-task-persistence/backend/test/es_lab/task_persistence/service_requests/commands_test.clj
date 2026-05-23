@@ -61,6 +61,8 @@
                                 :headers     {"x-user-id" "bob"}})
         record-spy (:record! (protocol/spies (:audit-port ctx)))]
     (is (spy/called-once? record-spy))
+    ; spy/calls returns a seq of raw arg-seqs, not {:args [...]} maps.
+    ; For (record! [this event]) the call is (this event), so second = event.
     (let [event (-> (spy/calls record-spy) first second)]
       (is (= "bob" (:actor event)))
       (is (= "submit-service-request" (:action event))))))

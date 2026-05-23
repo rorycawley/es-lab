@@ -26,6 +26,21 @@
                          (println "  http://localhost:8080/health       backend health endpoint")
                          (println "  http://localhost:8080/openapi.json backend OpenAPI spec")
                          (println "  http://localhost:8080/swagger-ui   backend API browser")
+                         (println "")
+                         (println "Rancher Desktop users — one-time machine setup for bb test:backend:")
+                         (println "  Adapter tests use Testcontainers. Rancher Desktop places the Docker socket at")
+                         (println "  ~/.rd/docker.sock and requires API version >=1.41, but docker-java defaults to")
+                         (println "  1.32. Fix with two properties files (create if missing):")
+                         (println "")
+                         (println "  ~/.docker-java.properties")
+                         (println "    api.version=1.44")
+                         (println "")
+                         (println "  ~/.testcontainers.properties")
+                         (println "    docker.host=unix:///Users/$USER/.rd/docker.sock")
+                         (println "    ryuk.disabled=true")
+                         (println "    checks.disable=true")
+                         (println "")
+                         (println "  Also ensure Rancher Desktop is using dockerd (moby), not containerd.")
                          (println ""))}
 
   setup

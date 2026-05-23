@@ -1,3 +1,10 @@
+; Rancher Desktop one-time setup required for Testcontainers to connect:
+;   ~/.docker-java.properties   → api.version=1.44
+;   ~/.testcontainers.properties → docker.host=unix:///Users/$USER/.rd/docker.sock
+;                                  ryuk.disabled=true / checks.disable=true
+; docker-java defaults to API 1.32; Rancher Desktop's daemon requires >=1.41.
+; DOCKER_API_VERSION env var is NOT read by docker-java — the properties file is the fix.
+; bb.edn test:backend supplies DOCKER_HOST / TESTCONTAINERS_* env vars automatically.
 (ns es-lab.task-persistence.db.postgres-test
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [es-lab.task-persistence.audit.port :as audit]
