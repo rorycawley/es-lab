@@ -1,0 +1,81 @@
+{:paths ["."]
+ :tasks
+ {:requires ([babashka.process :refer [shell]]
+             [clojure.test :as t])
+
+  :init (defn sh [& args]
+          (binding [*out* *err*]
+            (apply println "+" (remove map? args)))
+          (apply shell args))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task             (do (println "")
+                         (println "Prerequisites:")
+                         (println "  1. Install mise: curl https://mise.run | sh")
+                         (println "  2. Run: mise install   (installs bb; only needed once to bootstrap)")
+                         (println "")
+                         (println "Then:")
+                         (println "  bb all             (trust config + install tools + run all tests)")
+                         (println "  bb tasks           (list all available tasks)")
+                         (println "")
+                         (println "After bb up, the stack is available at:")
+                         (println "  http://localhost:8080/health       health endpoint")
+                         (println "  http://localhost:8080/openapi.json OpenAPI 3.0 spec")
+                         (println "  http://localhost:8080/swagger-ui   interactive API browser")
+                         (println ""))}
+
+  setup
+  {:doc  "Trust mise.toml and install all declared tools (run once after cloning)"
+   :task (do (sh "mise" "trust")
+             (sh "mise" "install"))}
+
+  up
+  {:doc  "Build and start the stack"
+   :task (do (sh "docker" "compose" "up" "-d" "--build" "--wait")
+             (println "")
+             (println "Stack is up:")
+             (println "  http://localhost:8080/health       health endpoint")
+             (println "  http://localhost:8080/openapi.json OpenAPI 3.0 spec")
+             (println "  http://localhost:8080/swagger-ui   interactive API browser")
+             (println ""))}
+
+  down
+  {:doc  "Stop the stack"
+   :task (sh "docker" "compose" "down")}
+
+  clean
+  {:doc  "Remove build artefacts"
+   :task (sh "rm" "-rf" "backend/target" "backend/.cpcache")}
+
+  lint
+  {:doc  "Lint with clj-kondo"
+   :task (sh "clj-kondo" "--parallel" "--lint" "backend/src:backend/test")}
+
+  fmt:check
+  {:doc  "Check code format with cljfmt"
+   :task (sh "cljfmt" "check" "backend/src" "backend/test")}
+
+  fmt:fix
+  {:doc  "Reformat code with cljfmt"
+   :task (sh "cljfmt" "fix" "backend/src" "backend/test")}
+
+  test:unit
+  {:doc  "Run unit and integration tests"
+   :task (sh {:dir "backend"} "clojure" "-M:test")}
+
+  test:acceptance
+  {:doc  "Run acceptance tests against the live stack"
+   :task (do (require 'acceptance.health-test)
+             (let [{:keys [fail error]} (t/run-tests 'acceptance.health-test)]
+               (when (pos? (+ fail error))
+                 (System/exit 1))))}
+
+  test
+  {:doc     "Run all tests"
+   :depends [test:unit test:acceptance]}
+
+  all
+  {:doc     "Setup and run all tests end to end"
+   :depends [setup test]}}}

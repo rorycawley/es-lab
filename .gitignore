@@ -1,14 +1,43 @@
+# Clojure
+target/
+classes/
+.cpcache/
 pom.xml
 pom.xml.asc
 *.jar
 *.class
-/lib/
-/classes/
-/target/
-/checkouts/
+
+# Leiningen
+lib/
+checkouts/
 .lein-deps-sum
 .lein-repl-history
 .lein-plugins/
 .lein-failures
+
+# nREPL
 .nrepl-port
-.cpcache/
+
+# mise
+.mise.local.toml
+
+# Babashka
+.babashka/
+
+# macOS
+.DS_Store
+._*
+
+# IDE
+.idea/
+*.iml
+.calva/
+.lsp/.cache/
+.clj-kondo/.cache/
+
+# Claude Code
+.claude/settings.local.json
+
+# wget download artefacts (from manual endpoint testing)
+index.html
+swagger-ui

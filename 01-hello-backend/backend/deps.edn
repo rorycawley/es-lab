@@ -1,0 +1,18 @@
+{:paths ["src" "resources"]
+ :deps  {org.clojure/clojure       {:mvn/version "1.12.0"}
+         ring/ring-core             {:mvn/version "1.12.2"}
+         ring/ring-jetty-adapter    {:mvn/version "1.12.2"}
+         metosin/reitit             {:mvn/version "0.7.2"}
+         metosin/muuntaja           {:mvn/version "0.6.10"}
+         metosin/ring-swagger-ui    {:mvn/version "4.15.5"}
+         aero/aero                  {:mvn/version "1.1.6"}}
+ :aliases
+ {:build {:deps       {io.github.clojure/tools.build {:git/tag "v0.10.5"
+                                                       :git/sha "2a21b7a"}}
+           :ns-default build}
+  :test  {:extra-paths ["test"]
+          :extra-deps  {lambdaisland/kaocha       {:mvn/version "1.91.1392"}
+                        ring/ring-mock            {:mvn/version "0.4.0"}
+                        metosin/jsonista          {:mvn/version "0.3.8"}
+                        org.babashka/http-client  {:mvn/version "0.4.16"}}
+          :main-opts   ["-m" "kaocha.runner"]}}}
