@@ -30,17 +30,23 @@ export class AppComponent {
   // Integer trigger so each submit always fires a reload, even redundant ones
   private readonly loadTrigger = signal(0);
 
+  readonly listError = signal(false);
+
   readonly requests = toSignal(
     toObservable(this.loadTrigger).pipe(
-      switchMap(() =>
-        this.http
+      switchMap(() => {
+        this.listError.set(false);
+        return this.http
           .post<{ requests: ServiceRequest[] }>('/api/queries/list-service-requests', {})
           .pipe(
             map(r => r.requests),
-            catchError(() => of([] as ServiceRequest[])),
+            catchError(() => {
+              this.listError.set(true);
+              return of([] as ServiceRequest[]);
+            }),
             startWith<ServiceRequest[] | null>(null),
-          ),
-      ),
+          );
+      }),
     ),
     { initialValue: null as ServiceRequest[] | null },
   );

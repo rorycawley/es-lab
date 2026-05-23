@@ -18,10 +18,15 @@
 (defn- make-ctx
   ([] (make-ctx stub-saved))
   ([saved]
-   {:service-request-port (protocol/mock sr/ServiceRequestPort
-                            (save! [_ _] saved))
-    :audit-port           (protocol/mock audit/AuditPort
-                            (record! [_ _] nil))}))
+   (let [sr-port    (protocol/mock sr/ServiceRequestPort
+                      (save! [_ _] saved)
+                      (list-all [_] []))
+         audit-port (protocol/mock audit/AuditPort
+                      (record! [_ _] nil))]
+     {:service-request-port sr-port
+      :audit-port           audit-port
+      :transact!            (fn [f] (f {:service-request-port sr-port
+                                        :audit-port           audit-port}))})))
 
 (defn- handle [ctx req]
   ((commands/submit-service-request-handler ctx) req))

@@ -6,6 +6,7 @@
 
 (defn- make-ctx [requests]
   {:service-request-port (protocol/mock sr/ServiceRequestPort
+                           (save! [_ _] nil)
                            (list-all [_] requests))})
 
 (defn- list-requests [ctx]

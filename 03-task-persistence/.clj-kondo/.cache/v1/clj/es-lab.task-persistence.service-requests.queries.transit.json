@@ -1,0 +1,1 @@
+["^ ","~$list-service-requests-handler",["^ ","~:row",4,"~:col",1,"~:fixed-arities",["~#set",[1]],"~:name","^0","~:ns","~$es-lab.task-persistence.service-requests.queries","~:top-ns","^7","~:arities",["^ ","~i1",["^ ","~:ret","~:fn"]],"~:type","^;"],"~:filename","backend/src/es_lab/task_persistence/service_requests/queries.clj"]

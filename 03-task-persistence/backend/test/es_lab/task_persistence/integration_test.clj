@@ -1,6 +1,5 @@
 (ns es-lab.task-persistence.integration-test
   (:require [babashka.http-client :as http]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [es-lab.task-persistence.routes :as routes]
             [es-lab.task-persistence.test-support :as support]

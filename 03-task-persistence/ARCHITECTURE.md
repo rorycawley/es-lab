@@ -7,7 +7,7 @@
                     │                                                                            │
   localhost:4200 ───┼──▶  frontend  (nginx:alpine)                         :80                 │
                     │     │                                                                      │
-                    │     │  /api/*        proxy_pass → strips /api/ prefix ────────────────────┼──▶  backend  (eclipse-temurin:21-jre)  :8080
+                    │     │  /api/*        proxy_pass → preserves /api/ prefix ──────────────────┼──▶  backend  (eclipse-temurin:21-jre)  :8080
                     │     │  /*.js,*.css   static, Cache-Control: immutable                     │     │
                     │     │  /*            try_files $uri /index.html                           │     │  POST /api/commands/submit-service-request
                     │     │                                                                      │     │  POST /api/queries/list-service-requests
@@ -26,7 +26,7 @@
 
 On startup the backend runs `migratus/migrate` before binding to port 8080. Migrations are SQL files in `resources/migrations/`; only outstanding ones are applied.
 
-The nginx proxy strips the `/api/` prefix before forwarding: a browser `POST /api/commands/submit-service-request` reaches the backend as `POST /api/commands/submit-service-request` (the full path is preserved because the proxy target has no trailing-slash path component).
+The nginx proxy preserves the full path when forwarding to the backend. `proxy_pass http://backend:8080` (no trailing slash) means no URI rewriting — a browser `POST /api/commands/submit-service-request` reaches the backend at exactly `POST /api/commands/submit-service-request`. Adding a trailing slash (`http://backend:8080/`) would strip the `/api/` prefix, causing 404s.
 
 ---
 
@@ -43,9 +43,11 @@ nginx (frontend container)
 submit-service-request-handler (commands.clj)
   │  1. read X-User-Id header (default "demo-user")
   │  2. validate: title and description must be non-blank strings → 422 if not
-  │  3. call ServiceRequestPort/save!  → saved record
-  │  4. call AuditPort/record!         → nil
-  │  5. return {:status 200 :body saved}
+  │  3. open JDBC transaction via transact!
+  │     3a. call ServiceRequestPort/save!  → saved record
+  │     3b. call AuditPort/record!         → nil   (rolls back save if this fails)
+  │     3c. commit
+  │  4. return {:status 200 :body saved}
   │
   ├─▶  PostgresServiceRequestPort (db/postgres.clj)
   │      INSERT INTO service_requests ... RETURNING *
@@ -90,7 +92,7 @@ audit/port.clj                         PostgresAuditPort [ds]
                                          → atom; returns nil
 ```
 
-The command and query handlers import only the protocol namespaces — they never see `next.jdbc` or SQL. `make-router` in `routes.clj` accepts a `ctx` map `{:service-request-port … :audit-port …}` and closes over it when building handlers. This is why `make-router` is a function, not a `def`.
+The command and query handlers import only the protocol namespaces — they never see `next.jdbc` or SQL. `make-router` in `routes.clj` accepts a `ctx` map `{:service-request-port … :audit-port … :transact! …}` and closes over it when building handlers. This is why `make-router` is a function, not a `def`. The `:transact!` key is a function `(fn [f] ...)` that opens a JDBC transaction and calls `f` with transactional port instances — so `save!` and `record!` are atomic. In tests, `:transact!` is a no-op wrapper that passes the in-memory ports through directly.
 
 ---
 
@@ -101,7 +103,7 @@ frontend                                    backend
 ────────────────────────────────────────    ────────────────────────────────────────
 Stage 1: node:22-alpine                     Stage 1: clojure:temurin-21-tools-deps-alpine
   COPY package.json package-lock.json         COPY deps.edn build.clj
-  RUN npm ci                    ← cached      RUN clojure -P              ← cached
+  RUN npm install               ← cached      RUN clojure -P              ← cached
   COPY . .       (src after deps)             COPY src resources
   RUN ng build --configuration=production     RUN clojure -T:build uber
   → dist/frontend/browser/                   → target/app.jar

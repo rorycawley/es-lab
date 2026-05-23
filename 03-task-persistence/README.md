@@ -132,7 +132,7 @@ After `bb up` the stack is available at:
 
 ```sh
 bb test                # all tests
-bb test:backend        # backend unit and integration tests (no Docker)
+bb test:backend        # backend unit, integration, and adapter tests (adapter tests require Docker)
 bb test:frontend       # frontend unit tests with Jest (no Docker)
 bb test:acceptance     # acceptance tests against the live stack (HTTP)
 bb test:e2e            # Playwright browser tests against the live stack
@@ -155,11 +155,11 @@ The backend accepts arbitrary JSON bodies and writes to Postgres. A misconfigure
 
 ### What design choices reduce the risk?
 
-Muuntaja limits request body size. The command handler validates that title and description are non-blank strings before touching the database. The ports-and-adapters boundary means query construction is confined to one adapter file.
+The command handler validates that title and description are non-blank strings before touching the database. The ports-and-adapters boundary means query construction is confined to one adapter file. `save!` and `audit/record!` execute inside a single JDBC transaction — if the audit write fails, the service request is rolled back.
 
 ### What is deliberately not solved yet?
 
-Authentication (the `X-User-Id` header is a stand-in), authorisation, TLS, CSRF protection, rate limiting, input length limits, Postgres credentials rotation.
+Authentication (the `X-User-Id` header is a stand-in), authorisation, TLS, CSRF protection, rate limiting, input length limits, request body size limits (no explicit limit is configured), Postgres credentials rotation.
 
 ## Production notes
 

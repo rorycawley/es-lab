@@ -18,5 +18,6 @@
                                :migration-dir "migrations"
                                :db            {:datasource ds}})
         ctx {:service-request-port (pg/->PostgresServiceRequestPort ds)
-             :audit-port           (pg/->PostgresAuditPort ds)}]
+             :audit-port           (pg/->PostgresAuditPort ds)
+             :transact!            (partial pg/transact! ds)}]
     (jetty/run-jetty (routes/make-router ctx) {:port port :join? true})))

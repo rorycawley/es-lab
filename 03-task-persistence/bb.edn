@@ -95,15 +95,18 @@
 
   test:backend
   {:doc  "Run backend unit, integration, and adapter tests (adapter tests require Docker)"
-   :task (let [docker-host (or (System/getenv "DOCKER_HOST") "unix:///Users/rorycawley/.rd/docker.sock")
+   :task (let [docker-host (System/getenv "DOCKER_HOST")
                host-ip     (or (System/getenv "TESTCONTAINERS_HOST_OVERRIDE")
                                (try (clojure.string/trim
                                       (:out (clojure.java.shell/sh "rdctl" "info" "--field" "ip-address")))
-                                    (catch Exception _ "localhost")))]
+                                    (catch Exception _ nil)))]
+           ; Only forward DOCKER_HOST if already set — otherwise let ~/.testcontainers.properties drive discovery.
+           ; TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE tells Testcontainers where to mount the Docker socket
+           ; inside helper containers (required for Rancher Desktop, harmless elsewhere).
            (sh {:dir "backend"
-                :extra-env {"DOCKER_HOST"                          docker-host
-                            "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" "/var/run/docker.sock"
-                            "TESTCONTAINERS_HOST_OVERRIDE"          host-ip}}
+                :extra-env (cond-> {"TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" "/var/run/docker.sock"}
+                             docker-host (assoc "DOCKER_HOST" docker-host)
+                             host-ip     (assoc "TESTCONTAINERS_HOST_OVERRIDE" host-ip))}
                "clojure" "-M:test"))}
 
   test:frontend

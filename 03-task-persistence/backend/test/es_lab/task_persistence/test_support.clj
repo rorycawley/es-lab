@@ -24,5 +24,9 @@
     nil))
 
 (defn make-ports []
-  {:service-request-port (->InMemoryServiceRequestPort (atom []))
-   :audit-port           (->InMemoryAuditPort (atom []))})
+  (let [sr-port    (->InMemoryServiceRequestPort (atom []))
+        audit-port (->InMemoryAuditPort (atom []))]
+    {:service-request-port sr-port
+     :audit-port           audit-port
+     :transact!            (fn [f] (f {:service-request-port sr-port
+                                       :audit-port           audit-port}))}))

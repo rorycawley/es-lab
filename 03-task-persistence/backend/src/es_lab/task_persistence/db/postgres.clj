@@ -37,3 +37,12 @@
         VALUES (?, ?, ?, ?::uuid, ?::jsonb)"
        (uuid/uuid7) actor action (str subject-id) (json/write-value-as-string metadata)])
     nil))
+
+(defn transact!
+  "Execute f inside a single JDBC transaction. f receives a ctx map with
+  :service-request-port and :audit-port bound to the same transactional connection,
+  so save! and record! either both commit or both roll back."
+  [ds f]
+  (jdbc/with-transaction [tx ds]
+    (f {:service-request-port (->PostgresServiceRequestPort tx)
+        :audit-port           (->PostgresAuditPort tx)})))

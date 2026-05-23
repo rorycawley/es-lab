@@ -115,6 +115,14 @@ describe('AppComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Submission failed');
   });
 
+  it('shows error state when list request fails', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    httpMock.expectOne(QUERY_URL).error(new ProgressEvent('error'));
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toContain('Could not load requests');
+  });
+
   it('does not submit when title is blank', async () => {
     fixture.detectChanges();
     await fixture.whenStable();
