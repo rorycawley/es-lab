@@ -1,0 +1,110 @@
+{:paths ["."]
+ :tasks
+ {:requires ([babashka.process :refer [shell]]
+             [clojure.test :as t])
+
+  :init (defn sh [& args]
+          (binding [*out* *err*]
+            (apply println "+" (remove map? args)))
+          (apply shell args))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task             (do (println "")
+                         (println "Prerequisites:")
+                         (println "  1. Install mise: curl https://mise.run | sh")
+                         (println "  2. Run: mise install   (installs bb and node; only needed once to bootstrap)")
+                         (println "")
+                         (println "Then:")
+                         (println "  bb all               (trust config + install tools + run all tests)")
+                         (println "  bb playwright:install  (install Playwright browser binaries)")
+                         (println "  bb tasks             (list all available tasks)")
+                         (println "")
+                         (println "After bb up, the stack is available at:")
+                         (println "  http://localhost:4200              Angular app")
+                         (println "  http://localhost:8080/health       backend health endpoint")
+                         (println "  http://localhost:8080/openapi.json backend OpenAPI spec")
+                         (println "  http://localhost:8080/swagger-ui   backend API browser")
+                         (println ""))}
+
+  setup
+  {:doc  "Trust mise.toml, install tools, install npm packages, and install Playwright browsers"
+   :task (do (sh "mise" "trust")
+             (sh "mise" "install")
+             (sh {:dir "frontend"} "npm" "install")
+             (sh {:dir "frontend"} "npx" "playwright" "install" "chromium"))}
+
+  playwright:install
+  {:doc  "Install Playwright browser binaries"
+   :task (sh {:dir "frontend"} "npx" "playwright" "install" "chromium")}
+
+  db:up
+  {:doc  "Start a local Postgres container for backend development (no build)"
+   :task (sh "docker" "compose" "up" "-d" "--wait" "postgres")}
+
+  db:down
+  {:doc  "Stop and remove the local Postgres container"
+   :task (sh "docker" "compose" "down" "postgres")}
+
+  up
+  {:doc  "Build and start the full stack"
+   :task (do (sh "docker" "compose" "up" "-d" "--build" "--wait")
+             (println "")
+             (println "Stack is up:")
+             (println "  http://localhost:4200              Angular app")
+             (println "  http://localhost:8080/health       backend health endpoint")
+             (println "  http://localhost:8080/openapi.json backend OpenAPI spec")
+             (println "  http://localhost:8080/swagger-ui   backend API browser")
+             (println ""))}
+
+  down
+  {:doc  "Stop the full stack"
+   :task (sh "docker" "compose" "down")}
+
+  clean
+  {:doc  "Remove build artefacts"
+   :task (sh "rm" "-rf" "backend/target" "backend/.cpcache" "frontend/dist" "frontend/.angular" "frontend/playwright-report" "frontend/test-results")}
+
+  lint
+  {:doc  "Lint backend with clj-kondo"
+   :task (sh "clj-kondo" "--parallel" "--lint" "backend/src:backend/test")}
+
+  fmt:check
+  {:doc  "Check backend formatting with cljfmt"
+   :task (sh "cljfmt" "check" "backend/src" "backend/test")}
+
+  fmt:fix
+  {:doc  "Reformat backend with cljfmt"
+   :task (sh "cljfmt" "fix" "backend/src" "backend/test")}
+
+  test:backend
+  {:doc  "Run backend unit and integration tests (no Docker needed)"
+   :task (sh {:dir "backend"} "clojure" "-M:test")}
+
+  test:frontend
+  {:doc  "Run frontend unit tests with Jest"
+   :task (sh {:dir "frontend"} "npm" "test")}
+
+  test:acceptance
+  {:doc  "Run acceptance tests against the live stack"
+   :task (do (require 'acceptance.app-test)
+             (let [{:keys [fail error]} (t/run-tests 'acceptance.app-test)]
+               (when (pos? (+ fail error))
+                 (System/exit 1))))}
+
+  test:e2e
+  {:doc  "Run Playwright E2E tests against the live stack"
+   :task (do (sh "docker" "compose" "up" "-d" "--build" "--wait")
+             (try
+               (sh {:dir "frontend"} "npx" "playwright" "test")
+               (finally
+                 (sh "docker" "compose" "down"))))}
+
+  test
+  {:doc     "Run all tests"
+   :depends [test:backend test:frontend test:acceptance test:e2e]}
+
+  all
+  {:doc     "Setup and run all tests end to end"
+   :depends [setup test]}}}
