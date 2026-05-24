@@ -8,7 +8,7 @@ Introduces: durable Postgres persistence, Flyway migrations, generated `tsvector
 
 ## Architecture
 
-Three Docker services: Postgres (database), a Clojure backend (commands and queries), and an Angular SPA served by nginx. Postgres data lives in a named Docker volume so submitted requests survive container restart. The backend runs Flyway on startup to apply outstanding migrations before accepting requests. The domain layer calls persistence through protocols; JDBC is confined to the adapter layer. Search is implemented in Postgres with a generated weighted `search_vector` column and a GIN index.
+Four Docker services: Postgres (database), a one-shot migrate container (Flyway), a Clojure backend (commands and queries), and an Angular SPA served by nginx. Compose starts them in dependency order — Flyway migrations are applied before the backend starts. Postgres data lives in a named Docker volume so submitted requests survive container restart. The domain layer calls persistence through protocols; JDBC is confined to the adapter layer. Search is implemented in Postgres with a generated weighted `search_vector` column and a GIN index.
 
 | Role | Choice | Rationale |
 |---|---|---|
@@ -19,7 +19,7 @@ Three Docker services: Postgres (database), a Clojure backend (commands and quer
 | Backend framework | Ring + Reitit | Same as 01/02 |
 | Persistence | next.jdbc + Postgres | Minimal JDBC wrapper; `as-unqualified-lower-maps` gives snake_case keys matching column names |
 | Search | Postgres full-text search | Weighted title/description `tsvector`, GIN index, and ranked `plainto_tsquery` reads |
-| Migrations | Flyway | Runs on startup; migration files in `resources/database/migrations/` |
+| Migrations | Flyway | One-shot Compose service; runs before the backend starts; files in `resources/database/migrations/` |
 | Ports and adapters | Clojure protocols | Domain calls `ServiceRequestPort` and `AuditPort`; JDBC adapter implements both; `transact!` supplies transactional port instances |
 | Audit log | Separate `audit_events` table | Records every command with actor, action, subject, and metadata in the same transaction as the domain write |
 | Unit test runner | Jest + jest-preset-angular | Frontend unit tests with mocked HTTP |
@@ -44,36 +44,29 @@ Business API endpoints use `POST` with a JSON body. No business endpoint uses `G
 curl https://mise.run | sh
 ```
 
-### 2. Install declared tools (bootstrap only)
+### 2. Run everything
 
 ```sh
-mise install   # installs node, babashka, java, clojure, and other tools
+bb all   # install tools + install browsers + run the standard test suite
 ```
 
-### 3. Run everything
-
-```sh
-bb all   # trust config + install npm packages + install Playwright + build image + run all tests
-```
-
-`bb all` calls `mise trust`, `mise install`, `npm ci`, and `npx playwright install chromium` internally — after the first bootstrap you only ever need `bb all`.
+`bb all` calls `mise install`, `npm ci`, and `npx playwright install chromium` — after the first run you only ever need `bb all`.
 
 ### 4. Start and stop the stack manually
 
 ```sh
-bb up    # build images and start the full stack (postgres + backend + frontend)
+bb up    # build images and start the full stack (postgres + migrate + backend + frontend)
 bb down  # stop the stack and remove the Postgres data volume
-bb reset # alias for bb down
 ```
 
-### 5. Local backend development (Postgres only)
+### 5. Local backend development (Postgres + migrations only)
 
 ```sh
-bb db:up    # start only the Postgres container
-bb db:down  # stop only the Postgres container
+bb db:up    # start Postgres and apply migrations
+bb db:down  # stop and remove the Postgres and migrate containers
 ```
 
-With Postgres running, start the backend directly:
+With Postgres running and migrations applied, start the backend directly:
 
 ```sh
 cd backend && clojure -M -m es-lab.task-persistence.core
@@ -99,10 +92,10 @@ After `bb up` the stack is available at:
 - [backend/src/es_lab/task_persistence/audit/port.clj](backend/src/es_lab/task_persistence/audit/port.clj) — `AuditPort` protocol
 - [backend/src/es_lab/task_persistence/service_requests/commands.clj](backend/src/es_lab/task_persistence/service_requests/commands.clj) — submit-service-request handler: validates, persists, audits
 - [backend/src/es_lab/task_persistence/service_requests/queries.clj](backend/src/es_lab/task_persistence/service_requests/queries.clj) — list-service-requests and search-service-requests handlers
-- [backend/src/es_lab/task_persistence/db/migrations.clj](backend/src/es_lab/task_persistence/db/migrations.clj) — Flyway startup wrapper for applying database migrations
+- [backend/src/es_lab/task_persistence/db/migrations.clj](backend/src/es_lab/task_persistence/db/migrations.clj) — Flyway wrapper used by the Postgres adapter tests to migrate a Testcontainers database
 - [backend/src/es_lab/task_persistence/db/postgres.clj](backend/src/es_lab/task_persistence/db/postgres.clj) — JDBC adapter implementing both ports
 - [backend/src/es_lab/task_persistence/routes.clj](backend/src/es_lab/task_persistence/routes.clj) — `make-router` function: injects ports into handlers
-- [backend/src/es_lab/task_persistence/core.clj](backend/src/es_lab/task_persistence/core.clj) — wires Flyway, datasource, ports, and Jetty
+- [backend/src/es_lab/task_persistence/core.clj](backend/src/es_lab/task_persistence/core.clj) — wires datasource, ports, and Jetty
 - [backend/resources/database/migrations/](backend/resources/database/migrations/) — Flyway SQL migration files
 - [backend/test/es_lab/task_persistence/test_support.clj](backend/test/es_lab/task_persistence/test_support.clj) — in-memory port implementations for testing
 - [backend/test/es_lab/task_persistence/integration_test.clj](backend/test/es_lab/task_persistence/integration_test.clj) — real Jetty + in-memory ports (no Docker)
@@ -110,7 +103,7 @@ After `bb up` the stack is available at:
 - [frontend/src/app/app.component.html](frontend/src/app/app.component.html) — Tailwind-styled submit form and request list
 - [frontend/src/app/app.component.spec.ts](frontend/src/app/app.component.spec.ts) — Jest unit tests with mocked HTTP
 - [frontend/nginx/default.conf](frontend/nginx/default.conf) — `/api/` proxy and Angular routing
-- [docker-compose.yml](docker-compose.yml) — three services: postgres → backend → frontend, each with healthchecks
+- [docker-compose.yml](docker-compose.yml) — four services: postgres, migrate, backend, frontend; each with healthchecks or a completion condition
 - [acceptance/app_test.clj](acceptance/app_test.clj) — HTTP acceptance tests including submit-then-list roundtrip
 - [frontend/e2e/app.spec.ts](frontend/e2e/app.spec.ts) — Playwright E2E browser test
 
@@ -119,7 +112,7 @@ After `bb up` the stack is available at:
 | Attribute | How |
 |---|---|
 | Portability | Runs with `docker compose up` — no local runtimes required |
-| Operability | Backend waits for Postgres healthcheck; frontend waits for backend healthcheck; Flyway auto-applies migrations on startup |
+| Operability | Compose starts services in dependency order; the migrate container applies Flyway migrations before the backend starts; each service has a healthcheck |
 | Maintainability | Domain handlers are pure functions of a `ctx` map; ports isolate them from JDBC; in-memory adapters keep domain and HTTP integration tests Docker-free |
 | Discoverability | Backend OpenAPI spec and Swagger UI available at runtime |
 | Auditability | Every command writes to `audit_events` with actor, action, subject, and metadata in the same transaction as the service request |
@@ -143,20 +136,22 @@ After `bb up` the stack is available at:
 ## Running the tests
 
 ```sh
-bb test                # all tests
+bb test                # standard test suite (backend, frontend, acceptance, E2E; excludes perf)
 bb test:backend        # backend unit, HTTP integration, and Postgres adapter tests (adapter tests require Docker)
 bb test:frontend       # frontend unit tests with Jest (no Docker)
 bb test:acceptance     # acceptance tests against the live stack (HTTP, resets the test volume)
 bb test:e2e            # Playwright browser tests against the live stack (resets the test volume)
+bb test:perf           # Gatling performance tests against the live stack (stack stays up after)
 ```
 
 ## Code quality
 
 ```sh
-bb lint        # lint backend with clj-kondo and frontend with ESLint
-bb fmt:check   # check backend formatting with cljfmt and frontend formatting with Prettier
-bb fmt:fix     # reformat backend with cljfmt and frontend with Prettier
-bb clean       # remove build artefacts
+bb check             # lint and check formatting for backend and frontend
+bb check:lint        # lint backend and frontend
+bb check:fmt         # check formatting for backend and frontend
+bb fix               # fix backend and frontend formatting
+bb clean             # remove build artefacts
 ```
 
 ## Security design notes
@@ -178,7 +173,7 @@ Authentication (the `X-User-Id` header is a stand-in), authorisation, TLS, CSRF 
 - Replace the hardcoded `DATABASE_URL` default with a secrets manager reference
 - The backend port 8080 is exposed directly to the host for development; in production remove that binding so the backend is only reachable through the frontend's network
 - Add a connection pool (HikariCP) before going to production — `next.jdbc/get-datasource` creates an unpooled datasource
-- Move migrations out of application startup before running multiple backend instances, or guard startup migrations with an operational deployment step
+- The Flyway migrate container handles migrations before the backend starts; in production use an equivalent pre-deploy migration step rather than running Flyway in-process alongside the application
 
 ## What is not proven yet
 

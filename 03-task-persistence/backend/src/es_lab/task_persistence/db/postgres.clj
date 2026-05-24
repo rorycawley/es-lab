@@ -30,7 +30,7 @@
           (jdbc/execute! ds
                          [(str "SELECT " service-request-columns
                                " FROM service_requests"
-                               " ORDER BY created_at DESC")]
+                               " ORDER BY created_at DESC, request_id DESC")]
                          {:builder-fn rs/as-unqualified-lower-maps})))
   (search [_ query]
     (mapv ->response

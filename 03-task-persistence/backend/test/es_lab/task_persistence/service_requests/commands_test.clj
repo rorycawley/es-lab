@@ -1,73 +1,93 @@
 (ns es-lab.task-persistence.service-requests.commands-test
   (:require [clojure.test :refer [deftest is]]
-            [es-lab.task-persistence.audit.port :as audit]
             [es-lab.task-persistence.service-requests.commands :as commands]
-            [es-lab.task-persistence.service-requests.port :as sr]
-            [spy.core :as spy]
-            [spy.protocol :as protocol]))
+            [es-lab.task-persistence.test-support :as ts]))
 
-(def ^:private stub-saved
-  {:request_id   "01955f3d-0000-7000-8000-000000000001"
-   :submitted_by "demo-user"
-   :title        "Fix door"
-   :description  "Room 101 handle broken"
-   :status       "submitted"
-   :created_at   "2026-01-01T00:00:00Z"
-   :updated_at   "2026-01-01T00:00:00Z"})
+(defn- make-request
+  ([body] (make-request body {}))
+  ([body headers] {:headers headers :body-params body}))
 
-(defn- make-ctx
-  ([] (make-ctx stub-saved))
-  ([saved]
-   (let [sr-port    (protocol/mock sr/ServiceRequestPort
-                                   (save! [_ _] saved)
-                                   (list-all [_] []))
-         audit-port (protocol/mock audit/AuditPort
-                                   (record! [_ _] nil))]
-     {:service-request-port sr-port
-      :audit-port           audit-port
-      :transact!            (fn [f] (f {:service-request-port sr-port
-                                        :audit-port           audit-port}))})))
-
-(defn- handle [ctx req]
-  ((commands/submit-service-request-handler ctx) req))
-
-(deftest returns-201-with-saved-request
-  (let [ctx  (make-ctx)
-        resp (handle ctx {:body-params {:title "Fix door" :description "Room 101 handle broken"}
-                          :headers     {}})]
+(deftest submit-returns-201-with-correct-fields
+  ;; AC-04-01
+  (let [ctx     (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)
+        resp    (handler (make-request {:title "T" :description "D"}))]
     (is (= 201 (:status resp)))
-    (is (= "Fix door" (get-in resp [:body :title])))
-    (is (= "demo-user" (get-in resp [:body :submitted_by])))
-    (is (string? (get-in resp [:body :request_id])))))
+    (let [body (:body resp)]
+      (is (= #{:request_id :title :description :status :submitted_by :created_at :updated_at}
+             (set (keys body))))
+      (is (= "T" (:title body)))
+      (is (= "D" (:description body)))
+      (is (= "submitted" (:status body)))
+      (is (string? (:request_id body)))
+      (is (string? (:submitted_by body)))
+      (is (string? (:created_at body)))
+      (is (string? (:updated_at body))))))
 
-(deftest uses-x-user-id-header
-  (let [ctx  (make-ctx (assoc stub-saved :submitted_by "alice"))
-        resp (handle ctx {:body-params {:title "Test" :description "Details"}
-                          :headers     {"x-user-id" "alice"}})]
+(deftest submit-reads-x-user-id-header
+  ;; AC-04-02
+  (let [ctx     (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)
+        resp    (handler (make-request {:title "T" :description "D"} {"x-user-id" "alice"}))]
     (is (= "alice" (get-in resp [:body :submitted_by])))))
 
-(deftest returns-422-when-title-blank
-  (let [ctx  (make-ctx)
-        resp (handle ctx {:body-params {:title "" :description "Details"}
-                          :headers     {}})]
-    (is (= 422 (:status resp)))
-    (is (spy/not-called? (:save! (protocol/spies (:service-request-port ctx)))))))
+(deftest submit-defaults-submitted-by-to-demo-user
+  ;; AC-04-03
+  (let [ctx     (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)
+        resp    (handler (make-request {:title "T" :description "D"}))]
+    (is (= "demo-user" (get-in resp [:body :submitted_by])))))
 
-(deftest returns-422-when-description-missing
-  (let [ctx  (make-ctx)
-        resp (handle ctx {:body-params {:title "Title"}
-                          :headers     {}})]
-    (is (= 422 (:status resp)))
-    (is (spy/not-called? (:save! (protocol/spies (:service-request-port ctx)))))))
+(deftest submit-rejects-missing-title
+  ;; AC-04-04
+  (let [ctx     (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)]
+    (is (= 422 (:status (handler (make-request {:description "D"})))))))
 
-(deftest records-audit-event
-  (let [ctx        (make-ctx (assoc stub-saved :submitted_by "bob"))
-        _          (handle ctx {:body-params {:title "Fix door" :description "Details"}
-                                :headers     {"x-user-id" "bob"}})
-        record-spy (:record! (protocol/spies (:audit-port ctx)))]
-    (is (spy/called-once? record-spy))
-    ; spy/calls returns a seq of raw arg-seqs, not {:args [...]} maps.
-    ; For (record! [this event]) the call is (this event), so second = event.
-    (let [event (-> (spy/calls record-spy) first second)]
-      (is (= "bob" (:actor event)))
-      (is (= "submit-service-request" (:action event))))))
+(deftest submit-rejects-blank-title
+  ;; AC-04-04
+  (let [ctx     (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)]
+    (doseq [blank ["" "   "]]
+      (is (= 422 (:status (handler (make-request {:title blank :description "D"}))))))))
+
+(deftest submit-rejects-missing-description
+  ;; AC-04-05
+  (let [ctx     (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)]
+    (is (= 422 (:status (handler (make-request {:title "T"})))))))
+
+(deftest submit-rejects-blank-description
+  ;; AC-04-05
+  (let [ctx     (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)]
+    (doseq [blank ["" "   "]]
+      (is (= 422 (:status (handler (make-request {:title "T" :description blank}))))))))
+
+(deftest submit-writes-audit-event-with-correct-fields
+  ;; QA-03-01
+  (let [{:keys [audit-port] :as ctx} (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)
+        resp    (handler (make-request {:title "T" :description "D"} {"x-user-id" "alice"}))
+        events  @(:!store audit-port)]
+    (is (= 1 (count events)))
+    (let [event (first events)]
+      (is (= "alice" (:actor event)))
+      (is (= "submit-service-request" (:action event)))
+      (is (= (get-in resp [:body :request_id]) (:subject-id event))))))
+
+(deftest submit-audit-defaults-actor-to-demo-user
+  ;; QA-03-02
+  (let [{:keys [audit-port] :as ctx} (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)
+        _       (handler (make-request {:title "T" :description "D"}))
+        events  @(:!store audit-port)]
+    (is (= "demo-user" (:actor (first events))))))
+
+(deftest two-submits-produce-two-audit-events
+  ;; QA-03-04
+  (let [{:keys [audit-port] :as ctx} (ts/make-ports)
+        handler (commands/submit-service-request-handler ctx)]
+    (handler (make-request {:title "A" :description "First"}))
+    (handler (make-request {:title "B" :description "Second"}))
+    (is (= 2 (count @(:!store audit-port))))))

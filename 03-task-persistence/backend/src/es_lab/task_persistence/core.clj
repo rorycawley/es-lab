@@ -1,7 +1,6 @@
 (ns es-lab.task-persistence.core
   (:require [aero.core :as aero]
             [clojure.java.io :as io]
-            [es-lab.task-persistence.db.migrations :as migrations]
             [es-lab.task-persistence.db.postgres :as pg]
             [es-lab.task-persistence.routes :as routes]
             [next.jdbc :as jdbc]
@@ -14,7 +13,6 @@
 (defn -main [& _]
   (let [{:keys [port database-url]} (read-config)
         ds  (jdbc/get-datasource {:jdbcUrl database-url})
-        _   (migrations/migrate! ds)
         ctx {:service-request-port (pg/->PostgresServiceRequestPort ds)
              :audit-port           (pg/->PostgresAuditPort ds)
              :transact!            (partial pg/transact! ds)}]

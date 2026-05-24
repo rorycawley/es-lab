@@ -4,6 +4,8 @@ classes/
 .cpcache/
 pom.xml
 pom.xml.asc
+# Gatling perf project has its own hand-written pom.xml
+!03-task-persistence/perf/pom.xml
 *.jar
 *.class
 

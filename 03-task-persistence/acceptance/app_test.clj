@@ -3,101 +3,109 @@
             [babashka.process :refer [shell]]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]))
+            [clojure.test :refer [deftest is]]))
 
-(defn stack-fixture [f]
-  (shell "docker compose down -v")
-  (shell "docker compose up -d --build --wait")
-  (try (f)
-       (finally
-         (shell "docker compose down -v")
-         (let [running (:out (shell {:out :string}
-                                    "docker compose ps --services --filter status=running"))]
-           (is (str/blank? running)
-               (str "expected no running compose services, found: " running))))))
+(def ^:private frontend "http://localhost:4200")
+(def ^:private backend  "http://localhost:8080")
 
-(use-fixtures :once stack-fixture)
+(defn- post-json
+  ([base path body] (post-json base path body {}))
+  ([base path body extra-headers]
+   (http/post (str base path)
+              {:headers (merge {"content-type" "application/json"
+                                "accept"       "application/json"}
+                               extra-headers)
+               :body    (json/generate-string body)
+               :throw   false})))
 
-(def ^:private json-headers {"Content-Type" "application/json"})
+(defn- get-url [url]
+  (http/get url {:throw false}))
 
-(defn- post [path body]
-  (http/post (str "http://localhost:8080" path)
-             {:headers json-headers
-              :body    (json/generate-string body)
-              :throw   false}))
+(defn- parse [resp]
+  (json/parse-string (:body resp) true))
 
-(defn- post-via-proxy [path body]
-  (http/post (str "http://localhost:4200" path)
-             {:headers json-headers
-              :body    (json/generate-string body)
-              :throw   false}))
+(deftest compose-stack-is-healthy
+  ;; AC-01-01
+  (let [running (shell {:out :string} "docker" "compose" "ps" "--services" "--filter" "status=running")
+        exited  (shell {:out :string} "docker" "compose" "ps" "--services" "--filter" "status=exited")]
+    (is (str/includes? (:out running) "postgres"))
+    (is (str/includes? (:out running) "backend"))
+    (is (str/includes? (:out running) "frontend"))
+    (is (str/includes? (:out exited) "migrate"))))
 
-(deftest frontend-returns-200
-  (is (= 200 (:status (http/get "http://localhost:4200/")))))
+(deftest frontend-serves-html-with-app-root
+  ;; AC-01-02
+  (let [resp (get-url (str frontend "/"))]
+    (is (= 200 (:status resp)))
+    (is (str/starts-with?
+          (get-in resp [:headers "content-type"] "")
+          "text/html"))
+    (is (str/includes? (:body resp) "<app-root"))))
 
-(deftest frontend-content-type-is-html
-  (let [ct (get-in (http/get "http://localhost:4200/") [:headers "content-type"])]
-    (is (str/starts-with? ct "text/html"))))
-
-(deftest frontend-body-contains-app-root
-  (is (str/includes? (:body (http/get "http://localhost:4200/")) "<app-root")))
-
-(deftest backend-health-directly-returns-200
-  (is (= 200 (:status (http/get "http://localhost:8080/health")))))
-
-(deftest backend-health-directly-is-ok
-  (let [body (-> (http/get "http://localhost:8080/health") :body (json/parse-string true))]
-    (is (= "ok" (:status body)))))
-
-(deftest submit-command-returns-201
-  (let [resp (post "/api/commands/submit-service-request"
-                   {:title "Broken window" :description "Window on 2nd floor is cracked"})]
+(deftest stack-accepts-commands-after-compose-up
+  ;; QA-01-02
+  (let [resp (post-json backend "/api/commands/submit-service-request"
+                        {:title "Readiness check" :description "Verifying stack is ready"})]
     (is (= 201 (:status resp)))))
 
-(deftest submit-command-returns-request-id
-  (let [body (-> (post "/api/commands/submit-service-request"
-                       {:title "Leaking tap" :description "Kitchen tap drips constantly"})
-                 :body
-                 (json/parse-string true))]
-    (is (string? (:request_id body)))))
-
-(deftest list-query-returns-200
-  (is (= 200 (:status (post "/api/queries/list-service-requests" {})))))
-
-(deftest list-query-returns-requests-key
-  (let [body (-> (post "/api/queries/list-service-requests" {}) :body (json/parse-string true))]
-    (is (vector? (:requests body)))))
-
 (deftest submit-then-list-roundtrip
-  (post "/api/commands/submit-service-request"
-        {:title "Noisy boiler" :description "Boiler in basement makes loud noise at night"})
-  (let [requests (-> (post "/api/queries/list-service-requests" {}) :body (json/parse-string true) :requests)]
-    (is (some #(= "Noisy boiler" (:title %)) requests))))
+  ;; AC-04-07
+  (let [title (str "Roundtrip " (random-uuid))
+        sub   (post-json frontend "/api/commands/submit-service-request"
+                         {:title title :description "E2E check"})]
+    (is (= 201 (:status sub)))
+    (let [listed (parse (post-json frontend "/api/queries/list-service-requests" {}))]
+      (is (some #(= title (:title %)) (:requests listed))))))
 
 (deftest submit-then-search-roundtrip
-  (post "/api/commands/submit-service-request"
-        {:title "Searchable radiator fault" :description "Radiator in library is cold"})
-  (let [requests (-> (post "/api/queries/search-service-requests" {:query "radiator"})
-                     :body
-                     (json/parse-string true)
-                     :requests)]
-    (is (some #(= "Searchable radiator fault" (:title %)) requests))))
+  ;; AC-08-05 (via full stack)
+  (let [term  (str "searchterm-" (random-uuid))
+        title (str "Request about " term)]
+    (post-json frontend "/api/commands/submit-service-request"
+               {:title title :description "Testing full-text search path"})
+    (let [result (parse (post-json frontend "/api/queries/search-service-requests" {:query term}))]
+      (is (some #(= title (:title %)) (:requests result))))))
 
-(deftest search-query-rejects-blank-query
-  (let [resp (post "/api/queries/search-service-requests" {:query " "})]
-    (is (= 422 (:status resp)))))
+(deftest proxy-returns-same-status-and-fields-as-direct-backend
+  ;; AC-04-09
+  (let [title       (str "Proxy-test " (random-uuid))
+        via-proxy   (post-json frontend "/api/commands/submit-service-request"
+                               {:title title :description "Via proxy"})
+        via-direct  (post-json backend "/api/commands/submit-service-request"
+                               {:title title :description "Via direct"})]
+    (is (= (:status via-proxy) (:status via-direct)))
+    (is (= (set (keys (parse via-proxy)))
+           (set (keys (parse via-direct)))))))
 
-(deftest submitted-request-survives-database-restart
-  (post "/api/commands/submit-service-request"
-        {:title "Persistent lift fault" :description "Lift B stops between floors"})
-  (shell "docker compose restart postgres backend")
-  (shell "docker compose up -d --wait")
-  (let [requests (-> (post "/api/queries/list-service-requests" {}) :body (json/parse-string true) :requests)]
-    (is (some #(= "Persistent lift fault" (:title %)) requests))))
+(deftest dangerous-input-stored-and-returned-unchanged
+  ;; QA-05-01
+  (doseq [input ["'; DROP TABLE service_requests; --"
+                 "<script>alert(1)</script>"]]
+    (let [sub (post-json frontend "/api/commands/submit-service-request"
+                         {:title input :description "Security check"})]
+      (is (= 201 (:status sub)))
+      (is (= input (:title (parse sub))))
+      (let [listed (parse (post-json frontend "/api/queries/list-service-requests" {}))]
+        (is (some #(= input (:title %)) (:requests listed)))))))
 
-(deftest submit-via-proxy-returns-201
-  (is (= 201 (:status (post-via-proxy "/api/commands/submit-service-request"
-                                      {:title "Flickering light" :description "Light in corridor flickers"})))))
+(deftest error-response-is-json-without-stack-trace
+  ;; QA-05-02
+  (let [resp (post-json frontend "/api/commands/submit-service-request"
+                        {:title "" :description "D"})]
+    (is (= 422 (:status resp)))
+    (let [body (:body resp)]
+      (is (map? (json/parse-string body)))
+      (is (not (str/includes? body "Exception")))
+      (is (not (str/includes? body "\tat ")))
+      (is (not (str/includes? body "jdbc:")))
+      (is (not (str/includes? body "password"))))))
 
-(deftest list-via-proxy-returns-200
-  (is (= 200 (:status (post-via-proxy "/api/queries/list-service-requests" {})))))
+(deftest data-survives-postgres-and-backend-restart
+  ;; AC-05-01
+  (let [title (str "Durability " (random-uuid))]
+    (is (= 201 (:status (post-json frontend "/api/commands/submit-service-request"
+                                   {:title title :description "Persistence test"}))))
+    (shell "docker" "compose" "restart" "postgres" "backend")
+    (shell "docker" "compose" "up" "-d" "--wait")
+    (let [listed (parse (post-json frontend "/api/queries/list-service-requests" {}))]
+      (is (some #(= title (:title %)) (:requests listed))))))

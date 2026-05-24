@@ -130,9 +130,9 @@ No environment is the only real one.
 
 ### 8. Express intent in every API call
 
-All API operations are named after what they do, not what they act on.
+All business API operations are named after what they do, not what they act on.
 
-Commands and queries are both expressed as `POST` with a JSON body. The URL is the operation name. There are no `GET`, `PUT`, `PATCH`, or `DELETE` endpoints.
+Commands and queries are both expressed as `POST` with a JSON body. The URL is the operation name. There are no `GET`, `PUT`, `PATCH`, or `DELETE` business endpoints. Operational and documentation endpoints such as health checks and OpenAPI documents remain conventional `GET` endpoints.
 
 This is a deliberate departure from REST. It makes every operation explicitly nameable, consistently authenticated, uniformly auditable, and free from the semantic assumptions HTTP verbs carry. The intent of every call is visible in its URL.
 
@@ -181,7 +181,7 @@ The long-term target includes:
 
 * web frontends
 * application backend
-* intentful POST-only API design (commands and queries)
+* intentful business API design using named POST commands and queries
 * modular monolith architecture
 * bounded contexts
 * vertical slices
@@ -230,6 +230,8 @@ The only shared files at the repository root are:
 
 ```text
 README.md
+ROADMAP.md
+LICENSE
 .gitignore
 ```
 

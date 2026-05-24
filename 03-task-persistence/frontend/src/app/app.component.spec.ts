@@ -1,32 +1,37 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
+/// <reference types="jest" />
+import { fakeAsync, TestBed, tick } from '@angular/core/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
+import { By } from '@angular/platform-browser';
+import { ComponentFixture } from '@angular/core/testing';
 import { AppComponent, SEARCH_DEBOUNCE_MS } from './app.component';
 
-const QUERY_URL = '/api/queries/list-service-requests';
+const LIST_URL = '/api/queries/list-service-requests';
+const SUBMIT_URL = '/api/commands/submit-service-request';
 const SEARCH_URL = '/api/queries/search-service-requests';
-const COMMAND_URL = '/api/commands/submit-service-request';
 
-const stubRequest = {
-  request_id: 'a1b2c3d4-0000-0000-0000-000000000001',
-  submitted_by: 'demo-user',
-  title: 'Broken printer',
-  description: 'Printer on 3rd floor is jammed',
-  status: 'submitted',
-  created_at: '2026-01-01T00:00:00Z',
-  updated_at: '2026-01-01T00:00:00Z',
-};
+function makeRequest(overrides: Record<string, string> = {}) {
+  return {
+    request_id: 'r1',
+    title: 'Broken printer',
+    description: 'Paper jam on floor 2',
+    status: 'submitted',
+    submitted_by: 'alice',
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
 
 describe('AppComponent', () => {
   let fixture: ComponentFixture<AppComponent>;
+  let component: AppComponent;
   let httpMock: HttpTestingController;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [AppComponent],
       providers: [
-        provideZonelessChangeDetection(),
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: SEARCH_DEBOUNCE_MS, useValue: 0 },
@@ -34,246 +39,232 @@ describe('AppComponent', () => {
     }).compileComponents();
 
     fixture = TestBed.createComponent(AppComponent);
+    component = fixture.componentInstance;
     httpMock = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => httpMock.verify());
 
-  it('shows loading while initial list request is in flight', async () => {
+  function initWithList(requests: unknown[] = []): void {
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL);
-    expect(fixture.nativeElement.textContent).toContain('Loading');
-  });
-
-  it('shows empty state when list returns no requests', async () => {
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests });
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
-    expect(fixture.nativeElement.textContent).toContain('No requests yet');
-  });
+  }
 
-  it('shows submitted requests when list returns data', async () => {
+  function fillField(selector: string, value: string): void {
+    const el: HTMLInputElement | HTMLTextAreaElement = fixture.debugElement.query(
+      By.css(selector),
+    ).nativeElement;
+    el.value = value;
+    el.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [stubRequest] });
-    await fixture.whenStable();
-    expect(fixture.nativeElement.textContent).toContain('Broken printer');
-    expect(fixture.nativeElement.textContent).toContain('Printer on 3rd floor is jammed');
-    expect(fixture.nativeElement.textContent).toContain('submitted');
-  });
+  }
 
-  it('searches requests after the search query changes', async () => {
+  function text(): string {
+    return fixture.nativeElement.textContent as string;
+  }
+
+  // AC-03-03
+  it('shows loading while the list request is in flight', fakeAsync(() => {
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
+    expect(text()).toContain('Loading');
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
     fixture.detectChanges();
+  }));
 
-    fixture.componentInstance.setSearchQuery('printer');
-    await fixture.whenStable();
-    const req = httpMock.expectOne(SEARCH_URL);
-    expect(req.request.body).toEqual({ query: 'printer' });
-    req.flush({ requests: [stubRequest] });
-    await fixture.whenStable();
+  // AC-03-01
+  it('shows no requests yet when list returns empty', fakeAsync(() => {
+    initWithList([]);
+    expect(text()).toContain('No service requests yet.');
+  }));
+
+  // AC-03-02
+  it('shows title, description, and status for each request', fakeAsync(() => {
+    initWithList([makeRequest()]);
+    expect(text()).toContain('Broken printer');
+    expect(text()).toContain('Paper jam on floor 2');
+    expect(text()).toContain('submitted');
+  }));
+
+  // AC-03-04
+  it('shows error message when list request fails', fakeAsync(() => {
     fixture.detectChanges();
-
-    expect(fixture.nativeElement.textContent).toContain('Broken printer');
-  });
-
-  it('returns to the full list when the search query is cleared', async () => {
+    httpMock.expectOne((r) => r.url === LIST_URL).error(new ProgressEvent('error'));
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
+    expect(text()).toContain('Could not load requests');
+  }));
 
-    fixture.componentInstance.setSearchQuery('printer');
-    await fixture.whenStable();
-    httpMock.expectOne(SEARCH_URL).flush({ requests: [stubRequest] });
-    await fixture.whenStable();
+  // AC-02-07
+  it('does not call submit endpoint when title is blank', fakeAsync(() => {
+    initWithList();
+    fillField('#description', 'Some description');
+    component.submit();
+    httpMock.expectNone(SUBMIT_URL);
+  }));
 
-    fixture.componentInstance.setSearchQuery('   ');
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [stubRequest] });
-    await fixture.whenStable();
-    fixture.detectChanges();
+  // AC-02-08
+  it('does not call submit endpoint when description is blank', fakeAsync(() => {
+    initWithList();
+    fillField('#title', 'Some title');
+    component.submit();
+    httpMock.expectNone(SUBMIT_URL);
+  }));
 
-    expect(fixture.nativeElement.textContent).toContain('Broken printer');
-  });
-
-  it('shows search empty state when no matching requests are found', async () => {
-    fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
-
-    fixture.componentInstance.setSearchQuery('printer');
-    await fixture.whenStable();
-    httpMock.expectOne(SEARCH_URL).flush({ requests: [] });
-    await fixture.whenStable();
+  // AC-02-02
+  it('shows submitting indicator and disables button while request is in flight', fakeAsync(() => {
+    initWithList();
+    fillField('#title', 'A title');
+    fillField('#description', 'A description');
+    component.submit();
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('No matching requests');
-  });
+    const button: HTMLButtonElement = fixture.debugElement.query(
+      By.css('button[type="submit"]'),
+    ).nativeElement;
+    expect(button.disabled).toBe(true);
+    expect(text()).toContain('Submitting');
 
-  it('shows submitting state while command is in flight', async () => {
+    httpMock.expectOne(SUBMIT_URL).flush({});
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
-
-    fixture.componentInstance.submitForm.title().value.set('Fix door');
-    fixture.componentInstance.submitForm.description().value.set('Door 201 is stuck');
-    fixture.componentInstance.submit();
-    await fixture.whenStable();
-
-    httpMock.expectOne(COMMAND_URL);
-    expect(fixture.nativeElement.textContent).toContain('Submitting');
-  });
-
-  it('shows success message and reloads list after successful submit', async () => {
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
+    tick(3000);
+  }));
 
-    fixture.componentInstance.submitForm.title().value.set('Fix door');
-    fixture.componentInstance.submitForm.description().value.set('Door 201 is stuck');
-    fixture.componentInstance.submit();
-    await fixture.whenStable();
+  // AC-02-01
+  it('shows success message after a successful submit', fakeAsync(() => {
+    initWithList();
+    fillField('#title', 'A title');
+    fillField('#description', 'A description');
+    component.submit();
 
-    httpMock.expectOne(COMMAND_URL).flush({});
-    await fixture.whenStable();
-
-    httpMock.expectOne(QUERY_URL).flush({ requests: [stubRequest] });
-    await fixture.whenStable();
-
-    expect(fixture.nativeElement.textContent).toContain('Request submitted successfully');
-    expect(fixture.nativeElement.textContent).toContain('Broken printer');
-  });
-
-  it('clears active search and reloads full list after successful submit', async () => {
+    httpMock.expectOne(SUBMIT_URL).flush({});
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
-
-    fixture.componentInstance.setSearchQuery('printer');
-    await fixture.whenStable();
-    httpMock.expectOne(SEARCH_URL).flush({ requests: [] });
-    await fixture.whenStable();
-
-    fixture.componentInstance.submitForm.title().value.set('Fix door');
-    fixture.componentInstance.submitForm.description().value.set('Door 201 is stuck');
-    fixture.componentInstance.submit();
-    await fixture.whenStable();
-
-    httpMock.expectOne(COMMAND_URL).flush({});
-    await fixture.whenStable();
-
-    expect(fixture.componentInstance.searchQuery()).toBe('');
-    httpMock.expectOne(QUERY_URL).flush({ requests: [stubRequest] });
-    await fixture.whenStable();
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('Request submitted successfully');
-    expect(fixture.nativeElement.textContent).toContain('Broken printer');
-  });
+    expect(text()).toContain('Service request submitted successfully');
+    tick(3000);
+  }));
 
-  it('shows error message on submit failure', async () => {
+  // AC-02-03
+  it('removes success message after 3 seconds', fakeAsync(() => {
+    initWithList();
+    fillField('#title', 'A title');
+    fillField('#description', 'A description');
+    component.submit();
+
+    httpMock.expectOne(SUBMIT_URL).flush({});
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
-
-    fixture.componentInstance.submitForm.title().value.set('Fix door');
-    fixture.componentInstance.submitForm.description().value.set('Door 201 is stuck');
-    fixture.componentInstance.submit();
-    await fixture.whenStable();
-
-    httpMock.expectOne(COMMAND_URL).error(new ProgressEvent('error'));
-    await fixture.whenStable();
-
-    expect(fixture.nativeElement.textContent).toContain('Submission failed');
-  });
-
-  it('shows error state when list request fails', async () => {
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).error(new ProgressEvent('error'));
-    await fixture.whenStable();
-    expect(fixture.nativeElement.textContent).toContain('Could not load requests');
-  });
 
-  it('does not submit when title is blank', async () => {
+    expect(text()).toContain('Service request submitted successfully');
+    tick(3000);
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
+    expect(text()).not.toContain('Service request submitted successfully');
+  }));
 
-    fixture.componentInstance.submitForm.description().value.set('Door 201 is stuck');
-    fixture.componentInstance.submit();
-    await fixture.whenStable();
-
-    httpMock.expectNone(COMMAND_URL);
-  });
-
-  it('does not submit when description is blank', async () => {
+  // AC-02-04
+  it('shows submission failed when the submit request errors', fakeAsync(() => {
+    initWithList();
+    fillField('#title', 'A title');
+    fillField('#description', 'A description');
+    component.submit();
     fixture.detectChanges();
-    await fixture.whenStable();
-    httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-    await fixture.whenStable();
 
-    fixture.componentInstance.submitForm.title().value.set('Fix door');
-    fixture.componentInstance.submit();
-    await fixture.whenStable();
+    httpMock.expectOne(SUBMIT_URL).error(new ProgressEvent('error'));
+    fixture.detectChanges();
 
-    httpMock.expectNone(COMMAND_URL);
-  });
+    expect(text()).toContain('Submission failed');
+  }));
 
-  it('clears success message after 3 seconds', async () => {
-    // jest.useFakeTimers fakes ALL setTimeout calls, including Angular's internal
-    // 0ms zoneless scheduler, which deadlocks fixture.whenStable(). Instead, capture
-    // only the 3-second auto-clear callback via a targeted spy so Angular's scheduler
-    // continues to use real setTimeout.
-    let successClearCallback: (() => void) | undefined;
-    const origSetTimeout = window.setTimeout.bind(window);
-    jest.spyOn(window, 'setTimeout').mockImplementation((handler, timeout, ...args: unknown[]) => {
-      if (timeout === 3000 && typeof handler === 'function') {
-        successClearCallback = () => handler(...args);
-        return 0;
-      }
-      return origSetTimeout(handler, timeout, ...args);
-    });
-    try {
-      fixture.detectChanges();
-      await fixture.whenStable();
-      httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-      await fixture.whenStable();
+  // AC-02-05
+  it('calls list endpoint after successful submit and shows new request', fakeAsync(() => {
+    initWithList();
+    fillField('#title', 'New request');
+    fillField('#description', 'Details here');
+    component.submit();
 
-      fixture.componentInstance.submitForm.title().value.set('Fix door');
-      fixture.componentInstance.submitForm.description().value.set('Door 201 is stuck');
-      fixture.componentInstance.submit();
-      await fixture.whenStable();
+    httpMock.expectOne(SUBMIT_URL).flush({});
+    fixture.detectChanges();
+    httpMock
+      .expectOne((r) => r.url === LIST_URL)
+      .flush({ requests: [makeRequest({ title: 'New request' })] });
+    fixture.detectChanges();
 
-      httpMock.expectOne(COMMAND_URL).flush({});
-      await fixture.whenStable();
+    expect(text()).toContain('New request');
+    tick(3000);
+  }));
 
-      httpMock.expectOne(QUERY_URL).flush({ requests: [] });
-      await fixture.whenStable();
-      fixture.detectChanges();
+  // AC-02-06
+  it('clears search and calls list endpoint after submit when search is active', fakeAsync(() => {
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
 
-      expect(fixture.nativeElement.textContent).toContain('Request submitted successfully');
-      expect(fixture.componentInstance.submitState()).toBe('success');
+    component.setSearchQuery('printer');
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === SEARCH_URL).flush({ requests: [] });
 
-      successClearCallback!();
+    fillField('#title', 'A title');
+    fillField('#description', 'A description');
+    component.submit();
 
-      expect(fixture.componentInstance.submitState()).toBe('idle');
-      fixture.detectChanges();
-      expect(fixture.nativeElement.textContent).not.toContain('Request submitted successfully');
-    } finally {
-      jest.restoreAllMocks();
-    }
-  });
+    httpMock.expectOne(SUBMIT_URL).flush({});
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
+    fixture.detectChanges();
+
+    expect(component.searchQuery()).toBe('');
+    tick(3000);
+  }));
+
+  // AC-08-02
+  it('calls list endpoint when search field is blank', fakeAsync(() => {
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
+    fixture.detectChanges();
+    // Only the list URL is expected — not the search URL
+  }));
+
+  // AC-08-03
+  it('calls list endpoint when search is cleared to blank', fakeAsync(() => {
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
+
+    component.setSearchQuery('printer');
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === SEARCH_URL).flush({ requests: [] });
+
+    component.setSearchQuery('');
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
+    fixture.detectChanges();
+  }));
+
+  // AC-08-01
+  it('shows only matching requests when search term is entered', fakeAsync(() => {
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
+
+    component.setSearchQuery('printer');
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === SEARCH_URL).flush({ requests: [makeRequest()] });
+    fixture.detectChanges();
+
+    expect(text()).toContain('Broken printer');
+  }));
+
+  // AC-08-04
+  it('shows no matching requests when search returns empty', fakeAsync(() => {
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === LIST_URL).flush({ requests: [] });
+
+    component.setSearchQuery('nomatches');
+    fixture.detectChanges();
+    httpMock.expectOne((r) => r.url === SEARCH_URL).flush({ requests: [] });
+    fixture.detectChanges();
+
+    expect(text()).toContain('No matching service requests.');
+  }));
 });

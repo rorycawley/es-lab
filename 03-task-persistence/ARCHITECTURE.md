@@ -1,213 +1,141 @@
 # Architecture: 03-task-persistence
 
-## Runtime
+## C4 Level 2 — Containers
 
 ```
-                    ┌──────────────────────── Docker Compose ──────────────────────────────────┐
-                    │                                                                            │
-  localhost:4200 ───┼──▶  frontend  (nginx:alpine)                         :80                 │
-                    │     │                                                                      │
-                    │     │  /api/*        proxy_pass → preserves /api/ prefix ──────────────────┼──▶  backend  (eclipse-temurin:21-jre)  :8080
-                    │     │  /*.js,*.css   static, Cache-Control: immutable                     │     │
-                    │     │  /*            try_files $uri /index.html                           │     │  POST /api/commands/submit-service-request
-                    │     │                                                                      │     │  POST /api/queries/list-service-requests
-                    │     │                                                                      │     │  POST /api/queries/search-service-requests
-                    │     └── depends_on: backend condition: service_healthy                    │     │  GET  /health
-                    │                                                                            │     │  GET  /openapi.json
-  localhost:8080 ───┼────────────────────────────────────────────────────────────────────────────┼──▶  │  GET  /swagger-ui
-  (direct)          │                                                                            │     │
-                    │                                                                            │     └── depends_on: postgres condition: service_healthy
-                    │                                                                            │           │
-                    │                                                                            │           ▼
-                    │                                                                            │     postgres  (postgres:18.4-alpine)  :5432
-  localhost:5432 ───┼────────────────────────────────────────────────────────────────────────────┼──▶  tables: service_requests, audit_events
-  (direct)          │                                                                            │     index: service_requests_search_vector_idx
-                    │                                                                            │     named volume: postgres-data
-                    │                                                                            │     healthcheck: pg_isready -U taskuser -d taskdb
-                    └────────────────────────────────────────────────────────────────────────────┘
+ ┌──────────────────────┐     ┌────────────────────────────────────────────────────────────────────────────────────────────┐
+ │                      │     │                                 Task Persistence [System]                                   │
+ │ <<Person>>           │     │                                                                                             │
+ │ User                 │     │  ┌───────────────────────────────────┐         ┌───────────────────────────────────┐        │
+ │                      │     │  │ <<Container>>                     │         │ <<Container>>                     │        │
+ │ Submits and views    │HTTP │  │ Frontend                          │ HTTP    │ Backend                           │        │
+ │ service requests     │────►│  │ [nginx:alpine]  :4200             │────────►│ [eclipse-temurin:21-jre]  :8080   │        │
+ │ via a web browser    │◄────│  │                                   │◄────────│                                   │        │
+ │                      │JSON │  │ Serves the Angular 21 SPA.        │ JSON    │ Clojure, Ring + Reitit.           │        │
+ └──────────────────────┘     │  │ Proxies POST /api/* to the        │         │ Handles POST commands and         │        │
+                               │  │ backend without rewriting          │         │ queries. Connects to a fully      │        │
+                               │  │ the path.                         │         │ migrated schema.                  │        │
+                               │  └───────────────────────────────────┘         └──────────────────┬────────────────┘        │
+                               │                                                                     │ JDBC :5432              │
+                               │                                                  ┌──────────────────┴────────────────┐        │
+                               │                                                  │ <<Container>>                     │        │
+                               │                                                  │ Migrate (one-shot init)           │        │
+                               │                                                  │ [flyway/flyway:12-alpine]         │        │
+                               │                                                  │                                   │        │
+                               │                                                  │ Applies SQL migrations and exits. │        │
+                               │                                                  │ Runs before backend starts.       │        │
+                               │                                                  └──────────────────┬────────────────┘        │
+                               │                                                                     │ JDBC :5432              │
+                               │                                                                     ▼                        │
+                               │                                                  ┌───────────────────────────────────┐        │
+                               │                                                  │ <<Container>>                     │        │
+                               │                                                  │ Database                          │        │
+                               │                                                  │ [postgres:18.4-alpine]  :5432     │        │
+                               │                                                  │                                   │        │
+                               │                                                  │ Stores service_requests and       │        │
+                               │                                                  │ audit_events. GIN index for       │        │
+                               │                                                  │ weighted full-text search.        │        │
+                               │                                                  └───────────────────────────────────┘        │
+                               └────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-On startup the backend runs Flyway before binding to port 8080. Migrations are SQL files in `resources/database/migrations/`; only outstanding ones are applied and recorded in Flyway's `schema_version` metadata table. Postgres stores data in the `postgres-data` Docker volume while the stack is running. `bb down`, `bb reset`, and Docker-backed test tasks remove that volume, so each run starts from a clean local database. Search uses a generated weighted `tsvector` column and a GIN index in Postgres.
+## Containers
 
-The nginx proxy preserves the full path when forwarding to the backend. `proxy_pass http://backend:8080` (no trailing slash) means no URI rewriting — a browser `POST /api/commands/submit-service-request` reaches the backend at exactly `POST /api/commands/submit-service-request`. Adding a trailing slash (`http://backend:8080/`) would strip the `/api/` prefix, causing 404s.
+| Container | Technology | Port | Responsibility |
+|---|---|---|---|
+| Frontend | nginx:alpine | 4200 | Serves the Angular 21 SPA; proxies `/api/*` to the backend without rewriting the path |
+| Backend | Clojure, eclipse-temurin:21-jre | 8080 | Ring + Reitit HTTP server; handles POST commands and queries |
+| Migrate | flyway/flyway:12-alpine | — | Applies outstanding SQL migrations and exits; runs before the backend starts |
+| Database | postgres:18.4-alpine | 5432 | Stores service requests and audit events; GIN index for weighted full-text search |
+
+Docker Compose starts containers in dependency order: postgres → migrate → backend → frontend. `migrate` mounts the SQL files from `backend/resources/database/migrations/`, runs all outstanding migrations against postgres, and exits. The backend starts only after `migrate` completes successfully, so it always connects to a fully migrated schema. Data lives in a named volume (`postgres-data`) so submitted requests survive container restarts. `bb down` and both Docker-backed test tasks remove that volume to prevent data leaking across runs.
 
 ---
 
-## Command and query flow
+## API
 
-```
-Browser
-  │
-  │  POST /api/commands/submit-service-request  {"title":"…","description":"…"}
-  ▼
-nginx (frontend container)
-  │  proxy_pass http://backend:8080
-  ▼
-submit-service-request-handler (commands.clj)
-  │  1. read X-User-Id header (default "demo-user")
-  │  2. validate: title and description must be non-blank strings → 422 if not
-  │  3. open JDBC transaction via transact!
-  │     3a. call ServiceRequestPort/save!  → saved record
-  │     3b. call AuditPort/record!         → nil   (rolls back save if this fails)
-  │     3c. commit
-  │  4. return {:status 200 :body saved}
-  │
-  ├─▶  PostgresServiceRequestPort (db/postgres.clj)
-  │      INSERT INTO service_requests ... RETURNING *
-  │      → snake_case map; UUIDs and timestamps stringified
-  │
-  └─▶  PostgresAuditPort (db/postgres.clj)
-         INSERT INTO audit_events ...
+All business operations use `POST`. `GET` is reserved for operational endpoints.
 
-Browser
-  │
-  │  POST /api/queries/list-service-requests  {}
-  ▼
-list-service-requests-handler (queries.clj)
-  │  call ServiceRequestPort/list-all → [{…}, …]
-  │  return {:status 200 :body {:requests […]}}
-  │
-  └─▶  PostgresServiceRequestPort (db/postgres.clj)
-         SELECT request_id, submitted_by, title, description, status, created_at, updated_at
-         FROM service_requests
-         ORDER BY created_at DESC
-         → vector of snake_case maps
+| Method | Path | Operation |
+|---|---|---|
+| POST | `/api/commands/submit-service-request` | Validate and persist a new service request; write an audit event in the same transaction |
+| POST | `/api/queries/list-service-requests` | Return all service requests, most recent first |
+| POST | `/api/queries/search-service-requests` | Return ranked full-text search results |
+| GET | `/health` | Health check |
+| GET | `/openapi.json` | OpenAPI 3.0 spec |
+| GET | `/swagger-ui` | Interactive API browser |
 
-Browser
-  │
-  │  POST /api/queries/search-service-requests  {"query":"printer"}
-  ▼
-search-service-requests-handler (queries.clj)
-  │  1. validate: query must be a non-blank string → 422 if not
-  │  2. trim query
-  │  3. call ServiceRequestPort/search → [{…}, …]
-  │  4. return {:status 200 :body {:requests […]}}
-  │
-  └─▶  PostgresServiceRequestPort (db/postgres.clj)
-         WHERE search_vector @@ plainto_tsquery('english', ?)
-         ORDER BY ts_rank(...) DESC, created_at DESC
-         → vector of snake_case maps with rank
-```
+The nginx proxy uses `proxy_pass http://backend:8080` with no trailing slash, so the full path — including the `/api/` prefix — is forwarded to the backend unchanged.
+
+---
+
+## Command flow
+
+`POST /api/commands/submit-service-request` with `{"title":"…","description":"…"}`:
+
+1. Read `X-User-Id` header (default `"demo-user"`)
+2. Validate: `title` and `description` must be non-blank strings → `422` if not
+3. Open a JDBC transaction via `transact!`
+   - `ServiceRequestPort/save!` — inserts a row and returns the saved record
+   - `AuditPort/record!` — inserts an audit row in the same transaction; if this fails, `save!` rolls back
+4. Return `201` with the saved record
+
+`transact!` binds both port instances to the same JDBC connection, making `save!` and `record!` atomic.
+
+---
+
+## Query flow
+
+`POST /api/queries/list-service-requests` with `{}`:
+
+Returns all rows from `service_requests` ordered by `created_at DESC, request_id DESC` (UUIDv7 tie-breaker for same-millisecond inserts). Response body: `{"requests":[…]}`.
+
+`POST /api/queries/search-service-requests` with `{"query":"…"}`:
+
+1. Validate: `query` must be a non-blank string → `422` if not
+2. Trim the query
+3. Run `plainto_tsquery('english', ?)` against the generated `search_vector` column
+4. Rank by `ts_rank` descending, then `created_at` descending
+5. Strip `rank` and `search_vector` from each result before returning
+
+`search_vector` is a Postgres generated column: `title` is weighted `A`, `description` is weighted `B`. A GIN index makes the query fast. Ranking and tokenisation stay in Postgres — no text processing in Clojure.
 
 ---
 
 ## Ports and adapters
 
-```
-domain layer                         adapter layer
-────────────────────────────────     ───────────────────────────────────
-service_requests/port.clj            db/postgres.clj
-  (defprotocol ServiceRequestPort      PostgresServiceRequestPort [ds]
-    (save!    [port request])            → next.jdbc/execute-one! INSERT
-    (list-all [port])                    → next.jdbc/execute! SELECT
-    (search   [port query]))             → next.jdbc/execute! full-text search SELECT
+The command and query handlers import only protocol namespaces. They never see `next.jdbc` or SQL.
 
-audit/port.clj                         PostgresAuditPort [ds]
-  (defprotocol AuditPort               → next.jdbc/execute-one! INSERT
+```
+domain                                   adapter
+──────────────────────────────────────   ──────────────────────────────────────────────
+service_requests/port.clj               db/postgres.clj
+  (defprotocol ServiceRequestPort         PostgresServiceRequestPort [ds]
+    (save!    [port request])               INSERT INTO service_requests … RETURNING *
+    (list-all [port])                       SELECT … ORDER BY created_at DESC, request_id DESC
+    (search   [port query]))                WHERE search_vector @@ plainto_tsquery …
+
+audit/port.clj                           PostgresAuditPort [ds]
+  (defprotocol AuditPort                   INSERT INTO audit_events …
     (record! [port event]))
 
-                                     test_support.clj
-                                       InMemoryServiceRequestPort [!store]
-                                         → atom; returns same snake_case shape
-                                       InMemoryAuditPort [!store]
-                                         → atom; returns nil
+                                         test_support.clj
+                                           InMemoryServiceRequestPort [!store]  ← atom
+                                           InMemoryAuditPort [!store]           ← atom
 ```
 
-The command and query handlers import only the protocol namespaces — they never see `next.jdbc` or SQL. `make-router` in `routes.clj` accepts a `ctx` map `{:service-request-port … :audit-port … :transact! …}` and closes over it when building handlers. This is why `make-router` is a function, not a `def`. The `:transact!` key is a function `(fn [f] ...)` that opens a JDBC transaction and calls `f` with transactional port instances — so `save!` and `record!` are atomic. In tests, `:transact!` is a no-op wrapper that passes the in-memory ports through directly.
+`make-router` in `routes.clj` takes a `ctx` map `{:service-request-port … :audit-port … :transact! …}` and closes over it. In production, `:transact!` opens a JDBC transaction and supplies transactional port instances. In tests, `:transact!` is a pass-through that injects in-memory ports directly — no Docker needed for domain or HTTP integration tests.
 
-`audit_events.subject_id` has a foreign key to `service_requests.request_id`. That makes the audit log request-scoped and prevents orphan audit rows if code ever writes audit data outside the command handler path. The tradeoff is intentional: future request deletion or archival features must handle audit rows explicitly instead of deleting service requests in isolation.
-
-The `service_requests.search_vector` column is generated by Postgres from `title` and `description`, with title weighted higher than description. The GIN index supports the `search` query without pushing tokenisation or ranking logic into Clojure.
+`audit_events.subject_id` has a foreign key to `service_requests.request_id`, making the audit log request-scoped and preventing orphan audit rows.
 
 ---
 
-## Image builds
+## Frontend reactive model
 
-```
-frontend                                    backend
-────────────────────────────────────────    ────────────────────────────────────────
-Stage 1: node:22-alpine                     Stage 1: clojure:temurin-21-tools-deps-alpine
-  COPY package.json package-lock.json         COPY deps.edn build.clj
-  RUN npm ci                    ← cached      RUN clojure -P              ← cached
-  COPY . .       (src after deps)             COPY src resources
-  RUN ng build --configuration=production     RUN clojure -T:build uber
-  → dist/frontend/browser/                   → target/app.jar
+The component is zoneless (no `zone.js`). All state flows through signals; HTTP is driven reactively.
 
-Stage 2: nginx:alpine                       Stage 2: eclipse-temurin:21-jre-alpine
-  COPY dist/frontend/browser/ /usr/share/     RUN addgroup/adduser app    ← non-root
-       nginx/html/                            COPY target/app.jar app.jar
-  COPY nginx/default.conf                     ENTRYPOINT java -jar app.jar
-```
-
----
-
-## Angular internals
-
-```
-main.ts
-  bootstrapApplication(AppComponent, {
-    providers: [
-      provideZonelessChangeDetection(),   ← no zone.js; re-renders on signal change only
-      provideHttpClient(),
-    ]
-  })
-
-AppComponent
-  formModel:     signal({ title, description })   ← source of truth for form values
-  submitForm:    form(formModel)                  ← Signal Forms FieldTree; [formField] binds to <input>
-
-  loadTrigger:   signal(0)                        ← incremented after every successful submit
-  searchQuery:   signal("")                       ← source of truth for active search input
-  requests:      toSignal(
-                   combineLatest([
-                     toObservable(loadTrigger),
-                     toObservable(searchQuery).pipe(
-                       map(trim),
-                       distinctUntilChanged(),
-                       debounce(300ms when nonblank),
-                     )
-                   ]).pipe(
-                     switchMap(([, query]) → {
-                       request$ =
-                         query
-                           ? http.post('/api/queries/search-service-requests', {query})
-                           : http.post('/api/queries/list-service-requests', {})
-
-                       return request$.pipe(
-                         map(r → r.requests),
-                         catchError(() → []),
-                         startWith(null),          ← null = loading state
-                       )
-                     })
-                   ), { initialValue: null }
-                 )
-
-  submitState:   signal<'idle'|'submitting'|'success'|'error'>('idle')
-
-  submit():
-    1. read formModel()
-    2. guard: skip if title or description is blank
-    3. set submitState → 'submitting'
-    4. POST /api/commands/submit-service-request
-       next: submitState → 'success', clear formModel, loadTrigger++
-       error: submitState → 'error'
-```
-
----
-
-## Test layers
-
-```
-Layer              Tool                       Docker   What it proves
-─────────────────  ─────────────────────────  ───────  ─────────────────────────────────────────────────
-backend unit       kaocha (clojure -M:test)   no       command validation, query response shape
-backend integ.     kaocha + live Jetty         no       HTTP routes, JSON, middleware, OpenAPI, Swagger UI
-backend adapter    kaocha + Testcontainers     yes      Flyway migrations and Postgres adapter behaviour
-frontend unit      Jest + jsdom                no       all UI states, submit flow, error handling
-HTTP acceptance    Babashka http-client        yes      nginx proxy, full roundtrip, Postgres persistence and restart durability
-E2E browser        Playwright (Chromium)       yes      form submit + list render in a real browser
-```
-
-`bb test` runs the four top-level test tasks sequentially: backend, frontend, acceptance, and e2e. The backend task covers three layers internally: unit, HTTP integration, and Postgres adapter tests. `test:acceptance` manages Docker inside a `use-fixtures :once` fixture; `test:e2e` manages Docker in `bb.edn`. Both Docker-backed stack tests remove the project Postgres volume before and after running, so persisted test data cannot affect later runs. Docker starts twice when running `bb test` — intentional so every task is independently runnable.
-
-For local backend development, `bb db:up` starts only Postgres. Domain and HTTP integration tests use in-memory ports and need no Docker; Postgres adapter tests use Testcontainers and require Docker.
+- `loadTrigger` (integer signal) increments after each successful submit, forcing a reload even if the same values are submitted twice in a row
+- `searchQuery` (string signal) drives debounced search; when blank, the full list query runs instead
+- `requests` derives from `combineLatest([loadTrigger, searchQuery])` via `switchMap` — any change cancels the in-flight request and starts a new one
+- On submit success: if a search is active, `searchQuery` is cleared (which triggers a full list reload via `combineLatest`); otherwise `loadTrigger` increments
+- `submitState` resets from `'success'` to `'idle'` after 3 seconds, hiding the success message

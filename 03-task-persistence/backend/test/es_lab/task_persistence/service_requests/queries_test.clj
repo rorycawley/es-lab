@@ -1,69 +1,61 @@
 (ns es-lab.task-persistence.service-requests.queries-test
   (:require [clojure.test :refer [deftest is]]
-            [es-lab.task-persistence.service-requests.port :as sr]
+            [es-lab.task-persistence.service-requests.commands :as commands]
             [es-lab.task-persistence.service-requests.queries :as queries]
-            [spy.protocol :as protocol]))
+            [es-lab.task-persistence.test-support :as ts]))
 
-(defn- make-ctx [requests]
-  {:service-request-port (protocol/mock sr/ServiceRequestPort
-                                        (save! [_ _] nil)
-                                        (list-all [_] requests)
-                                        (search [_ query]
-                                                (filterv #(= query (:title %)) requests)))})
+(defn- submit [ctx title description]
+  (let [handler (commands/submit-service-request-handler ctx)]
+    (handler {:headers {} :body-params {:title title :description description}})))
 
-(defn- list-requests [ctx]
-  ((queries/list-service-requests-handler ctx) {}))
+(deftest list-returns-200-with-requests-array
+  ;; AC-04-06
+  (let [ctx     (ts/make-ports)
+        handler (queries/list-service-requests-handler ctx)
+        resp    (handler {})]
+    (is (= 200 (:status resp)))
+    (is (vector? (get-in resp [:body :requests])))))
 
-(defn- search-requests [ctx body]
-  ((queries/search-service-requests-handler ctx) {:body-params body}))
-
-(def ^:private stub-request
-  {:request_id   "01955f3d-0000-7000-8000-000000000001"
-   :submitted_by "demo-user"
-   :title        "Fix door"
-   :description  "Room 101"
-   :status       "submitted"
-   :created_at   "2026-01-01T00:00:00Z"
-   :updated_at   "2026-01-01T00:00:00Z"})
-
-(deftest returns-200-with-empty-list
-  (let [resp (list-requests (make-ctx []))]
+(deftest search-returns-empty-array-when-no-matches
+  ;; AC-08-07
+  (let [ctx     (ts/make-ports)
+        handler (queries/search-service-requests-handler ctx)
+        resp    (handler {:body-params {:query "xyzzy"}})]
     (is (= 200 (:status resp)))
     (is (= [] (get-in resp [:body :requests])))))
 
-(deftest returns-submitted-requests
-  (let [resp (list-requests (make-ctx [stub-request]))]
-    (is (= 200 (:status resp)))
-    (is (= 1 (count (get-in resp [:body :requests]))))
-    (is (= "Fix door" (get-in resp [:body :requests 0 :title])))))
-
-(deftest returns-all-requests
-  (let [r1   (assoc stub-request :request_id "01955f3d-0000-7000-8000-000000000001" :title "First")
-        r2   (assoc stub-request :request_id "01955f3d-0000-7000-8000-000000000002" :title "Second")
-        resp (list-requests (make-ctx [r1 r2]))]
-    (is (= 2 (count (get-in resp [:body :requests]))))))
-
-(deftest search-returns-matching-requests
-  (let [resp (search-requests (make-ctx [stub-request]) {:query "Fix door"})]
-    (is (= 200 (:status resp)))
-    (is (= "Fix door" (get-in resp [:body :requests 0 :title])))))
-
-(deftest search-trims-query-before-calling-port
-  (let [resp (search-requests (make-ctx [stub-request]) {:query "  Fix door  "})]
-    (is (= 200 (:status resp)))
-    (is (= 1 (count (get-in resp [:body :requests]))))))
-
-(deftest search-rejects-missing-query
-  (let [resp (search-requests (make-ctx []) {})]
+(deftest search-rejects-missing-query-field
+  ;; AC-08-08
+  (let [ctx     (ts/make-ports)
+        handler (queries/search-service-requests-handler ctx)
+        resp    (handler {:body-params {}})]
     (is (= 422 (:status resp)))
-    (is (= "query must be a string" (get-in resp [:body :error])))))
-
-(deftest search-rejects-non-string-query
-  (let [resp (search-requests (make-ctx []) {:query 123})]
-    (is (= 422 (:status resp)))
-    (is (= "query must be a string" (get-in resp [:body :error])))))
+    (is (contains? (:body resp) :error))))
 
 (deftest search-rejects-blank-query
-  (let [resp (search-requests (make-ctx []) {:query "  "})]
-    (is (= 422 (:status resp)))
-    (is (= "query cannot be blank" (get-in resp [:body :error])))))
+  ;; AC-08-09
+  (let [ctx     (ts/make-ports)
+        handler (queries/search-service-requests-handler ctx)]
+    (doseq [q ["" "   "]]
+      (let [resp (handler {:body-params {:query q}})]
+        (is (= 422 (:status resp)))
+        (is (contains? (:body resp) :error))))))
+
+(deftest search-rejects-non-string-query
+  ;; AC-08-09
+  (let [ctx     (ts/make-ports)
+        handler (queries/search-service-requests-handler ctx)]
+    (doseq [q [42 nil true []]]
+      (let [resp (handler {:body-params {:query q}})]
+        (is (= 422 (:status resp)))
+        (is (contains? (:body resp) :error))))))
+
+(deftest search-trims-whitespace-from-query
+  ;; AC-08-10
+  (let [ctx            (ts/make-ports)
+        search-handler (queries/search-service-requests-handler ctx)]
+    (submit ctx "Broken printer" "Paper jam on floor 2")
+    (let [trimmed (search-handler {:body-params {:query "printer"}})
+          padded  (search-handler {:body-params {:query "  printer  "}})]
+      (is (= (get-in trimmed [:body :requests])
+             (get-in padded  [:body :requests]))))))

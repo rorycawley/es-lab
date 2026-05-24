@@ -42,7 +42,7 @@
       </form>
       <div aria-live="polite">
         @if (submitState() === 'success') {
-          <p class="text-green-700 text-sm font-medium">Request submitted successfully.</p>
+          <p class="text-green-700 text-sm font-medium">Service request submitted successfully.</p>
         } @else if (submitState() === 'error') {
           <p class="text-red-700 text-sm font-medium">Submission failed. Please try again.</p>
         }
@@ -72,9 +72,9 @@
           <p class="text-gray-500">Loading&hellip;</p>
         } @else if (requests()!.length === 0) {
           @if (isSearching()) {
-            <p class="text-gray-500">No matching requests.</p>
+            <p class="text-gray-500">No matching service requests.</p>
           } @else {
-            <p class="text-gray-500">No requests yet.</p>
+            <p class="text-gray-500">No service requests yet.</p>
           }
         } @else {
           <ul class="divide-y divide-gray-100">

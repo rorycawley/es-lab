@@ -2,108 +2,220 @@
 
 ## How to read this document
 
-**User stories** capture intent: who wants something, what they want, and why. They are written from the outside — from the perspective of a user or developer interacting with the system — and deliberately say nothing about implementation. A story answers the question "what problem are we solving and for whom?"
+**User stories** capture intent: who wants something, what they want, and why. They say nothing about implementation.
 
-**Acceptance criteria** define done. Each criterion is a testable condition: given some starting state, when something happens, then a specific observable outcome must be true. They set the boundary of the story — anything not described here is out of scope for the story. Acceptance criteria are precise enough to verify but do not prescribe how to implement. The same criterion can be satisfied by many different technical approaches.
+**Acceptance criteria** define done. Each criterion follows the form: given a starting state, when something happens, then a specific observable outcome is true. A criterion is testable when its outcome can be verified by an automated test without knowledge of the implementation.
 
-**Implementation** is how the code satisfies the acceptance criteria. Implementation decisions — which libraries, data structures, SQL queries, HTTP status codes, component state machines — live in [ARCHITECTURE.md](ARCHITECTURE.md), not here. A decision belongs in the spec only if it is observable from outside the system and therefore testable; otherwise it belongs in the architecture document.
+**Quality attributes** are non-functional requirements that cut across all stories. They generate their own criteria and tests.
 
-The consequence: if a behaviour is not described in an acceptance criterion, there is no requirement for it to exist, and changing or removing it is not a regression. Conversely, if a behaviour is described here, it must be verified by an automated test that references the criterion.
+Every automated test must reference at least one AC or QA criterion by ID. A test with no such reference should be deleted.
 
-## Story 1 — Zero-dependency setup
-
-> As a developer, I want to run the full stack locally without installing any language runtimes or build tools on my machine, so that I can get it running regardless of my existing environment.
-
-**Acceptance criteria:**
-- Given a machine with only Docker installed, when I start the stack, then the frontend, backend, and Postgres database all run successfully without any additional installation steps
-
-**Verified by:** `docker compose up --wait` — the stack starts cleanly with only Docker installed. `bb test:acceptance` also exercises this as a side-effect (the stack-fixture runs `docker compose up` before every acceptance test run), but running the automated verifier requires the project toolchain (Babashka, mise).
+**Definitions used throughout:**
+- *service request* — a user-submitted record representing an issue or need (e.g. "printer is broken"). It has a title, description, status, submitter identity, and timestamps. Stored in the `service_requests` table and identified by a `request_id`.
+- *blank* — an empty string or a string containing only whitespace characters
+- *non-blank* — a string containing at least one non-whitespace character
+- *full-text match* — case-insensitive, word-boundary tokenisation as implemented by Postgres `plainto_tsquery`
 
 ---
 
-## Story 2 — Submit a service request
+## US-01 — Zero-dependency setup
 
-> As a user, I want to submit a service request through the browser, so that my issue is recorded and persisted.
+> As a developer, I want to run the full stack locally with only Docker, so that I can run it regardless of what is installed on my machine.
 
-**Acceptance criteria:**
-- Given the stack is running, when I fill in the Title and Description fields and click Submit, then I see "Request submitted successfully"
-- Given I have just seen "Request submitted successfully", when a few seconds pass without further interaction, then the success message disappears
-- Given the stack is running, when I submit a request, then the request appears in the Submitted Requests list immediately after
-- Given the stack is running, when I submit a request without a title, then submission does not proceed
-- Given the stack is running, when I submit a request without a description, then submission does not proceed
+**AC-01-01** — Given a machine with only Docker installed, when `docker compose up --wait` runs, then the command exits with code 0; postgres, backend, and frontend are healthy; and migrate has completed successfully.
 
-**Verified by:** `bb test:frontend` — Jest unit tests with mocked HTTP cover all UI states; `bb test:e2e` — Playwright submits a real request in a browser and asserts it appears in the list
+**AC-01-02** — Given the stack is running, when `GET http://localhost:4200/` is called, then the response status is 200, the `Content-Type` header begins with `text/html`, and the response body contains the string `<app-root`.
 
 ---
 
-## Story 3 — View submitted requests
+## US-02 — Submit a service request
 
-> As a user, I want to see all submitted requests when I open the application, so that I know what is already in the system.
+> As a user, I want to submit a service request through the browser, so that my issue is recorded.
 
-**Acceptance criteria:**
-- Given the stack is running and no requests have been submitted, when I open the application, then I see "No requests yet."
-- Given the stack is running and requests have been submitted, when I open the application, then I see the list of requests with their titles, descriptions, and statuses
-- Given multiple requests have been submitted, when I view the list, then the most recently submitted request appears first
-- Given the application is loading the list, then I see a loading indicator
+**AC-02-01** — Given the form is idle, when a non-blank Title and a non-blank Description are entered and Submit is clicked, then the text "Service request submitted successfully" is visible.
 
-**Verified by:** `bb test:frontend` — Jest unit tests cover the loading, empty, and populated list states
+**AC-02-02** — Given the form has been submitted and the command request is in flight, when the UI is inspected before a response is received, then a submitting indicator is visible and the Submit button is not clickable.
 
----
+**AC-02-03** — Given "Service request submitted successfully" is visible, when 3 seconds elapse, then the text is no longer present in the DOM.
 
-## Story 4 — Data durability
+**AC-02-04** — Given the form has been submitted, when the command request fails with a network or server error, then the text "Submission failed" is visible.
 
-> As a developer, I want submitted requests to be stored in Postgres and retrievable after the fact, so that the persistence layer is proven to work end-to-end.
+**AC-02-05** — Given a submit succeeds and no search is active, when the subsequent list request completes, then the newly submitted service request's title is present in the list.
 
-**Acceptance criteria:**
-- Given the stack is running, when I submit a request via the command endpoint, then the response status is 201 and the body includes a `request_id`
-- Given the stack is running, when I submit a request and then call the list query endpoint, then the submitted request appears in the response
-- Given a request has been submitted, when Postgres and the backend are restarted, then the submitted request is still returned by the list query endpoint
-- Given the stack is running, when I call the list query endpoint, then the response body has a `requests` key containing an array
-- Given a fresh database, when backend migrations run, then every expected migration is recorded in the migration metadata table
-- Given a fresh database, when an audit event references a missing service request, then the database rejects the audit event and no orphan audit row is stored
+**AC-02-06** — Given a search is active when a submit succeeds, then the search field value becomes empty and the full list endpoint is called rather than the search endpoint.
 
-**Verified by:** `bb test:acceptance` — Babashka HTTP tests run submit-then-list and restart durability checks against the live stack; `bb test:backend` — Postgres adapter tests assert the expected Flyway metadata rows exist after migration and that audit events cannot reference missing service requests
+**AC-02-07** — Given the Title field is blank, when Submit is clicked, then no HTTP request is made to the command endpoint.
+
+**AC-02-08** — Given the Description field is blank, when Submit is clicked, then no HTTP request is made to the command endpoint.
 
 ---
 
-## Story 5 — E2E browser roundtrip
+## US-03 — View submitted service requests
 
-> As a developer, I want a browser-level test that confirms a submitted request appears in the list in a real browser, so that I know the full stack — Postgres, backend, nginx proxy, and Angular — is wired together correctly.
+> As a user, I want to see all submitted service requests when I open the application, so that I know what is already in the system.
 
-**Acceptance criteria:**
-- Given the full Docker stack is running, when Playwright fills in the form and clicks Submit, then it finds the submitted request title visible in the list
+**AC-03-01** — Given no service requests have been submitted, when the list request completes, then the text "No service requests yet." is present in the DOM.
 
-**Verified by:** `bb test:e2e` — Playwright drives a real Chromium browser against the live Docker stack
+**AC-03-02** — Given one or more service requests have been submitted, when the list request completes, then each service request's title, description, and status are present in the DOM.
 
----
+**AC-03-03** — Given the application has sent a list request that has not yet received a response, then the text "Loading" is present in the DOM.
 
-## Story 6 — Clean shutdown
-
-> As a developer, I want to stop the stack cleanly, so that no orphaned processes are left consuming resources.
-
-**Acceptance criteria:**
-- Given the stack is running, when I stop it, then all project Compose services terminate and no project containers remain running
-- Given the stack is running, when I stop it with `bb down`, then the project Postgres data volume is removed
-- Given an automated test run starts or finishes, then the project Postgres test volume is removed so test data does not leak across runs
-
-**Verified by:** `bb test:acceptance` and `bb test:e2e` — both call `docker compose down -v` around the run and assert that no Compose services remain running. `bb down` and `bb reset` both remove the named Postgres data volume when a fully clean manual slate is needed.
+**AC-03-04** — Given the list request fails with a network or server error, then the text "Could not load requests" is present in the DOM.
 
 ---
 
-## Story 7 — Search submitted requests
+## US-04 — Command and query API contract
 
-> As a user, I want to search submitted service requests by title and description, so that I can find relevant historical requests without reading the full list.
+> As a developer, I want the backend API to have a stable, well-defined contract, so that clients can rely on it without inspecting the implementation.
 
-**Acceptance criteria:**
-- Given the application is open, when I type a search term into the Search requests field, then the list updates to show matching requests
-- Given the Search requests field is blank, then the application shows the full submitted requests list
-- Given I type a search term and then clear it, then the application returns to the full submitted requests list
-- Given no submitted requests match the search term, then the application shows "No matching requests."
-- Given submitted requests exist, when I search for a term in a request title, then matching requests are returned
-- Given submitted requests exist, when I search for a term in a request description, then matching requests are returned
-- Given no submitted requests match the search term, when I search, then the response contains an empty `requests` array
-- Given a search term is missing or blank, when I call the search query endpoint, then the backend returns `422`
-- Given one request matches in the title and another matches in the description, when I search for the shared term, then the title match is ranked first
-- Given I call the search query endpoint, then each result in the response contains only the standard request fields and does not include internal scoring data
+**AC-04-01** — Given `POST /api/commands/submit-service-request` is called with `{"title":"T","description":"D"}`, then the response status is 201 and the response body is a JSON object containing exactly the fields `request_id` (string), `title` (string, value "T"), `description` (string, value "D"), `status` (string, value "submitted"), `submitted_by` (string), `created_at` (string), and `updated_at` (string).
 
-**Verified by:** `bb test:frontend` — Jest unit tests cover debounced active search, clearing the search, and search empty state; `bb test:e2e` — Playwright submits a real request, searches for it, and checks the no-match state; `bb test:backend` — handler, HTTP integration, and Postgres adapter tests cover validation, matching, empty results, and rank ordering; `bb test:acceptance` — live-stack HTTP tests cover submit-then-search and blank-query rejection.
+**AC-04-02** — Given `POST /api/commands/submit-service-request` is called with header `X-User-Id: alice`, then the `submitted_by` field in the response body is `"alice"`.
+
+**AC-04-03** — Given `POST /api/commands/submit-service-request` is called without an `X-User-Id` header, then the `submitted_by` field in the response body is `"demo-user"`.
+
+**AC-04-04** — Given `POST /api/commands/submit-service-request` is called with a missing `title` field or a blank `title`, then the response status is 422.
+
+**AC-04-05** — Given `POST /api/commands/submit-service-request` is called with a missing `description` field or a blank `description`, then the response status is 422.
+
+**AC-04-06** — Given `POST /api/queries/list-service-requests` is called with `{}`, then the response status is 200 and the response body is a JSON object with a `requests` key containing an array; each element contains exactly the fields `request_id`, `title`, `description`, `status`, `submitted_by`, `created_at`, and `updated_at` as strings, and no other fields.
+
+**AC-04-07** — Given a service request has been submitted, when `POST /api/queries/list-service-requests` is called, then the `requests` array contains an element whose field values match those returned in the submit response.
+
+**AC-04-08** — Given service requests A and B are submitted in sequence with B submitted after A, when `POST /api/queries/list-service-requests` is called, then B appears before A in the `requests` array.
+
+**AC-04-09** — Given a command or query endpoint is called via the nginx proxy at `http://localhost:4200/api/...`, then the response status code and response body JSON fields are the same as when calling the backend directly at `http://localhost:8080/api/...` with the same request.
+
+---
+
+## US-05 — Data durability
+
+> As a developer, I want submitted service requests to survive infrastructure restarts and to have migration state tracked, so that I know the persistence layer is proven end-to-end.
+
+**AC-05-01** — Given a service request has been submitted and then Postgres and the backend containers are restarted, when `POST /api/queries/list-service-requests` is called after the stack is healthy again, then the submitted service request still appears in the `requests` array.
+
+**AC-05-02** — Given a fresh database, when Flyway migrations are applied, then the `schema_version` table contains exactly four rows — versions `1`, `2`, `3`, and `4` — each with `success` equal to `true`.
+
+**AC-05-03** — Given an audit event references a `subject_id` that has no matching row in `service_requests`, then the database rejects the write and no audit event row is stored.
+
+---
+
+## US-06 — E2E browser roundtrip
+
+> As a developer, I want a browser-level test that proves the full stack is wired together, so that I know Postgres, backend, nginx, and Angular are all connected correctly.
+
+**AC-06-01** — Given the full Docker stack is running, when a browser navigates to `http://localhost:4200`, fills in a non-blank Title and Description, and clicks Submit, then within 5 seconds the submitted title is present in the list on the same page.
+
+---
+
+## US-07 — Clean shutdown
+
+> As a developer, I want to stop the stack cleanly, so that no orphaned containers or data volumes are left behind.
+
+**AC-07-01** — Given the stack is running, when `bb down` completes, then `docker compose ps --services --filter status=running` returns no output for this project.
+
+**AC-07-02** — Given the stack has been started, when `bb down` completes, then the project Postgres data volume is absent from `docker volume ls`.
+
+**AC-07-03** — Given an acceptance or E2E test run completes (whether passing or failing), then the project Postgres data volume is absent from `docker volume ls`.
+
+---
+
+## US-08 — Search submitted service requests
+
+> As a user, I want to search submitted service requests by keyword, so that I can find relevant service requests without scrolling the full list.
+
+**AC-08-01** — Given the Search field contains a non-blank term, when the search response is received, then the list displays only service requests that contain the term in their title or description (full-text match, case-insensitive).
+
+**AC-08-02** — Given the Search field is blank, then the application calls the list endpoint and displays all submitted service requests.
+
+**AC-08-03** — Given the Search field contained a term and is then cleared to blank, then the application calls the list endpoint and displays all submitted service requests.
+
+**AC-08-04** — Given the search response is received and no submitted service requests match the term, then the text "No matching service requests." is present in the DOM.
+
+**AC-08-05** — Given a submitted service request contains the search term in its title (matched case-insensitively), when `POST /api/queries/search-service-requests` is called with `{"query":"<term>"}`, then that service request appears in the `requests` array.
+
+**AC-08-06** — Given a submitted service request contains the search term in its description but not in its title, when `POST /api/queries/search-service-requests` is called with `{"query":"<term>"}`, then that service request appears in the `requests` array.
+
+**AC-08-07** — Given no submitted service requests contain the search term in their title or description, when `POST /api/queries/search-service-requests` is called with `{"query":"<term>"}`, then the response body is `{"requests":[]}`.
+
+**AC-08-08** — Given `POST /api/queries/search-service-requests` is called without a `query` field, then the response status is 422 and the response body contains an `error` field.
+
+**AC-08-09** — Given `POST /api/queries/search-service-requests` is called with a `query` field that is blank, contains only whitespace, or is not a string, then the response status is 422 and the response body contains an `error` field.
+
+**AC-08-10** — Given `POST /api/queries/search-service-requests` is called with a `query` value that has leading or trailing whitespace, then the `requests` array contains the same elements as when called with the trimmed value.
+
+**AC-08-11** — Given service request A contains the search term in its title and service request B contains the term only in its description, when `POST /api/queries/search-service-requests` is called with that term, then A appears before B in the `requests` array.
+
+**AC-08-12** — Given `POST /api/queries/search-service-requests` returns results, then each element in the `requests` array contains exactly the fields `request_id`, `title`, `description`, `status`, `submitted_by`, `created_at`, and `updated_at` as strings, and no other fields.
+
+---
+
+## Quality attributes
+
+Quality attributes are non-functional requirements that cut across all stories. Each criterion must be verified by an automated test referencing its ID.
+
+---
+
+### QA-01 — Operability
+
+The system must expose a machine-readable health signal so that orchestrators can determine whether it is ready to serve traffic.
+
+**QA-01-01** — Given the backend is running, when `GET /health` is called, then the response status is 200 and the response body is exactly `{"status":"ok"}`.
+
+**QA-01-02** — Given `docker compose up --wait` has exited with code 0, when `POST /api/commands/submit-service-request` is called with a valid body, then the response status is 201. This verifies that the backend does not report healthy before its dependencies (database, migrations) are ready.
+
+---
+
+### QA-02 — Discoverability
+
+The backend API must be self-describing so that a developer can understand and call every endpoint without reading source code.
+
+**QA-02-01** — Given the backend is running, when `GET /openapi.json` is called, then the response status is 200 and the `openapi` field in the response body is a string beginning with `"3."`.
+
+**QA-02-02** — Given the backend is running, when `GET /openapi.json` is called, then the document contains the path `POST /api/commands/submit-service-request` with a request body schema whose `required` array is exactly `["title", "description"]`.
+
+**QA-02-03** — Given the backend is running, when `GET /openapi.json` is called, then the submit endpoint entry includes a request body example with non-blank `title` and `description` string values.
+
+**QA-02-04** — Given the backend is running, when `GET /openapi.json` is called, then the document contains the path `POST /api/queries/list-service-requests`.
+
+**QA-02-05** — Given the backend is running, when `GET /openapi.json` is called, then the document contains the path `POST /api/queries/search-service-requests` with a request body schema whose `required` array is exactly `["query"]`.
+
+**QA-02-06** — Given the backend is running, when `GET /openapi.json` is called, then the search endpoint entry includes a request body example with a non-blank `query` string value.
+
+**QA-02-07** — Given the backend is running, when `GET /swagger-ui` is called, then the response status is 200.
+
+---
+
+### QA-03 — Auditability
+
+Every state-changing command must produce a complete, accurate record of who performed the action, what action was performed, and which resource was affected. The record must be written in the same database transaction as the command so it cannot be bypassed or lost.
+
+**QA-03-01** — Given `POST /api/commands/submit-service-request` is called with header `X-User-Id: alice` and succeeds, then exactly one audit event row exists in the database with actor `"alice"`, action `"submit-service-request"`, and `subject_id` equal to the `request_id` returned in the response body.
+
+**QA-03-02** — Given `POST /api/commands/submit-service-request` is called without an `X-User-Id` header and succeeds, then exactly one audit event row exists in the database with actor `"demo-user"`, action `"submit-service-request"`, and `subject_id` equal to the `request_id` returned in the response body.
+
+**QA-03-03** — Given a service request insert and audit event insert execute within a single database transaction, when the audit event insert fails (e.g. due to a constraint violation), then the transaction is rolled back and neither the service request row nor the audit event row is present in the database.
+
+**QA-03-04** — Given `POST /api/commands/submit-service-request` is called twice in sequence, then exactly two audit event rows are present in the database, one per submission.
+
+---
+
+### QA-04 — Performance
+
+The system must remain responsive and error-free under concurrent load. A request is successful if it receives an HTTP 2xx response; a timeout, connection error, or 5xx counts as a failure.
+
+**QA-04-01** — Given the `submit-and-list` scenario runs against the live stack (each virtual user executes: list service requests → pause 1 s → submit a service request → pause 1 s → list service requests again; 10 users ramped linearly over 30 s), then the p95 response time is below 1000 ms, the p99 response time is below 2000 ms, and the success rate is above 99%.
+
+**QA-04-02** — Given the `browse-and-search` scenario runs against the live stack (each virtual user executes: list service requests → pause 1 s → search for a known term; 20 users ramped linearly over 30 s), then the p95 response time is below 1000 ms, the p99 response time is below 2000 ms, and the success rate is above 99%.
+
+---
+
+### QA-05 — Security
+
+The system must not be exploitable through its input surface. Authentication and authorisation are out of scope; the criteria below address input handling and information disclosure.
+
+**QA-05-01** — Given `POST /api/commands/submit-service-request` is called with a `title` or `description` containing potentially dangerous content (e.g. SQL metacharacters such as `'; DROP TABLE service_requests; --` or script tags such as `<script>alert(1)</script>`), then the response status is 201, and when the submitted service request is subsequently retrieved via the list endpoint, the returned `title` or `description` value is byte-for-byte equal to what was submitted.
+
+**QA-05-02** — Given a request to the backend produces a 422 validation error response, then the response body is a JSON object and does not contain a stack trace, a file system path, a SQL statement, or a database connection string. (Scope is limited to validation errors; 404, 405, and 5xx responses are not yet covered by a JSON error handler.)
+
+**QA-05-03** — *Not yet implemented.* Given `POST /api/commands/submit-service-request` is called with a request body exceeding a defined maximum byte size, then the backend returns 413 before processing the request. No size limit is currently configured.

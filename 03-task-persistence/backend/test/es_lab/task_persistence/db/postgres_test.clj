@@ -1,10 +1,3 @@
-; Rancher Desktop one-time setup required for Testcontainers to connect:
-;   ~/.docker-java.properties   → api.version=1.44
-;   ~/.testcontainers.properties → docker.host=unix:///Users/$USER/.rd/docker.sock
-;                                  ryuk.disabled=true / checks.disable=true
-; docker-java defaults to API 1.32; Rancher Desktop's daemon requires >=1.41.
-; DOCKER_API_VERSION env var is NOT read by docker-java — the properties file is the fix.
-; bb.edn test:backend supplies DOCKER_HOST / TESTCONTAINERS_* env vars automatically.
 (ns es-lab.task-persistence.db.postgres-test
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [es-lab.task-persistence.audit.port :as audit]
@@ -13,205 +6,141 @@
             [es-lab.task-persistence.service-requests.port :as sr]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
-  (:import [java.sql SQLException]
-           [org.testcontainers.containers PostgreSQLContainer]
-           [org.testcontainers.utility DockerImageName]))
+  (:import [org.testcontainers.containers PostgreSQLContainer]))
 
 (def ^:dynamic *ds* nil)
 
-(def ^:private pg-container
-  (-> (DockerImageName/parse "postgres:18.4-alpine")
-      (PostgreSQLContainer.)))
+(defn with-postgres [f]
+  (let [container (PostgreSQLContainer. "postgres:18.4-alpine")]
+    (.start container)
+    (try
+      (let [ds (jdbc/get-datasource {:jdbcUrl  (.getJdbcUrl container)
+                                     :user     (.getUsername container)
+                                     :password (.getPassword container)})]
+        (migrations/migrate! ds)
+        (binding [*ds* ds]
+          (f)))
+      (finally
+        (.stop container)))))
 
-(defn- postgres-fixture [f]
-  (.start pg-container)
-  (let [ds (jdbc/get-datasource {:jdbcUrl  (.getJdbcUrl pg-container)
-                                 :user     (.getUsername pg-container)
-                                 :password (.getPassword pg-container)})]
-    (migrations/migrate! ds)
-    (binding [*ds* ds]
-      (f))))
-
-(defn- truncate-fixture [f]
-  (jdbc/execute! *ds* ["TRUNCATE service_requests, audit_events"])
+(defn truncate [f]
+  (jdbc/execute! *ds* ["TRUNCATE audit_events, service_requests CASCADE"])
   (f))
 
-(use-fixtures :once postgres-fixture)
-(use-fixtures :each truncate-fixture)
+(use-fixtures :once with-postgres)
+(use-fixtures :each truncate)
 
-(defn- sr-port [] (pg/->PostgresServiceRequestPort *ds*))
-(defn- audit-port [] (pg/->PostgresAuditPort *ds*))
+(defn- save-one! [ds & {:keys [title description submitted-by]
+                         :or   {title        "Default title"
+                                description  "Default description"
+                                submitted-by "test-user"}}]
+  (sr/save! (pg/->PostgresServiceRequestPort ds)
+            {:title title :description description :submitted-by submitted-by}))
 
-;; --- Migrations ---
-
-(deftest migrations-are-recorded-in-metadata-table
+(deftest migrations-recorded-in-schema-version
+  ;; AC-05-02
   (let [rows (jdbc/execute! *ds*
-                            ["SELECT version, description, script, success
-                              FROM schema_version
-                              ORDER BY installed_rank"]
+                            ["SELECT version, success FROM schema_version ORDER BY installed_rank"]
                             {:builder-fn rs/as-unqualified-lower-maps})]
-    (is (= [{:version "1"
-             :description "create service requests"
-             :script "V1__create_service_requests.sql"
-             :success true}
-            {:version "2"
-             :description "create audit events"
-             :script "V2__create_audit_events.sql"
-             :success true}
-            {:version "3"
-             :description "add service request search vector"
-             :script "V3__add_service_request_search_vector.sql"
-             :success true}
-            {:version "4"
-             :description "index service request search vector"
-             :script "V4__index_service_request_search_vector.sql"
-             :success true}]
-           (mapv #(select-keys % [:version :description :script :success]) rows)))))
+    (is (= 4 (count rows)))
+    (is (= ["1" "2" "3" "4"] (map :version rows)))
+    (is (every? :success rows))))
 
-;; --- ServiceRequestPort ---
-
-(deftest save-returns-record-with-all-fields
-  (let [saved (sr/save! (sr-port) {:submitted-by "alice"
-                                   :title        "Fix door"
-                                   :description  "Room 101 handle broken"})]
-    (is (string? (:request_id saved)))
-    (is (= "alice" (:submitted_by saved)))
-    (is (= "Fix door" (:title saved)))
-    (is (= "Room 101 handle broken" (:description saved)))
+(deftest save-returns-all-required-fields
+  ;; AC-04-07 (shape)
+  (let [saved (save-one! *ds* :title "T" :description "D")]
+    (is (= #{:request_id :title :description :status :submitted_by :created_at :updated_at}
+           (set (keys saved))))
+    (is (= "T" (:title saved)))
+    (is (= "D" (:description saved)))
     (is (= "submitted" (:status saved)))
+    (is (string? (:request_id saved)))
     (is (string? (:created_at saved)))
     (is (string? (:updated_at saved)))))
 
-(deftest save-does-not-expose-search-vector
-  (let [saved (sr/save! (sr-port) {:submitted-by "alice"
-                                   :title        "Fix door"
-                                   :description  "Room 101 handle broken"})]
-    (is (nil? (:search_vector saved)))))
-
-(deftest save-generates-uuidv7
-  (let [saved (sr/save! (sr-port) {:submitted-by "alice" :title "T" :description "D"})]
-    (is (= "7" (subs (:request_id saved) 14 15)))))
-
-(deftest list-all-returns-empty-when-no-records
-  (is (= [] (sr/list-all (sr-port)))))
-
-(deftest list-all-returns-saved-records
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Fix door" :description "Room 101"})
-  (let [results (sr/list-all (sr-port))]
-    (is (= 1 (count results)))
-    (is (= "Fix door" (:title (first results))))))
-
-(deftest list-all-returns-all-records
-  (sr/save! (sr-port) {:submitted-by "alice" :title "First"  :description "D"})
-  (sr/save! (sr-port) {:submitted-by "bob"   :title "Second" :description "D"})
-  (is (= 2 (count (sr/list-all (sr-port))))))
+(deftest list-all-includes-saved-record
+  ;; AC-04-07 (roundtrip)
+  (let [saved  (save-one! *ds* :title "Roundtrip")
+        listed (sr/list-all (pg/->PostgresServiceRequestPort *ds*))]
+    (is (some #(= (:request_id saved) (:request_id %)) listed))))
 
 (deftest list-all-returns-most-recent-first
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Older"  :description "D"})
-  (Thread/sleep 50)
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Newer" :description "D"})
-  (let [results (sr/list-all (sr-port))]
-    (is (= "Newer" (:title (first results))))
-    (is (= "Older" (:title (second results))))))
+  ;; AC-04-08
+  (let [a       (save-one! *ds* :title "First submitted")
+        b       (save-one! *ds* :title "Second submitted")
+        results (sr/list-all (pg/->PostgresServiceRequestPort *ds*))
+        ids     (map :request_id results)
+        pos     (fn [id] (.indexOf ids id))]
+    (is (< (pos (:request_id b)) (pos (:request_id a))))))
 
-(deftest list-all-fields-are-strings
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Fix door" :description "Room 101"})
-  (let [result (first (sr/list-all (sr-port)))]
-    (is (string? (:title result)))
-    (is (string? (:request_id result)))
-    (is (string? (:created_at result)))))
+(deftest search-finds-title-match
+  ;; AC-08-05
+  (save-one! *ds* :title "Broken printer" :description "Something unrelated")
+  (let [results (sr/search (pg/->PostgresServiceRequestPort *ds*) "printer")]
+    (is (some #(= "Broken printer" (:title %)) results))))
 
-(deftest list-all-does-not-expose-search-vector
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Fix door" :description "Room 101"})
-  (is (nil? (:search_vector (first (sr/list-all (sr-port)))))))
+(deftest search-finds-description-match
+  ;; AC-08-06
+  (save-one! *ds* :title "Unrelated title" :description "Paper jam on printer")
+  (let [results (sr/search (pg/->PostgresServiceRequestPort *ds*) "printer")]
+    (is (some #(= "Unrelated title" (:title %)) results))))
 
-(deftest search-returns-empty-when-no-records-match
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Fix door" :description "Room 101"})
-  (is (= [] (sr/search (sr-port) "printer"))))
+(deftest search-ranks-title-above-description
+  ;; AC-08-11
+  (save-one! *ds* :title "printer issue" :description "Something else")
+  (save-one! *ds* :title "Other request" :description "printer is broken")
+  (let [results (sr/search (pg/->PostgresServiceRequestPort *ds*) "printer")
+        titles  (map :title results)]
+    (is (< (.indexOf titles "printer issue")
+           (.indexOf titles "Other request")))))
 
-(deftest search-matches-title
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Printer jam" :description "Room 101"})
-  (let [results (sr/search (sr-port) "printer")]
-    (is (= 1 (count results)))
-    (is (= "Printer jam" (:title (first results))))
-    (is (nil? (:rank (first results))))))
+(deftest search-result-fields-are-exactly-seven
+  ;; AC-08-12
+  (save-one! *ds* :title "Field check" :description "Checking fields")
+  (let [results (sr/search (pg/->PostgresServiceRequestPort *ds*) "check")]
+    (is (seq results))
+    (doseq [r results]
+      (is (= #{:request_id :title :description :status :submitted_by :created_at :updated_at}
+             (set (keys r)))))))
 
-(deftest search-matches-description
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Office issue" :description "Printer jam in Room 101"})
-  (let [results (sr/search (sr-port) "printer")]
-    (is (= 1 (count results)))
-    (is (= "Office issue" (:title (first results))))))
+(deftest audit-event-written-with-correct-fields
+  ;; QA-03-01
+  (let [saved (save-one! *ds* :submitted-by "alice")]
+    (audit/record! (pg/->PostgresAuditPort *ds*)
+                   {:actor      "alice"
+                    :action     "submit-service-request"
+                    :subject-id (:request_id saved)
+                    :metadata   {:title (:title saved)}})
+    (let [rows (jdbc/execute! *ds*
+                              ["SELECT actor, action, subject_id::text FROM audit_events"]
+                              {:builder-fn rs/as-unqualified-lower-maps})]
+      (is (= 1 (count rows)))
+      (is (= "alice" (:actor (first rows))))
+      (is (= "submit-service-request" (:action (first rows))))
+      (is (= (:request_id saved) (:subject_id (first rows)))))))
 
-(deftest search-ranks-title-matches-ahead-of-description-matches
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Office issue" :description "Printer jam in Room 101"})
-  (sr/save! (sr-port) {:submitted-by "alice" :title "Printer jam" :description "Room 101"})
-  (let [[first-result] (sr/search (sr-port) "printer")]
-    (is (= "Printer jam" (:title first-result)))
-    (is (nil? (:rank first-result)))))
-
-;; --- AuditPort ---
-
-(deftest audit-record-returns-nil
-  (let [saved (sr/save! (sr-port) {:submitted-by "alice" :title "T" :description "D"})]
-    (is (nil? (audit/record! (audit-port)
-                             {:actor      "alice"
-                              :action     "submit-service-request"
-                              :subject-id (:request_id saved)
-                              :metadata   {:title "T"}})))))
-
-(deftest audit-record-persists-to-db
-  (let [saved (sr/save! (sr-port) {:submitted-by "alice" :title "T" :description "D"})
-        _     (audit/record! (audit-port)
-                             {:actor      "alice"
-                              :action     "submit-service-request"
-                              :subject-id (:request_id saved)
-                              :metadata   {:title "T"}})
-        rows  (jdbc/execute! *ds* ["SELECT * FROM audit_events"])]
-    (is (= 1 (count rows)))))
-
-(deftest audit-event-id-is-uuidv7
-  (let [saved (sr/save! (sr-port) {:submitted-by "alice" :title "T" :description "D"})
-        _     (audit/record! (audit-port)
-                             {:actor      "alice"
-                              :action     "submit-service-request"
-                              :subject-id (:request_id saved)
-                              :metadata   {:title "T"}})
-        row   (first (jdbc/execute! *ds* ["SELECT audit_event_id::text FROM audit_events"]
-                                    {:builder-fn rs/as-unqualified-lower-maps}))]
-    (is (= "7" (subs (:audit_event_id row) 14 15)))))
-
-(deftest audit-record-rejects-missing-service-request
-  (let [missing-request-id "01900000-0000-7000-8000-000000000001"
-        ex                 (try
-                             (audit/record! (audit-port)
-                                            {:actor      "alice"
-                                             :action     "submit-service-request"
-                                             :subject-id missing-request-id
-                                             :metadata   {:title "T"}})
-                             nil
-                             (catch SQLException e
-                               e))]
-    (is (= "23503" (.getSQLState ex)))
-    (is (zero? (-> (jdbc/execute-one! *ds* ["SELECT COUNT(*) FROM audit_events"])
-                   vals
-                   first)))))
-
-(deftest transact-rolls-back-service-request-when-audit-fails
+(deftest transact-rolls-back-on-audit-failure
+  ;; QA-03-03
   (is (thrown? Exception
                (pg/transact! *ds*
                              (fn [{:keys [service-request-port audit-port]}]
                                (sr/save! service-request-port
-                                         {:submitted-by "alice"
-                                          :title        "T"
-                                          :description  "D"})
+                                         {:submitted-by "u"
+                                          :title        "Should roll back"
+                                          :description  "Rollback test"})
                                (audit/record! audit-port
-                                              {:actor      "alice"
+                                              {:actor      "u"
                                                :action     "submit-service-request"
-                                               :subject-id "not-a-uuid"
-                                               :metadata   {:title "T"}})))))
-  (is (zero? (-> (jdbc/execute-one! *ds* ["SELECT COUNT(*) FROM service_requests"])
-                 vals
-                 first)))
-  (is (zero? (-> (jdbc/execute-one! *ds* ["SELECT COUNT(*) FROM audit_events"])
-                 vals
-                 first))))
+                                               :subject-id (str (java.util.UUID/randomUUID))
+                                               :metadata   {}})))))
+  (is (empty? (sr/list-all (pg/->PostgresServiceRequestPort *ds*)))))
+
+(deftest fk-constraint-rejects-orphan-audit-event
+  ;; AC-05-03
+  (let [audit-port (pg/->PostgresAuditPort *ds*)]
+    (is (thrown? Exception
+                 (audit/record! audit-port
+                                {:actor      "user"
+                                 :action     "submit-service-request"
+                                 :subject-id (str (java.util.UUID/randomUUID))
+                                 :metadata   {}})))))

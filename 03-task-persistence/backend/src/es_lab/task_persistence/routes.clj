@@ -8,7 +8,7 @@
             [reitit.swagger-ui :as swagger-ui]))
 
 (defn- health-handler [_]
-  {:status 200 :body {:status "ok" :version "0.1.0"}})
+  {:status 200 :body {:status "ok"}})
 
 (def ^:private service-request-schema
   {:type       "object"

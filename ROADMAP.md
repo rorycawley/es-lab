@@ -69,7 +69,7 @@ The goal is **not** to make every substitution free. The goal is to keep substit
 
 ## API design conventions
 
-All project APIs use a single convention: **POST with JSON for both commands and queries.** There are no `GET`, `PUT`, `PATCH`, or `DELETE` endpoints in es-lab projects.
+All project business APIs use a single convention: **POST with JSON for both commands and queries.** There are no `GET`, `PUT`, `PATCH`, or `DELETE` business endpoints in es-lab projects. Operational and documentation endpoints such as `/health`, `/openapi.json`, and `/swagger-ui` remain conventional `GET` endpoints.
 
 This is not REST. It is an intentful API: every endpoint is named after the operation it performs, not the resource it acts on.
 
@@ -241,7 +241,7 @@ The roadmap names the architectural claim each project proves. The detailed fitn
 |---|---|---|---|
 | 01 | complete | `hello-backend` | A minimal Clojure backend serves a single endpoint and runs with `docker compose up`. |
 | 02 | complete | `hello-frontend` | An Angular 21 SPA calls the Clojure backend through nginx and renders the result. Proves the full end-to-end toolchain: Docker Compose, nginx proxy, Angular, Jest, Playwright. *(Also subsumed the original project 03, frontend-calls-backend.)* |
-| 03 | in progress | `task-persistence` | A user submits a service request through the frontend. The backend validates it, persists it to Postgres via a Migratus migration, and reads it back. Proves durable state and round-trip data flow. Introduces the intentful POST-only API (commands and queries), the ports-and-adapters boundary at persistence, and a simple audit log alongside the domain table. A fixed demo-user header (`X-User-Id`) stands in for real auth. |
+| 03 | in progress | `task-persistence` | A user submits a service request through the frontend. The backend validates it, persists it to Postgres via a Migratus migration, and reads it back. Proves durable state and round-trip data flow. Introduces intentful business API endpoints (POST commands and queries), the ports-and-adapters boundary at persistence, and a simple audit log alongside the domain table. A fixed demo-user header (`X-User-Id`) stands in for real auth. |
 | 04 | planned | `dual-portal-basics` | Two SPAs (customer and backoffice) share one backend; distinct command and query endpoints prove segregated API surfaces without a gateway. |
 | 05 | planned | `ports-and-adapters` | The persistence adapter introduced in 03 is extracted behind a Clojure protocol and swapped for a second implementation, proving the domain is fully isolated from infrastructure. |
 | 06 | planned | `modular-monolith` | Multiple bounded contexts live in one deployable while remaining strictly isolated from each other. |

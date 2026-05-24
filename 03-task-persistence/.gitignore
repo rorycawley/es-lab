@@ -1,1 +1,16 @@
 .clj-kondo/.cache/
+
+# Clojure build/cache output
+backend/.cpcache/
+backend/target/
+
+# Frontend dependencies and build/test output
+frontend/node_modules/
+frontend/.angular/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+
+# Perf test build and reports
+perf/target/

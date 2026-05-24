@@ -1,30 +1,14 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-test('submits a service request and sees it in the list', async ({ page }) => {
-  const title = `Broken printer ${Date.now()}`;
+// AC-06-01
+test('submitted title appears in the list within 5 seconds', async ({ page }) => {
+  const title = `Browser test ${Date.now()}`;
 
   await page.goto('/');
 
-  await page.getByLabel('Title').fill(title);
-  await page.getByLabel('Description').fill('Printer on 3rd floor is jammed');
-  await page.getByRole('button', { name: 'Submit' }).click();
+  await page.fill('#title', title);
+  await page.fill('#description', 'End-to-end browser test');
+  await page.click('button[type="submit"]');
 
-  await expect(page.getByText('Request submitted successfully')).toBeVisible({ timeout: 5000 });
   await expect(page.getByText(title)).toBeVisible({ timeout: 5000 });
-
-  await page.getByLabel('Search requests').fill(title);
-  await expect(page.getByText(title)).toBeVisible({ timeout: 5000 });
-
-  await page.getByLabel('Search requests').fill(`no match ${Date.now()}`);
-  await expect(page.getByText('No matching requests.')).toBeVisible({ timeout: 5000 });
-
-  const unfilteredTitle = `Door repair ${Date.now()}`;
-
-  await page.getByLabel('Title').fill(unfilteredTitle);
-  await page.getByLabel('Description').fill('Door 201 is stuck');
-  await page.getByRole('button', { name: 'Submit' }).click();
-
-  await expect(page.getByText('Request submitted successfully')).toBeVisible({ timeout: 5000 });
-  await expect(page.getByLabel('Search requests')).toHaveValue('');
-  await expect(page.getByText(unfilteredTitle)).toBeVisible({ timeout: 5000 });
 });
