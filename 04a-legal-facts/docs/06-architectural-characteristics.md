@@ -34,8 +34,61 @@ software: they constrain design, implementation, testing, and operations.
 | Privacy and disclosure control | The public Register is open, but not every internal fact is public. | Public read models expose only Public-classified fields. Internal audit facts stay protected. |
 | Data protection | Sensitive personal data (director home addresses, identity documents, payment references) must not be disclosed beyond their permitted classification level. | Every data field and document type carries a classification label. FLS enforces classification at query time. Application logs mask Restricted and above. |
 | Rebuildability | Derived state can be lost or corrupted. | Read models must be rebuildable from event streams. |
+| Performance | Slow responses erode public trust and operational efficiency. | All API endpoints must meet defined latency targets under normal load. |
 | Scope control | This is a proof-of-concept micro-registry. | Parked concerns must not leak into active acceptance criteria or implementation. |
 | Testability | Architectural qualities must not depend on manual review. | Mandatory fitness functions must run beside feature tests. |
+
+## Measurable Targets
+
+Each characteristic must have at least one measurable target. Targets are either
+verified continuously by a fitness function (FF) or monitored operationally via
+dashboards and alerting. Both columns are required: a target with no verification
+method is an aspiration, not a commitment.
+
+| Characteristic | Metric | Target | Verification |
+|----------------|--------|--------|-------------|
+| **Legal integrity** | Durability of committed events | Zero loss - a written event must never be lost | Database: synchronous WAL writes + point-in-time recovery. FF-003 asserts no mutation path exists |
+| **Legal integrity** | Audit log completeness | 100% of commands produce an audit log entry | FF-003 + audit log row count checked against command ledger in acceptance tests |
+| **Auditability** | Audit log retention | Permanent - no entry ever deleted or altered | FF-003; database permission audit (audit_writer is INSERT-only) |
+| **Data consistency** | Read model divergence | Zero - read models must be rebuildable to match event store state | FF-002: drop and replay produces identical query results |
+| **Idempotency** | Duplicate side-effect rate | 0% - a replayed command ID must never produce a second side effect | FF-004: re-issue commands with same ID; assert no duplicate events or payments |
+| **Fault tolerance** | RTO (Recovery Time Objective) | < 1 day - system restored to full operation within one business day of a failure | Disaster recovery runbook; tested in scheduled DR exercises |
+| **Fault tolerance** | RPO (Recovery Point Objective) | < 15 minutes for general system state (process manager state, projections). Zero for committed events - see legal integrity above | Point-in-time recovery to within 15 min; WAL archiving continuous |
+| **Fault tolerance** | Availability | 99.9% of scheduled uptime (excludes pre-notified maintenance windows) | Uptime monitoring; SLA dashboard |
+| **Fault tolerance** | MTTR (Mean Time to Recovery) | < 4 hours from incident declared to full service restored | Incident log; measured per incident |
+| **Observability** | MTTD (Mean Time to Detect) | < 30 minutes from fault occurrence to alert firing | Alert latency measured in monitoring platform |
+| **Observability** | MTTR contribution | Observability tooling must not extend MTTR - on-call must reach root cause within 1 hour of detection | Incident post-mortems |
+| **Performance** | p95 API response time | < 300ms for all command and query endpoints under normal load | FF-015: load test at expected concurrency; assert p95 < 300ms |
+| **Performance** | p99 API response time | < 1 second | FF-015 |
+| **Performance** | System-caused error rate | < 0.1% of valid requests fail due to infrastructure or application error (distinct from domain rejections) | Error rate dashboard; alerting threshold |
+| **Rebuildability** | Full read model rebuild time | < 2 hours for complete replay of all events across all aggregates | FF-002: timed replay in CI against a representative event volume |
+| **Security** | Four-eyes violation rate | 0% - no approved or rejected application where Examiner and Registrar are the same person | FF-014 |
+| **Data protection** | Sensitive field exposure in application logs | 0 occurrences of plaintext Restricted, Confidential, or Sealed values in log output | FF-011 |
+| **Data protection** | Breach detection and notification | < 72 hours from detection to regulatory notification (GDPR obligation) | Incident response procedure; not a fitness function |
+
+### Notes on RPO and Legal Integrity
+
+The 15-minute RPO applies to recoverable operational state: process manager
+instances, outbox relay position, and projection checkpoints. These can be
+replayed or retried.
+
+Committed events are subject to a stricter standard. Once the database
+acknowledges a write to the `events` table, that event is a legal fact. Losing
+it is not a recovery scenario - it is a breach of the Registry's legal
+obligations under §20. The architecture achieves this through synchronous WAL
+writes and continuous archiving: the database does not acknowledge a commit
+until the write is durable. This is not a target to monitor; it is an
+invariant enforced at the infrastructure level.
+
+### Scheduled Downtime
+
+The 99.9% availability target excludes pre-notified maintenance windows.
+Maintenance windows must be:
+- Announced to users at least 48 hours in advance
+- Scheduled outside core business hours
+- Limited to a maximum of 4 hours per calendar month
+
+Unannounced downtime counts against the 99.9% target regardless of cause.
 
 ## Design Implications
 
@@ -120,6 +173,18 @@ beyond the named roles permitted to see it.
   to application logs is moderately restricted: operations/DevOps personnel
   only, separate from domain staff access.
 
+### Performance
+
+- p95 response time for all API endpoints must be < 300ms under normal load.
+- p99 must be < 1 second.
+- Performance targets apply to both command endpoints (write path) and query
+  endpoints (read path).
+- System-caused errors (5xx responses due to infrastructure or application
+  failure) must remain below 0.1% of valid requests. Domain rejections (4xx
+  due to business rule violations) are not errors.
+- Performance is verified by FF-015, which runs a load test at expected
+  concurrency and asserts the latency percentiles.
+
 ### Scope Control
 
 Parked concerns must be visible but inactive. This protects the proof of concept
@@ -158,6 +223,7 @@ Each has a stable ID used in user story traceability metadata.
 | FF-012 | Public read model queries return only Public-classified fields. | Privacy and disclosure control, data protection | Call every public query endpoint and assert the response contains no Restricted or Confidential fields as defined in the data classification rules (BR-DC-*). |
 | FF-013 | The audit log is not accessible via any application API endpoint. | Data protection | Assert no API route exists that returns audit log rows; assert `audit_log` is not readable by the application DB role used for command handling or read models. |
 | FF-014 | The four-eyes rule is enforced: a Registrar who also examined the application cannot approve or reject it. | Security, controlled decision-making | Attempt to issue `ApproveApplication` and `RejectApplication` as a Registrar whose `verified_person_id` matches the assigned Examiner on that application; assert both commands are rejected with reason `four-eyes-violation` and that the attempt is recorded in the audit log. |
+| FF-015 | p95 API response time is < 300ms and p99 is < 1 second under normal load. | Performance | Run a load test at expected concurrency against a representative set of command and query endpoints; assert p95 < 300ms and p99 < 1s; assert system-caused error rate < 0.1%. |
 
 
 ## Traceability Matrix
@@ -180,6 +246,7 @@ The reverse lookup - from user story or test back to characteristic - is in the
 | Rebuildability | ADR-0002, ADR-0023 | US-PB-001, US-PB-002 | FF-002 |
 | Data protection | ADR-0020, ADR-0025 | All stories that expose personal data | FF-011, FF-012, FF-013 |
 | Controlled decision-making | ADR-0010, ADR-0020 | US-EX-001, US-EX-002, US-RE-001 | FF-006, FF-014 |
+| Performance | ADR-0012, ADR-0016 | All stories with response-sensitive interactions | FF-015 |
 | Scope control | - | All stories | FF-010 |
 | Testability | ADR-0010, ADR-0019 | All stories | FF-006 |
 
