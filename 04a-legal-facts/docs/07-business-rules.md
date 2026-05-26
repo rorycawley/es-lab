@@ -198,6 +198,10 @@ legal act.
 | BR-RA-009 | An application may only be referred to the Registrar when it is in `UnderExamination` and has no open requisitions | §13 |
 | BR-RA-010 | Only the Registrar may approve or reject an application, and only when it is in the `ReadyForDecision` state | §14, §16 |
 | BR-RA-011 | A rejected application must state the reason for rejection | §16 |
+| BR-RA-012 | The Registrar may remit a `ReadyForDecision` application back to `UnderExamination` for further examination; the remittal must state the reason | §14A |
+| BR-RA-013 | A remittal is not a decision - it does not approve or reject the application and does not prejudge the outcome | §14A |
+| BR-RA-014 | The identity of the Registrar who ordered the remittal and the stated reason are permanently recorded as an event | §14A, §20 |
+| BR-RA-015 | Upon remittal, the application is returned to the assigned Examiner; the Registrar who ordered the remittal is not precluded from subsequently deciding on the same application provided the four-eyes rule (§13A) is still satisfied | §14A |
 
 **State machine:**
 
@@ -207,8 +211,9 @@ legal act.
   [:under-examination              :raise-requisition]    :awaiting-requisition-response ;; BR-RQ-001, BR-RQ-002, BR-RQ-004
   [:awaiting-requisition-response  :requisition-answered] :under-examination           ;; BR-RQ-007
   [:under-examination              :refer-to-registrar]   :ready-for-decision          ;; BR-RA-008, BR-RA-009
-  [:ready-for-decision             :approve-application]  :approved                    ;; BR-RA-010, BR-AP-001–BR-AP-010
-  [:ready-for-decision             :reject-application]   :rejected                    ;; BR-RA-010, BR-RA-011
+  [:ready-for-decision             :approve-application]         :approved              ;; BR-RA-010, BR-AP-001-BR-AP-010
+  [:ready-for-decision             :reject-application]          :rejected              ;; BR-RA-010, BR-RA-011
+  [:ready-for-decision             :remit-for-further-examination] :under-examination   ;; BR-RA-012-BR-RA-015
   [:submitted                     :withdraw-application] :withdrawn                   ;; BR-RA-003, BR-RA-004
   [:under-examination              :withdraw-application] :withdrawn                   ;; BR-RA-003
   [:awaiting-requisition-response  :withdraw-application] :withdrawn                   ;; BR-RQ-011

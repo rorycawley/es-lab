@@ -148,6 +148,16 @@ The Registrar shall approve a registration application if it complies with this 
 
 Approval is a decision about the application. Upon approval, the Registrar shall direct the Registry to register the company under Section 15.
 
+**Section 14A - Remittal for Further Examination**
+
+Before making a decision under Section 14 or Section 16, the Registrar may remit a registration application to the assigned Examiner for further examination where the Registrar considers that the case is not yet sufficiently examined, requires additional clarification, or requires information not already on the record.
+
+The Registrar shall state the reason for remittal. The reason and the identity of the Registrar who ordered the remittal shall be permanently recorded.
+
+Upon remittal, the application returns to the examination phase and is reassigned to the Examiner for further action. A remittal is not a decision. It does not constitute an approval or rejection of the application and does not prejudge the outcome.
+
+The Registrar who orders a remittal is not thereby precluded from subsequently deciding on the same application, provided the separation requirement of Section 13A is satisfied.
+
 **Section 15 - Registration**
 
 Upon the Registrar's direction under Section 14, the Registry shall register the company and assign it a Registration Number. The company becomes a legal entity upon the assignment of its Registration Number.

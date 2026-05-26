@@ -345,6 +345,7 @@ stateDiagram-v2
 
     ReadyForDecision        --> Approved                    : ApproveApplication
     ReadyForDecision        --> Rejected                    : RejectApplication
+    ReadyForDecision        --> UnderExamination            : RemitForFurtherExamination
     ReadyForDecision        --> Withdrawn                   : WithdrawApplication
 
     Approved  --> [*]
@@ -398,6 +399,7 @@ one aggregate. A command is either accepted (produces events) or rejected
 | `ReferToRegistrar` | Examiner (assigned) | `UnderExamination` | `ReadyForDecision` |
 | `ApproveApplication` | Registrar | `ReadyForDecision` | `Approved` |
 | `RejectApplication` | Registrar | `ReadyForDecision` | `Rejected` |
+| `RemitForFurtherExamination` | Registrar | `ReadyForDecision` | `UnderExamination` - reason required; not a decision (§14A) |
 | `WithdrawApplication` | Applicant | `Submitted`, `UnderExamination`, `AwaitingRequisitionResponse`, `ReadyForDecision` | `Withdrawn` |
 
 ### Registered Company Commands
@@ -443,6 +445,7 @@ and `actor-id`.
 | `ApplicationReferredToRegistrar` | `ReferToRegistrar` | Application ready for decision |
 | `RegistrationApplicationApproved` | `ApproveApplication` | Registrar's decision; triggers Approval Process Manager |
 | `RegistrationApplicationRejected` | `RejectApplication` | Terminal; rejection reason permanently recorded |
+| `RegistrationApplicationRemitted` | `RemitForFurtherExamination` | Not a decision; application returns to examination; remittal reason and Registrar identity permanently recorded (§14A, §20) |
 | `RegistrationApplicationWithdrawn` | `WithdrawApplication` | Terminal; filing fee non-refundable |
 
 ### Registered Company Events
@@ -579,6 +582,7 @@ flowchart TD
 
     RFD -->|"ApproveApplication - Registrar"| APPROVED
     RFD -->|"RejectApplication - Registrar"| REJECTED
+    RFD -->|"RemitForFurtherExamination - Registrar\nstates reason"| EXAM
     RFD -->|"WithdrawApplication - Applicant"| WITHDRAWN
 
     APPROVED([ApplicationApproved\ntriggers Approval PM])
