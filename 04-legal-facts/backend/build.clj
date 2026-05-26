@@ -4,7 +4,7 @@
 (def class-dir "target/classes")
 (def basis (delay (b/create-basis {:project "deps.edn"})))
 
-(defn uber [_]
+(defn ^:export uber [_]
   (b/delete {:path "target"})
   (b/copy-dir {:src-dirs ["src" "resources"] :target-dir class-dir})
   (b/compile-clj {:basis     @basis

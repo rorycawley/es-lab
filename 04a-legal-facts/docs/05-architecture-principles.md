@@ -11,6 +11,33 @@ appears to contradict a principle, the ADR must explicitly state why the
 exception is justified.
 
 
+## Dependency and Coupling
+
+**Dependency is the key problem in software development at all scales.**
+Coupling kills software. It is a worse problem than DRY violations, worse
+than duplication, worse than most other design deficiencies — because
+coupling between components, between modules, and between tests and
+implementation details makes every change expensive and every refactor
+dangerous. Every structural decision in this system is made with coupling
+as the primary concern.
+
+**Decouple tests from implementation details.**
+Tests target the public contract — the stable API, the observable behaviour
+at the module boundary. Implementation details are left free of tests.
+This means no assertions on private functions, no coupling to internal data
+structures, no heavy mocking of collaborators. A test that can only pass
+when the implementation is arranged a specific way is not a specification —
+it is an obstacle to change.
+
+**The reward for test decoupling is freedom to refactor.**
+When tests target behaviour at the public boundary, the internals can be
+restructured, optimised, and replaced without touching the test suite. The
+test suite becomes a safety net rather than a cage. This is the precondition
+for Many More Much Smaller Steps (see `DEVELOPMENT-WORKFLOW.md`): you can
+move quickly because the net holds even when you commit sins on the way to
+green.
+
+
 ## Domain Integrity
 
 **The law is the requirements document.**

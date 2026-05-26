@@ -327,7 +327,9 @@
   <strong class="label">Why a pure function?</strong>
   A pure function is trivially testable — you call it with inputs and check
   the outputs. There is no mocking, no database setup, no test containers.
-  Just data in, data out.
+  Just data in, data out. This is the Dependency and Coupling principle in
+  action: the Decider has zero coupling to infrastructure, so tests of the
+  Decider are completely free of infrastructure concerns.
   <br><br>
   It is also the only correct approach for event sourcing. The business logic
   must not touch infrastructure. If it did, replaying events to rebuild state
@@ -451,9 +453,11 @@
 
 4. Call decide(state, command) → [new-events] or error
 
-5. Save new-events to the event store
+5. Save new-events to the event store  (single transaction)
    (optimistic concurrency: reject if sequence number conflict)
-   (outbox: mark published=false for delivery to RabbitMQ)
+   (outbox: write to outbox_events for external system delivery)
+   Internal consumers — process managers, projectors — receive events
+   by polling the event store on global_position, not via the outbox.
 
 6. Return success to the caller</pre>
 <div class="callout">
@@ -634,12 +638,16 @@
   <span class="label">      (ReferToRegistrar)</span><br>
   <span class="state">ReadyForDecision</span>
   <span class="arrow"> →→ </span>
+  <span class="state">UnderExamination</span>
+  <span class="label">     (RemitForFurtherExamination — §14A)</span><br>
+  <span class="state">ReadyForDecision</span>
+  <span class="arrow"> →→ </span>
   <span class="state">Approved</span>
-  <span class="label">             (ApproveApplication)</span><br>
+  <span class="label">             (ApproveApplication — §13A Four-Eyes check)</span><br>
   <span class="state">ReadyForDecision</span>
   <span class="arrow"> →→ </span>
   <span class="state">Rejected</span>
-  <span class="label">             (RejectApplication)</span><br>
+  <span class="label">             (RejectApplication — §13A Four-Eyes check)</span><br>
   <span class="state">Submitted|UnderExamination|</span><br>
   <span class="state">  AwaitingRequisitionResponse|</span><br>
   <span class="state">  ReadyForDecision</span>
@@ -687,6 +695,12 @@
     :ReferredToRegistrar
     (assoc state :status :ready-for-decision)
 
+    :RegistrationApplicationRemitted          ;; §14A — Registrar sends back for further examination
+    (assoc state
+           :status               :under-examination
+           :remittal-reason      (:reason event)
+           :remitting-registrar-id (:registrar-id event))
+
     :RegistrationApplicationApproved
     (assoc state :status :approved :registrar-id (:registrar-id event))
 
@@ -704,14 +718,26 @@
 ;; 3. Return events</pre>
 <div class="callout">
   <strong class="label">The Decider has no knowledge of who is calling it</strong>
-  Role enforcement — checking that only an Examiner can begin examination,
-  or only the Registrar can approve — happens in the <em>handler</em>, before
-  the command reaches the runner. The Decider receives a fully validated
-  command. It trusts that the caller has already been authorised.
+  Authorisation happens in the <em>handler</em>, before the command reaches
+  the runner. The Decider receives a fully validated command and trusts that
+  the caller has already been authorised. Two distinct authorisation checks
+  apply before the Decider sees the command:
   <br><br>
-  This is the Separation of Concerns principle applied to security. Security
-  policy lives in the handler. Domain logic lives in the Decider. They never
-  mix.
+  <strong>RBAC</strong> — role-based: only an Examiner can call
+  <code>BeginExamination</code>; only a Registrar can call
+  <code>ApproveApplication</code> or <code>RejectApplication</code>.
+  <br><br>
+  <strong>ABAC — Four-Eyes Rule (§13A)</strong> — attribute-based: for
+  <code>ApproveApplication</code> and <code>RejectApplication</code>, the
+  handler checks that the <code>verified_person_id</code> of the acting
+  Registrar does not match the <code>verified_person_id</code> of the
+  assigned Examiner. RBAC alone is insufficient — one natural person may hold
+  both offices. This check catches that case. A breach is rejected with reason
+  <code>four-eyes-violation</code> and recorded in the audit log before
+  the command is ever dispatched.
+  <br><br>
+  Security policy lives in the handler. Domain logic lives in the Decider.
+  They never mix.
 </div>
 </section>
 
@@ -770,7 +796,11 @@
 <h2>9. Testing a Decider</h2>
 <p>
   Because the Decider is a pure function, testing is simple. No mocks.
-  No database. No test containers. Just data.
+  No database. No test containers. Just data. The Decider <em>is</em> the
+  public contract — the stable boundary between infrastructure and domain
+  logic. Tests written against it are decoupled from all implementation
+  details. You can change the runner, swap the event store, or restructure
+  the handler without touching a single test.
 </p>
 <pre>
 (deftest submit-draft-test
@@ -907,12 +937,17 @@
 <div class="callout">
   <strong class="label">Registration Application</strong>
   The formal lodgement under examination. Manages the examination workflow
-  including requisitions, referral, and the Registrar's decision.
+  including requisitions, referral, Registrar remittal (§14A), and the
+  Registrar's final decision. ApproveApplication and RejectApplication are
+  subject to the Four-Eyes Rule (§13A) enforced as an ABAC check in the handler.
   <span class="callout-subhead">Non-terminal states</span>
   <code>Submitted</code>, <code>UnderExamination</code>,
   <code>AwaitingRequisitionResponse</code>, <code>ReadyForDecision</code>
   <span class="callout-subhead">Terminal states</span>
   <code>Approved</code>, <code>Rejected</code>, <code>Withdrawn</code>
+  <span class="callout-subhead">Key transition</span>
+  <code>ReadyForDecision → UnderExamination</code> via
+  <code>RemitForFurtherExamination</code> — not a decision, reason permanently recorded
   <span class="callout-subhead">Decider</span>
   <code>registry.registration-application.decider</code>
 </div>
@@ -932,22 +967,29 @@
 <div class="callout amber">
   <strong class="label">Process Managers — coordination, not domain</strong>
   Process managers are event-sourced finite state machines, but they are not
-  domain aggregates. They coordinate work across aggregates by listening for
-  events and issuing commands. They use the same Decider structure — evolve,
-  decide, initial-state — but their state represents coordination progress,
-  not domain facts.
+  domain aggregates. They coordinate work across aggregates by consuming events
+  and issuing commands. They use the same Decider structure — evolve, decide,
+  initial-state — but their state represents coordination progress, not domain
+  facts.
+  <br><br>
+  <strong>How they receive events:</strong> process managers are background
+  threads that poll the event store directly, using
+  <code>global_position</code> as a monotonic checkpoint (ADR-0015 Path 2).
+  They do not subscribe to the in-process bus or a message broker. A database
+  advisory lock ensures only one instance of each process manager runs at a
+  time across all deployed instances.
   <br><br>
   Current process managers:
   <br><br>
-  <code>DraftSubmissionProcessManager</code> — listens for
+  <code>DraftSubmissionProcessManager</code> — polls for
   <code>DraftSubmitted</code>, creates the RegistrationApplication<br>
-  <code>ApprovalProcessManager</code> — listens for
+  <code>ApprovalProcessManager</code> — polls for
   <code>RegistrationApplicationApproved</code>, creates the RegisteredCompany<br>
   <br>
   Process managers must persist their coordination state durably. If they
   crash between receiving an event and issuing the resulting command, they
-  must recover to exactly the right position. They never restart from the
-  beginning. This is why they are event-sourced.
+  recover from their last committed checkpoint — never from the beginning.
+  This is why they are event-sourced.
 </div>
 
 <div class="callout">

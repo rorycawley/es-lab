@@ -4,10 +4,111 @@
 *Date: 2026-05-26.*
 
 
+## Testing Philosophy
+
+This document follows Kent Beck's *Test-Driven Development: By Example* as its
+primary reference. The principles below are not preferences — they govern every
+testing decision in this project.
+
+
+### The reason to test is a new behaviour, not a method on a class
+
+A test exists because there is something the software must do. The trigger is
+always a requirement — a user story, an acceptance criterion, a business rule.
+A test that exists because a class or method was written is testing the wrong
+thing. Tests protect requirements. Tests do not protect implementation details.
+
+
+### The test pyramid
+
+```
+        ▲
+       /UI\          — few; slow; prove the system works end-to-end
+      /────\
+     / Integ\        — some; verify ports connect correctly to adapters
+    /─────────\
+   / Unit Tests \    — many; fast; test behaviour at the module boundary
+  /─────────────\
+```
+
+*After Mike Cohn, Martin Fowler et al.*
+
+Most tests live at the bottom. A wide base of fast, behavioural tests at the
+module boundary. A smaller set of integration tests confirming adapters wire
+correctly. A thin layer of system tests for end-to-end confidence. UI tests and
+Gherkin-style executable specifications (Fitnesse, SpecFlow, Cucumber, ATDD)
+are not used — they are slow, brittle, and test through the wrong layer.
+
+
+### Scaffold tests and keeper tests
+
+When building a feature, developer tests are used as scaffolding — constraints
+and guardrails for small iterations. These are temporary. Once the feature is
+complete, scaffold tests are deleted.
+
+A building uses an enormous amount of scaffolding during construction. Once
+the building stands, the scaffolding is torn down. Keeping it would make the
+building impossible to modify. Scaffold tests kept after development is done
+become exactly this: they couple tests to implementation details, require
+changes whenever the internals are rearranged, and turn refactoring into a
+test-fixing exercise.
+
+**The rule:** delete scaffold tests when development of that piece is done.
+The tests that survive are the ones that protect a requirement.
+
+**Write dirty code to get green, then refactor.** No new tests are written
+during the Refactor phase. No new tests for refactored internals, private
+functions, or intermediate classes. The surviving test suite covers the
+public boundary. The internals are free to change.
+
+
+### Test the port, not the implementation
+
+"Unit" means module — not a class, not a method. The unit of test is the
+publicly exported surface of a module: its port, its API, its stable contract.
+The unit of isolation is the test itself.
+
+Both development (TDD) and acceptance (demonstrating a story is done) use
+tests written against this port. The same test boundary serves both purposes.
+
+This derives from information hiding: implementation details are hidden behind
+a public facade kept deliberately stable. Tests against the facade do not
+break when the internals change. When you can refactor freely without touching
+tests, the boundary is drawn correctly.
+
+> "We must not couple tests to implementation. Test only the public API."
+
+A test whose intent is not immediately clear when you read it is testing the
+wrong thing. If a test only exercises mock behaviour rather than real
+behaviour, it is testing the mock, not the software.
+
+
+### What not to mock
+
+Do not mock internals, private functions, or adapters. Adapters are tested
+separately with real infrastructure (Layer 2 below). Domain logic is tested
+against the Decider directly — no mocks needed because the Decider is a pure
+function. The only test doubles used are for external systems the team does not
+control, and those doubles implement the full port interface, not a partial mock.
+
+Avoid IoC container wiring in tests. Tests construct their own dependencies
+directly. A test that relies on a container to assemble its subject under test
+is not isolated.
+
+
+### TDD helps design the best possible API
+
+An advantage of writing the test first is that it forces you to design the
+public interface before you write the implementation. If the test is hard to
+write, the API is wrong. The test suite is the first consumer of the module.
+If it is unpleasant to use, the module will be unpleasant to use.
+
+
 ## Goals
 
 - Every behaviour described in a user story acceptance criterion has a
-  corresponding automated test with the same ID.
+  corresponding automated test with the same ID, written against the module's
+  public port — not against its internals.
 - Every architectural characteristic defined in
   `06-architectural-characteristics.md` is verified by a fitness function that
   runs in CI.
@@ -15,6 +116,8 @@
   locally on the happy path.
 - External systems the team does not control (payment gateway, identity broker,
   address validation) are never a test dependency for the domain.
+- Refactoring never breaks the test suite. If it does, the tests are coupled
+  to implementation details and must be fixed to target the public boundary.
 
 
 ## Test Layers
@@ -22,10 +125,21 @@
 Tests are organised into five layers. Each layer has a defined scope, speed
 target, and placement in the commit/push/CI workflow.
 
-### Layer 1 - Pure Function Tests
+### Layer 1 - Pure Function Tests (tests written on a port)
 
 **Scope:** Deciders, business rule predicates, FSM transition validation,
 event evolution functions, domain utilities.
+
+**The port:** The Decider `decide` function is the stable public contract of
+the domain module. Tests call it directly with state and command maps and
+assert on the returned events or errors. No mocks. No infrastructure. The
+Decider is a pure function: same input, same output, always.
+
+These are the primary keeper tests. They survive because they protect
+requirements (user stories and acceptance criteria), not because they were
+scaffolded during implementation. Scaffold tests — tests written to work
+out internal logic during a development session — are deleted before the
+work is committed.
 
 **Characteristics:** No I/O. No database. No containers. No network. Pure
 functions in, assertions out.
@@ -34,7 +148,7 @@ functions in, assertions out.
 
 **Runs:** Pre-commit hook (mandatory gate before every local commit).
 
-**Naming:** Test names reference acceptance criterion IDs where applicable:
+**Naming:** Test names reference acceptance criterion IDs:
 ```clojure
 (deftest AC-AP-007-005-submit-draft-rejects-missing-company-name ...)
 ```
@@ -43,14 +157,19 @@ functions in, assertions out.
 broken invariants in the domain model.
 
 
-### Layer 2 - Adapter / Integration Tests
+### Layer 2 - Adapter / Integration Tests (ports to adapters)
 
 **Scope:** Database adapters (event store, command ledger, projections, audit
-log), message bus adapters, outbox publisher. Each test exercises one adapter
-against a real instance of the dependency.
+log), outbox publisher. Each test exercises one adapter against a real instance
+of its dependency.
 
-**Characteristics:** Uses Testcontainers to spin up real Postgres and RabbitMQ
-(or equivalent) instances. No domain business logic in scope.
+**The port:** Each adapter test calls the port interface and asserts that the
+adapter implements it correctly against real infrastructure. Adapters are not
+mocked — they are tested here, with real Postgres, so they can be trusted
+everywhere else. Domain logic is not in scope.
+
+**Characteristics:** Uses Testcontainers to spin up a real Postgres instance.
+No domain business logic. No mocking of adapters.
 
 **Speed target:** Full suite under 45 seconds.
 
@@ -60,20 +179,27 @@ against a real instance of the dependency.
 containers run in the pipeline. See `docs/setup/testcontainers.md` for
 Rancher Desktop configuration.
 
-**What this catches:** Schema mismatches, ORM/SQL bugs, connection handling,
+**What this catches:** Schema mismatches, SQL bugs, connection handling,
 transaction boundaries, adapter interface compliance.
 
 
-### Layer 3 - Behavioural / Acceptance Tests
+### Layer 3 - Behavioural / Acceptance Tests (system port)
 
-**Scope:** Full vertical slices through the system - HTTP request in, events
-persisted, projection updated, HTTP query response out. These are the tests
-that verify acceptance criteria for user stories.
+**Scope:** Full vertical slices — HTTP request in, events persisted,
+projection updated, HTTP query response out. These verify acceptance criteria
+for user stories. Both development (TDD) and acceptance (story sign-off) use
+these tests.
 
-**Characteristics:** The application starts with in-memory or Testcontainers
-infrastructure. External systems (Stripe, OIDC broker, address validation) are
-replaced by test doubles (see Mocking Strategy below). Tests are written in
-Given/When/Then structure matching the acceptance criteria.
+**The port:** The HTTP API is the system-level port. Tests call it directly
+with realistic inputs and assert on observable outputs. They do not reach
+inside the system to check internal state. External systems the team does not
+control are replaced by test doubles that implement the full port interface —
+not partial mocks (see Mocking Strategy below).
+
+**Characteristics:** The application runs with Testcontainers infrastructure.
+Tests follow Given/When/Then matching the acceptance criteria. They are not
+written in Gherkin or any executable specification format — they are standard
+developer tests in Clojure, readable by anyone who can read code.
 
 **Speed target:** Full suite under 3 minutes.
 
@@ -134,6 +260,73 @@ break a frontend or integration client.
 Performance and load tests are maintained in the `perf/` directory and run
 separately from the CI gate. They are not blocking. They exist to establish
 baselines and detect regressions in throughput or latency before a release.
+
+
+## Testcontainers
+
+Testcontainers is a library that programmatically starts and stops real Docker
+containers — Postgres, and any other infrastructure dependency — directly from
+test code, with no separate setup step and no persistent local service required.
+Understanding why it is used is inseparable from understanding the test strategy.
+
+
+### Why Testcontainers makes "don't mock adapters" viable
+
+The philosophy above says: do not mock adapters — test them with real
+infrastructure. Testcontainers is what makes this economically feasible. Without
+it, testing an adapter against real Postgres would require every developer to
+run a local database, manage its schema, and keep it consistent with CI. With
+Testcontainers, the test itself starts the container, runs migrations, executes
+the test, and tears the container down. The test is self-contained and portable.
+
+This is the reason Layer 1 (pure function) tests can assert confidently that
+the Decider works correctly without any infrastructure at all — the adapters
+have been separately verified in Layer 2 against a real database, using
+Testcontainers. The two layers trust each other because each does one job
+completely.
+
+
+### Where Testcontainers is used
+
+| Layer | Infrastructure started | Purpose |
+|-------|----------------------|---------|
+| Layer 2 — Adapter tests | Postgres | Verify each adapter implements its port correctly against real SQL, real transactions, real constraints |
+| Layer 3 — Behavioural tests | Postgres | Run the full application stack; events are persisted, projections updated, queries return real data |
+
+Layer 1 (pure function) tests start no containers. The Decider is a pure
+function. Layer 4 and Layer 5 may use a running system rather than
+Testcontainers depending on the fitness function.
+
+
+### Test isolation
+
+Each test creates its own state and tears it down. No test assumes any
+particular database state left by a previous test. This is what the principle
+"the unit of isolation is the test" means in practice.
+
+Two mechanisms are used:
+
+**Transaction rollback** (preferred for Layer 2): the test wraps its database
+operations in a transaction and rolls back at the end. No data persists between
+tests. This is fast — no container restart between tests.
+
+**Schema reset** (used for Layer 3 full-stack tests): the application starts
+against a fresh schema. Tests run against a known-empty database. Slower but
+necessary when the full application stack manages its own connections.
+
+Because tests are isolated, they can run fully in parallel and finish in
+seconds. Shared state between tests is the primary cause of flaky test suites.
+Testcontainers with isolation eliminates that cause.
+
+
+### Local and CI parity
+
+The same containers run locally and in CI. There is no "works on my machine"
+class of failure. A test that passes locally passes in CI because both
+environments start from the same container image.
+
+Local setup requires Rancher Desktop (or Docker Desktop) with the
+`api.version=1.44` configuration. See `docs/setup/testcontainers.md`.
 
 
 ## Development Workflow and Git Gates
@@ -208,6 +401,12 @@ interface that behave deterministically in a test context.
 partial mocks. This ensures that a slow integration test with a real adapter
 can always be substituted for a fast test with a stub without changing the
 test setup.
+
+**Do not mock internals, private functions, or adapters.** Mocking an adapter
+does not test the adapter — it tests the mock. Adapter correctness is verified
+in Layer 2 with real infrastructure. Domain correctness is verified in Layer 1
+with pure functions. There is no remaining case that requires mocking an
+internal. If the test setup feels like it requires one, the boundary is wrong.
 
 
 ## Behavioural Test Structure
