@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:18.4-alpine
+    environment:
+      POSTGRES_DB: registry
+      POSTGRES_USER: registry
+      POSTGRES_PASSWORD: registry
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registry -d registry"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  migrate:
+    image: flyway/flyway:12-alpine
+    command: >
+      -url=jdbc:postgresql://postgres:5432/registry
+      -user=registry
+      -password=registry
+      -locations=filesystem:/flyway/sql
+      migrate
+    volumes:
+      - ./backend/resources/db/migrations:/flyway/sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      REGISTRY_DB_URL: "jdbc:postgresql://postgres:5432/registry?user=registry&password=registry"
+      REGISTRY_DB_USER: registry
+      REGISTRY_DB_PASSWORD: registry
+      RABBITMQ_HOST: rabbitmq
+      PORT: "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  postgres-data:

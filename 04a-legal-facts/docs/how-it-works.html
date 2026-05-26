@@ -1,0 +1,2010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How the Registry Works — End to End</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
+
+  :root {
+    --bg:        #0f1117;
+    --bg2:       #181c27;
+    --border:    #2a2f3f;
+    --accent:    #4f8ef7;
+    --accent2:   #7eb8f7;
+    --green:     #4ecb8d;
+    --amber:     #f7c948;
+    --muted:     #6b7494;
+    --text:      #d8ddf0;
+    --text-soft: #9aa3c2;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 300;
+    line-height: 1.7;
+    padding: 2rem 1.5rem 6rem;
+    max-width: 700px;
+    margin: 0 auto;
+  }
+
+  /* ---- header ---- */
+  .doc-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+    font-weight: 500;
+    color: #fff;
+    line-height: 1.3;
+    margin-bottom: 1rem;
+  }
+
+  .subtitle {
+    color: var(--text-soft);
+    font-size: 0.92rem;
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ---- step ---- */
+  .step {
+    padding-left: 1.25rem;
+    border-left: 2px solid var(--border);
+    margin-bottom: 3rem;
+    position: relative;
+  }
+
+  .step::before {
+    content: attr(data-n);
+    position: absolute;
+    left: -1.1rem;
+    top: 0;
+    width: 2rem;
+    height: 2rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--accent);
+    /* flex on pseudo-elements needs this trick */
+    line-height: 2rem;
+    text-align: center;
+  }
+
+  .step-tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+  }
+
+  .step-title {
+    font-size: 1rem;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 0.85rem;
+    line-height: 1.4;
+  }
+
+  .step p {
+    color: var(--text-soft);
+    font-size: 0.9rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .step p:last-child { margin-bottom: 0; }
+
+  /* ---- code ---- */
+  pre {
+    background: #0a0d14;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--accent2);
+    overflow-x: auto;
+    margin: 0.85rem 0;
+    line-height: 1.6;
+  }
+
+  code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8em;
+    background: #1a1f2e;
+    color: var(--accent2);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+
+  /* ---- callout ---- */
+  .callout {
+    background: #111827;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--green);
+    border-radius: 4px;
+    padding: 0.85rem 1rem;
+    margin: 0.85rem 0;
+    font-size: 0.86rem;
+    color: var(--text-soft);
+    line-height: 1.6;
+  }
+
+  .callout strong.label {
+    color: var(--green);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 0.4rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .callout.amber { border-left-color: var(--amber); }
+  .callout.amber strong.label { color: var(--amber); }
+
+  .callout-subhead {
+    color: var(--text);
+    font-size: 0.84em;
+    font-weight: 500;
+    display: block;
+    margin-top: 0.85rem;
+    margin-bottom: 0.2rem;
+  }
+
+  em { font-style: italic; color: var(--text); }
+</style>
+</head>
+<body>
+
+<p class="doc-label">Developer Guide</p>
+<h1>How the Registry Works<br>End to End</h1>
+<p class="subtitle">
+  This document follows a single registration request from a person clicking
+  Submit all the way to a company becoming a legal entity in the register.
+  Written for new developers joining the team.
+</p>
+
+<!-- STEP 00 -->
+<div class="step" data-n="00">
+  <p class="step-tag">Background</p>
+  <p class="step-title">Why this system exists</p>
+  <p>
+    Someone has decided to start a company. Before it legally exists, it must
+    be registered with the national registry — because <em>a company does not
+    exist until the state says it does</em>.
+  </p>
+  <p>
+    Registration is not something you do on a whim. Before making an
+    application, an identity-verified applicant must gather the necessary
+    information: a proposed company name, at least two directors who have
+    verified-person records, and a registered office address. The registry
+    website sets out the full process clearly, and reading it carefully before
+    starting an application will save time.
+  </p>
+  <p>
+    This document follows what happens from that moment — a person clicking
+    Submit — all the way to a company becoming a legal entity in the register.
+  </p>
+</div>
+
+<!-- STEP 01 -->
+<div class="step" data-n="01">
+  <p class="step-tag">Authentication</p>
+  <p class="step-title">The applicant proves who they are</p>
+  <p>
+    Before the applicant can do anything in the registry, they must
+    authenticate. This is not a simple username and password check.
+    The registry uses a third-party <em>identity broker</em> that is
+    compliant with OIDC — OpenID Connect — an open standard for identity
+    verification built on top of OAuth 2.0.
+  </p>
+  <p>
+    The applicant's browser is redirected to the identity broker, which
+    coordinates with the appropriate identity provider. The Registry only
+    accepts identity providers that perform identity verification as part of
+    signup and issue a verified natural-person digital identity. Depending on
+    the configuration, the applicant may also be
+    required to complete multi-factor authentication — for example,
+    confirming a code sent to their phone. This entire flow happens between
+    the browser and the broker's own infrastructure — it does not touch the
+    registry server at all.
+  </p>
+
+  <div class="callout">
+    <strong class="label">The Registry consumes verified identities</strong>
+    This project does not perform identity proofing itself. It trusts the
+    verified natural-person claim supplied by the identity broker for users,
+    and it trusts verified-person records supplied by external verification
+    services for natural persons named in company data.
+    <br><br>
+    A future project may add a parallel workflow that contacts proposed
+    directors, asks them to complete identity verification through a trusted
+    third-party provider, and resumes examination only when confirmation is
+    received. In this contract, the flag or record must already exist before
+    the relevant command can succeed.
+  </div>
+
+  <div class="callout">
+    <strong class="label">The Authorization Code Flow with PKCE and BFF</strong>
+    The registry uses a specific authentication flow called the
+    <em>Authorization Code Flow with PKCE (Proof Key for Code Exchange)
+    and the Backend for Frontend (BFF) pattern</em>. This is the most
+    secure approach available for browser-based applications.
+    <span class="callout-subhead">Authorization Code Flow</span>
+    Rather than sending a token directly to the browser, the identity
+    broker sends a short-lived, single-use <em>authorization code</em>.
+    The registry's backend server exchanges that code for the actual token.
+    The browser never sees the token itself.
+    <span class="callout-subhead">PKCE — Proof Key for Code Exchange</span>
+    Before the flow starts, the backend generates a secret and sends a
+    one-way hash of it to the broker. When the backend later exchanges the
+    code for a token, it sends the original secret. The broker verifies it
+    matches the hash. Even if an attacker intercepts the authorization code
+    in transit, they cannot exchange it — they do not have the secret.
+    <span class="callout-subhead">BFF — Backend for Frontend</span>
+    The registry's backend acts as an intermediary for all authentication.
+    The Angular frontend never handles tokens at all. Instead it communicates
+    with the backend using a secure HttpOnly cookie that JavaScript cannot
+    read. Tokens live only on the server. This eliminates an entire class of
+    attacks where malicious JavaScript injected into the page steals tokens.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Redis — where the session lives</strong>
+    When authentication completes, the backend receives the access token,
+    refresh token, and the user's identity claims from the broker. These are
+    not stored in Postgres — a database round trip on every request would be
+    too slow. Instead they are stored in <em>Redis</em>, which runs as a pod
+    inside the Kubernetes cluster and can retrieve a record in microseconds.
+    <br><br>
+    Before anything is written to Redis, the token data is encrypted.
+    The encryption is handled by <em>OpenBao's Transit engine</em> — a
+    feature OpenBao describes as encryption as a service. OpenBao runs on
+    dedicated VMs outside the Kubernetes cluster, on a private network
+    reachable from the cluster but not from the public internet. The backend
+    sends the plaintext token data to OpenBao Transit over mutual TLS.
+    OpenBao encrypts it using a key that is stored inside OpenBao and
+    <em>never leaves it</em>, then returns the ciphertext. The backend
+    stores that ciphertext in Redis.
+    <br><br>
+    The backend generates a random <em>session ID</em> and uses it as the
+    Redis key. Under that key it stores the encrypted payload containing
+    the access token, refresh token, and the applicant's verified identity
+    claims. All encrypted by OpenBao Transit before storage.
+    <br><br>
+    The session ID is set as a cookie with three security flags.
+    <em>HttpOnly</em> means JavaScript cannot read it — it is invisible
+    to scripts, which defeats XSS token theft. <em>Secure</em> means the
+    browser will only send it over HTTPS — never over plain HTTP.
+    <em>SameSite=Strict</em> means the browser will not send it on
+    requests originating from other sites — which defeats Cross-Site
+    Request Forgery (CSRF) attacks. All three flags together.
+    JavaScript cannot read it. It is a pointer
+    into Redis — useless without the server, and useless on the server
+    without OpenBao to decrypt the payload.
+    <br><br>
+    When the applicant logs out, the backend deletes the Redis entry. The
+    session is immediately and completely invalidated.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">Is it not risky to send plaintext tokens to OpenBao over the network?</strong>
+    This is a reasonable concern, especially given that OpenBao runs on
+    separate VMs outside the cluster rather than as an in-cluster service.
+    The call does cross a network boundary.
+    <br><br>
+    The mitigations are:
+    <br><br>
+    All communication between the Kubernetes cluster and the OpenBao VMs
+    uses <em>mutual TLS</em> — both sides present certificates and verify
+    each other. The plaintext is protected in transit. An attacker
+    intercepting the network between the cluster and OpenBao would see
+    only encrypted traffic.
+    <br><br>
+    The OpenBao VMs sit on a private network segment with no public internet
+    exposure. Network-level access controls — firewalls and security group
+    rules — permit only the registry backend pods to reach OpenBao's API
+    port. Nothing else can connect.
+    <br><br>
+    The alternative — fetching the encryption key from OpenBao and encrypting
+    locally in the application — would expose the key in the application's
+    memory. If an attacker compromised the running process, they could
+    extract the key and decrypt everything in Redis. With OpenBao Transit,
+    the key <em>never leaves OpenBao</em>. The application only ever holds
+    ciphertext. Even a fully compromised backend process cannot extract the
+    key because it does not have it.
+    <br><br>
+    Every encrypt and decrypt call is logged by OpenBao's audit system.
+    Any unusual pattern is visible and can trigger an alert.
+  </div>
+
+  <div class="callout">
+    <strong class="label">How OpenBao and Redis are protected</strong>
+    <span class="callout-subhead">How the backend authenticates with OpenBao</span>
+    The backend uses <em>Kubernetes Service Account authentication</em>.
+    Every pod has a short-lived service account token automatically projected
+    into it by Kubernetes. OpenBao is configured to trust the Kubernetes
+    cluster and verifies this token with the Kubernetes API server. The
+    registry backend's service account is permitted to use the Transit engine
+    — and nothing else. No static passwords or API keys are involved.
+    This is the <em>Principle of Least Privilege</em>: every component is
+    granted only the minimum permissions needed to do its job. A compromised
+    backend pod cannot use OpenBao to read other secrets, access other key
+    rings, or perform administrative operations.
+    <span class="callout-subhead">How static secrets reach the application</span>
+    The Redis connection password and other static credentials are delivered
+    by an <em>OpenBao sidecar agent</em> — a small container that runs
+    alongside the registry backend in the same pod. The sidecar authenticates
+    to OpenBao, fetches the secrets, and writes them to a shared in-memory
+    volume only that pod can see. The registry backend reads them from that
+    file. It never calls OpenBao for these. When a secret rotates in OpenBao,
+    the sidecar picks up the new value automatically.
+    <span class="callout-subhead">Redis network isolation</span>
+    Redis is a Kubernetes service with no external exposure. Kubernetes
+    <em>Network Policies</em> restrict which pods can connect to it —
+    only the registry backend pods are permitted. TLS encrypts all traffic
+    between the backend and Redis within the cluster.
+    <span class="callout-subhead">OpenBao VM hardening</span>
+    The OpenBao VMs are not general-purpose servers. They run only OpenBao,
+    are access-controlled, patched, and monitored. OpenBao itself encrypts
+    all data before writing to its own storage — access to the underlying
+    VM disk is not sufficient to read secrets. OpenBao requires an unseal
+    process on startup, meaning the data is protected even if the VM is
+    cloned or its disk imaged.
+    <span class="callout-subhead">Automatic key rotation</span>
+    OpenBao rotates the Transit engine key on a schedule. Existing ciphertext
+    in Redis can still be decrypted using the previous key version and
+    re-encrypted with the new key without disrupting live sessions. The
+    backend never handles key rotation — OpenBao manages it entirely.
+    <span class="callout-subhead">The residual risk</span>
+    A realistic attack would require both compromising the private network
+    between the cluster and the OpenBao VMs, and breaking mutual TLS — or
+    alternatively compromising OpenBao itself. Any decrypt operation through
+    OpenBao's API is logged. This is a substantially harder target than
+    reading a key from an environment variable.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Why a broker, not a direct identity provider?</strong>
+    The broker decouples the registry from any single identity provider.
+    If the government introduces a new national identity scheme, or an
+    existing provider changes, only the broker needs updating — the registry
+    does not change.
+    <br><br>
+    When the registry receives a request, it does not simply accept the
+    session cookie at face value. It actively validates the associated token
+    with the identity broker — confirming the token is genuine, unexpired, and
+    was issued by a trusted broker. Only once that validation passes is the
+    request allowed to proceed.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Trust relationships — how the registry registers with the broker</strong>
+    The registry registers itself with the broker as a <em>confidential
+    client</em>. The broker issues a <em>client ID</em> (public) and a
+    <em>client secret</em> (private, known only to the registry backend).
+    The registry uses these when exchanging an authorization code for a token,
+    proving to the broker that it is the legitimate registry.
+    <br><br>
+    The broker also registers which <em>redirect URIs</em> are permitted —
+    the exact addresses it may send authorization codes back to. This prevents
+    an attacker registering a fake application and redirecting codes to their
+    own server.
+    <br><br>
+    Without this pre-established trust relationship, no authentication flow
+    can take place.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Token lifetimes — the risk and the trade-off</strong>
+    Local JWT validation is fast — the registry validates tokens in memory
+    using cached public keys, with no network call. But this introduces a
+    risk worth understanding.
+    <span class="callout-subhead">Access token — 5 minutes</span>
+    If an access token were stolen — which the BFF pattern makes very unlikely
+    — the attacker has at most 5 minutes before it expires. The registry cannot
+    revoke it sooner because validation is local — a JWT (JSON Web Token) is
+    self-contained and stateless; once issued it is valid until its expiry
+    claim is reached, regardless of what the server does. 5 minutes is the
+    industry standard for high-assurance systems.
+    <span class="callout-subhead">Refresh token — 1 hour</span>
+    When the access token expires, the backend silently uses the refresh token
+    to obtain a new one — the applicant sees nothing. The refresh token lives
+    only on the server. If a session is forcibly ended, the broker revokes the
+    refresh token immediately and the next renewal attempt fails.
+    <span class="callout-subhead">JWKS signing keys — cached 10 min, rotated quarterly</span>
+    The broker's public signing keys are cached locally for 10 minutes to
+    1 hour. The keys themselves rotate roughly four times a year. An emergency
+    rotation is possible if a key is compromised; the short cache duration
+    limits the exposure window.
+    <span class="callout-subhead">Is this acceptable?</span>
+    For a national companies registry — yes. The BFF pattern keeps tokens off
+    the browser. Access tokens are short-lived. Refresh tokens are server-side
+    and immediately revocable. A higher-assurance system (such as banking
+    transactions) might use token introspection for real-time revocation on
+    every request, accepting the performance cost in exchange.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">Accountability and audit</strong>
+    Because every request carries a verified identity, we know with certainty
+    who performed every action. Every command, every event in the database,
+    and every audit log entry is tied to a real, verified person. For a
+    national registry this is a legal requirement. If an applicant attempts
+    fraudulent activity, there is an unambiguous, tamper-evident trail.
+  </div>
+</div>
+
+<!-- STEP 02 -->
+<div class="step" data-n="02">
+  <p class="step-tag">Network security</p>
+  <p class="step-title">Every request to the registry passes through Cloudflare first</p>
+  <p>
+    Once authenticated, the applicant starts making requests to the registry
+    — creating a draft, submitting an application, and so on. These requests
+    never go directly to the registry server. Before any of them arrive,
+    they pass through Cloudflare.
+  </p>
+  <p>
+    When the browser makes a request to the registry's domain, it first
+    performs a <em>DNS lookup</em> — translating the domain name into an IP
+    address. That address belongs to Cloudflare, not to the registry server.
+    The registry server itself is never exposed directly to the public internet.
+  </p>
+
+  <div class="callout">
+    <strong class="label">What Cloudflare does</strong>
+    Cloudflare operates a global network of data centres that sits between
+    the public internet and the registry server. Every request passes
+    through this network before reaching the registry.
+    <span class="callout-subhead">WAF — Web Application Firewall</span>
+    Cloudflare runs two rulesets against every request. The first is
+    Cloudflare's own managed ruleset, maintained by their security team and
+    updated continuously as new threats emerge. The second is the
+    <em>OWASP Core Ruleset</em> — an industry-standard set of rules that
+    covers the most common web application attacks: SQL injection,
+    cross-site scripting, malformed headers, and similar exploits. Both
+    run before the request reaches the registry.
+    <span class="callout-subhead">DDoS protection</span>
+    DDoS protection is automatic on all Cloudflare plans — there is nothing
+    to configure and it cannot be turned off. It operates at three network
+    layers simultaneously: layer 3 and 4 (network-level packet floods) and
+    layer 7 (HTTP-level application attacks). Because Cloudflare's global
+    network handles enormous volumes of traffic across millions of sites,
+    it can absorb and filter attack traffic that would instantly overwhelm
+    a single server.
+    <span class="callout-subhead">Rate limiting</span>
+    Rate limiting rules restrict how many requests a client can make in a
+    given time window. Importantly, Cloudflare's advanced rate limiting can
+    count requests not just by IP address, but by session token, user ID,
+    or even a field within the JSON request body. For an authenticated API
+    like the registry, this means a compromised account cannot be used to
+    flood the system — the limit applies per verified identity, not just
+    per network address.
+    <span class="callout-subhead">IP and geographic blocking</span>
+    Requests from IP ranges or geographic regions associated with malicious
+    activity can be blocked outright at Cloudflare's edge — before they
+    consume any registry resources at all.
+    <span class="callout-subhead">Bot protection</span>
+    Cloudflare assigns a bot score to every request using behavioural
+    analysis, TLS fingerprinting, and machine learning. Known bots and
+    automated scrapers are challenged or blocked. Legitimate automated
+    systems — such as verified search engine crawlers — can be explicitly
+    allowed.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Cloudflare Tunnel — the registry server is never publicly reachable</strong>
+    Once Cloudflare decides a request is legitimate, it needs to deliver
+    it to the registry server. This is done via a
+    <em>Cloudflare Tunnel</em>.
+    <br><br>
+    A small daemon called <code>cloudflared</code> runs on the registry
+    server. On startup, it establishes a persistent <em>outbound-only</em>
+    connection to Cloudflare's edge network, encrypted with
+    post-quantum encryption. Cloudflare routes approved inbound traffic
+    back through this tunnel to the registry server.
+    <br><br>
+    This completely inverts the traditional model. There are no open
+    inbound ports on the registry server. There is no public IP address
+    that an attacker can target directly. The firewall can block all
+    inbound traffic entirely — the tunnel works purely through outbound
+    connections the server itself initiates. Even if an attacker discovered
+    the server's IP address, there is nothing listening to connect to.
+    <br><br>
+    This is the <em>Zero Trust</em> security model applied to network
+    access — never expose, never assume trust, always verify. No component
+    is reachable by default. Access must be explicitly granted and
+    authenticated at every boundary.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">Defence in Depth</strong>
+    <em>Defence in Depth</em> is a security principle: no single control
+    is sufficient, and each layer assumes the others can fail. Cloudflare
+    is the outer perimeter — it handles volume attacks, known exploit
+    patterns, and bot traffic before they reach the system. The registry's own authentication is
+    the inner perimeter — a request that somehow bypassed Cloudflare
+    would still need a valid verified identity to do anything. A stolen
+    session would be limited to a 5-minute access token window. Each
+    layer assumes the others can fail.
+  </div>
+</div>
+
+<!-- STEP 03 -->
+<div class="step" data-n="03">
+  <p class="step-tag">Browser → API</p>
+  <p class="step-title">The applicant creates a draft</p>
+  <p>
+    Once authenticated and through Cloudflare, the applicant can begin.
+    The first thing they do is create a <em>draft</em>. A draft is not a
+    registration application. It is a private workspace — a place to gather
+    and organise the required information before making a formal lodgement
+    with the Registry.
+  </p>
+  <p>
+    The applicant clicks a button — something like <em>Start a new company
+    registration</em> — and the browser sends:
+  </p>
+  <pre>POST /api/v1/drafts</pre>
+
+  <div class="callout">
+    <strong class="label">Every command is idempotent</strong>
+    Every command in this system can be safely sent more than once and
+    will produce the same result. This is not optional — it is a core
+    architectural guarantee.
+    <br><br>
+    When the browser sends a request, things can go wrong. The network
+    can drop the response after the server has already processed the
+    command. The applicant might click the button twice. A retry
+    mechanism might fire after a timeout. In all these cases, the
+    server might receive the same command more than once.
+    <br><br>
+    Without idempotency, a duplicate command could create a duplicate
+    draft, submit an application twice, or worse. For a national registry
+    where legal records depend on correctness, this is unacceptable.
+    <br><br>
+    The mechanism is the <em>command ID</em>. Every command carries a
+    unique ID — a UUIDv7 generated by the client before sending. The
+    system records the command ID in a command ledger together with the
+    command outcome. Events caused by that command record the command ID
+    as their <em>causation ID</em>, but causation ID is traceability
+    metadata, not the event's unique identity. Multiple events may share
+    the same causation ID when they were caused by the same command.
+    <br><br>
+    If the same command arrives a second time, the command ledger returns
+    the previously recorded outcome and the server performs no side
+    effects again. Nothing is recorded twice. The client cannot tell the
+    difference between a first execution and a repeat.
+    <br><br>
+    This also means retrying a failed request is always safe. The client
+    does not need to know whether the first attempt succeeded or not. It
+    simply resends the same command with the same command ID, and the
+    system handles it correctly either way.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Task-based UI vs CRUD</strong>
+    Instead of showing a generic form where the user edits fields and clicks
+    Save, the UI exposes named actions — each one corresponding directly to
+    what the user is trying to accomplish. This is a <em>task-based UI</em>,
+    a pattern popularised by Greg Young in the context of CQRS and DDD, and
+    contrasted with CRUD-based UIs where the server must infer intent from
+    which fields changed.
+    <br><br>
+    A CRUD-based API exposes resources — you GET a thing, PUT a thing, PATCH
+    a thing. The server has to guess what the user intended by comparing old
+    and new field values. A task-based API exposes intent — the endpoint name
+    tells the server exactly what the user wanted. There is no guessing.
+    <br><br>
+    This maps naturally to the backend architecture. Each named action in the
+    UI corresponds directly to a <em>command</em>. Each command is handled by
+    the Decider, which either accepts it and records an event, or rejects it.
+    This is CQRS — Command Query Responsibility Segregation. The user's action,
+    the API endpoint, the backend command, and the recorded event all share the
+    same name and the same intent.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Anatomy of the URL</strong>
+    Every part of this URL is a deliberate decision.
+    <span class="callout-subhead">/api</span>
+    Separates machine-readable API endpoints from browser-rendered pages.
+    <span class="callout-subhead">/v1</span>
+    The API version. If the API needs to change in a breaking way, a new
+    version (<code>/v2</code>) is introduced alongside the old one. Existing
+    clients keep working. Critical for a national registry where external
+    systems — tax authorities, banks, legal systems — cannot be forced to
+    update on your schedule.
+    <span class="callout-subhead">/drafts</span>
+    The <em>aggregate</em>. Each URL segment corresponds directly to a
+    Domain-Driven Design aggregate — the authoritative owner of a concept's
+    state and behaviour. A <code>draft</code> is a distinct aggregate from a
+    <code>registration-application</code>. They have different IDs, different
+    lifecycles, different rules, and different legal meaning. This is the same
+    pattern Stripe uses — <code>payment_intent</code>, <code>customer</code>,
+    <code>invoice</code> are all separate aggregates with their own URLs.
+    <span class="callout-subhead">No action name on creation</span>
+    POSTing to the aggregate root creates a new instance — the same convention
+    Stripe uses with <code>POST /v1/payment_intents</code>. Action names only
+    appear for operations on an existing resource:
+    <br><br>
+    <code>POST /api/v1/drafts/{id}/update</code><br>
+    <code>POST /api/v1/drafts/{id}/submit</code><br>
+    <code>POST /api/v1/drafts/{id}/cancel</code>
+    <br><br>
+    Compare directly with Stripe:
+    <br><br>
+    <code>POST /v1/payment_intents/{id}/confirm</code><br>
+    <code>POST /v1/payment_intents/{id}/cancel</code><br>
+    <code>POST /v1/payment_intents/{id}/capture</code>
+    <br><br>
+    The pattern is identical. The URL tells you the aggregate, the instance,
+    and the exact task. A new developer does not need documentation to
+    understand what an endpoint does. The name is the documentation.
+  </div>
+
+  <div class="callout">
+    <strong class="label">What a draft is — and what it is not</strong>
+    A draft has no legal existence. It is not visible to the Registry. It
+    cannot be examined or decided upon. It is purely the applicant's private
+    workspace.
+    <br><br>
+    A draft tolerates incomplete information. The applicant can create one
+    with minimal details and build it up over several sessions. There is no
+    completeness validation at this stage — that comes at submission.
+    <br><br>
+    Several business rules govern drafts:
+    <span class="callout-subhead">Maximum 5 active drafts per applicant</span>
+    An applicant may not have more than 5 active drafts at any time across
+    all their drafts, regardless of company type. A sixth creation attempt
+    is rejected by the Decider before any event is recorded.
+    <span class="callout-subhead">Drafts expire after 30 days</span>
+    A draft not submitted within 30 days is automatically expired. A
+    scheduled background job finds active drafts older than the configured
+    expiry threshold and issues an <code>ExpireDraft</code> command to each
+    one through the Decider — the same path as any other command. The state
+    machine is checked, the event is recorded, the audit trail is complete.
+    The business logic is never bypassed.
+    <span class="callout-subhead">Cancelled and expired drafts are retained</span>
+    Drafts are never deleted. A cancelled draft disappears from the
+    applicant's view but remains in storage permanently. This is a national
+    registry — every action, including abandoned attempts, is retained for
+    audit and legal purposes.
+  </div>
+
+  <p>
+    The system creates an empty draft and returns a draft ID — a
+    <em>UUIDv7</em>. Unlike UUIDv4 which is purely random, UUIDv7 embeds
+    a millisecond timestamp in its most significant bits. This means IDs
+    sort chronologically, which improves Postgres index performance and
+    means any ID in a log immediately tells you when it was created.
+    The applicant can now fill in the form across as many sessions as needed,
+    saving progress as they go.
+  </p>
+</div>
+
+<!-- STEP 04 -->
+<div class="step" data-n="04">
+  <p class="step-tag">Browser → API</p>
+  <p class="step-title">The applicant submits the draft</p>
+  <p>
+    When the applicant is satisfied the draft is complete, they click Submit.
+    This is the moment the draft becomes a formal <em>registration
+    application</em> — a legal act of lodgement with the Registry. The
+    browser sends:
+  </p>
+  <pre>POST /api/v1/drafts/{id}/submit</pre>
+
+  <div class="callout">
+    <strong class="label">Three distinct domain concepts</strong>
+    It is worth being explicit about what these three things are, because
+    they are often confused:
+    <br><br>
+    A <strong style="color: var(--text)">Draft</strong> is a private
+    workspace. No legal existence. Tolerates incomplete information. Owned
+    by the applicant. Has its own ID.
+    <br><br>
+    A <strong style="color: var(--text)">Registration Application</strong>
+    is a formal lodgement. A legal act. Always complete by definition —
+    submission enforces this. Owned by the Registry. Has its own separate
+    ID. Created from a draft but is a different thing.
+    <br><br>
+    A <strong style="color: var(--text)">Company Registration</strong> is
+    a legal fact recorded in the Register. The company exists in law from
+    this moment. Permanent. Has its own ID — the registration number. Created
+    from an approved registration application but is a different thing again.
+  </div>
+
+  <div class="callout">
+    <strong class="label">What happens when the draft is submitted</strong>
+    Submission is a validation gate. The Decider checks that the draft
+    contains everything the law requires:
+    <br><br>
+    — A proposed company name<br>
+    — At least two proposed directors<br>
+    — Every director has a verified-person record<br>
+    — Every director confirmed as a natural person<br>
+    — A registered office address
+    <br><br>
+    If anything is missing the command is rejected, the draft is unchanged,
+    and no event is recorded. The applicant sees the errors and corrects them.
+    <br><br>
+    If all checks pass, the Decider emits a <code>DraftSubmitted</code> event.
+    The draft is now in its terminal state — it cannot be updated, cancelled,
+    or submitted again. It is retained in storage permanently.
+    <br><br>
+    A <em>process manager</em> listens for <code>DraftSubmitted</code> events.
+    When it sees one, it issues a <code>CreateRegistrationApplication</code>
+    command, which creates a new aggregate — a registration application — with
+    its own new ID. The content of the draft is copied in. The draft ID is
+    recorded on the application as an audit reference.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">Why a process manager rather than a direct call?</strong>
+    The process manager is what makes this an
+    <em>Event-driven Architecture (EDA)</em>. In EDA, components communicate
+    by producing and consuming events rather than calling each other directly.
+    The Draft aggregate does not know about the Registration Application
+    aggregate. It simply records what happened. The process manager, listening
+    to the event stream, decides what to do next.
+    <br><br>
+    This means the two aggregates are fully decoupled. Adding a new reaction
+    to a <code>DraftSubmitted</code> event — a confirmation email, a supervisor
+    notification — requires no changes to the Draft aggregate at all.
+    <br><br>
+    The process manager is idempotent. If it sees the same
+    <code>DraftSubmitted</code> event twice — which can happen in distributed
+    systems — it does nothing the second time. It records the event it has
+    handled and issues commands with stable command IDs so retries return the
+    previous outcome rather than appending duplicate events.
+  </div>
+
+  <div class="callout">
+    <strong class="label">The process manager is a FSM — and must save state durably</strong>
+    A process manager is not just a listener that fires and forgets. For
+    any workflow spanning more than one step, it is a
+    <em>finite state machine</em> — it moves through defined states in
+    response to events it receives, and issues commands as a result of
+    those transitions.
+    <br><br>
+    The draft submission process is simple — one trigger, one command,
+    one confirmation:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    [Waiting]<br>
+    &nbsp;&nbsp;→ DraftSubmitted received<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ issues CreateRegistrationApplication<br>
+    [AwaitingConfirmation]<br>
+    &nbsp;&nbsp;→ RegistrationApplicationCreated received<br>
+    [Completed]
+    </code>
+    <br>
+    But longer workflows — approval involving address validation, legal
+    review, or payment — have many states, branches, timeouts, and
+    compensating actions for failures. The FSM must be explicit about all.
+    <span class="callout-subhead">Why state persistence is critical</span>
+    A process manager that does not durably save its state is dangerous.
+    If it crashes between receiving an event and issuing the resulting
+    command — or between issuing a command and receiving confirmation —
+    it must recover to exactly the right position in the FSM on restart.
+    It cannot guess where it was. It cannot start from the beginning.
+    <br><br>
+    Its state must be persisted durably before any command is issued,
+    recovered correctly on restart, and idempotent — replaying the same
+    event must not advance the FSM twice.
+    <span class="callout-subhead">Implemented as an event-sourced FSM</span>
+    In this system the process manager is implemented using the same
+    pattern as aggregates — event sourcing. Its state transitions are
+    recorded as events in their own dedicated event stream. On restart
+    it replays its own events to rebuild its current FSM position, exactly
+    as aggregates do.
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    draft-submission-process/{id} event stream:<br>
+    &nbsp;&nbsp;DraftSubmissionStarted      → state: AwaitingAppCreation<br>
+    &nbsp;&nbsp;AppCreationCommandIssued    → state: AwaitingConfirmation<br>
+    &nbsp;&nbsp;AppCreationConfirmed        → state: Completed
+    </code>
+    <br>
+    This gives a full audit trail of the coordination itself — not just
+    the domain facts. You can answer: what was the process manager doing
+    at 14:32:07? Had it issued the command? Was it still waiting? For a
+    national registry where auditability is a legal requirement this matters.
+    <span class="callout-subhead">The process manager is not a domain aggregate</span>
+    It does not enforce business invariants. It does not own domain concepts.
+    But it uses the same infrastructure — event sourcing, FSM, event store —
+    for coordination purposes. It is event-sourced coordination infrastructure,
+    not a domain model.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">A more complex example — the approval process manager</strong>
+    The registration application approval workflow illustrates why a
+    robust FSM is necessary. The approval Decider records the Registrar's
+    decision. The process manager then performs the follow-on registration
+    work:
+    <br><br>
+    — Observe <code>RegistrationApplicationApproved</code><br>
+    — Issue <code>CreateRegisteredCompany</code> with a new Registration Number<br>
+    — Wait for <code>RegisteredCompanyCreated</code><br>
+    — Notify the applicant only after the registered company exists<br>
+    <br>
+    The approval process manager FSM:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    [Waiting]<br>
+    &nbsp;&nbsp;→ RegistrationApplicationApproved → [CreatingRegisteredCompany]<br>
+    [CreatingRegisteredCompany]<br>
+    &nbsp;&nbsp;→ RegisteredCompanyCreated → [NotifyingApplicant]<br>
+    &nbsp;&nbsp;→ Failed → [CompensatingAction]<br>
+    [NotifyingApplicant]<br>
+    &nbsp;&nbsp;→ NotificationSent → [Completed]
+    </code>
+    <br>
+    Each state transition is an event in the process manager's own stream.
+    If it crashes while in <code>NotifyingApplicant</code>, it restarts in
+    that state — it does not re-create the registered company or re-approve
+    the application. It simply retries the notification. No domain state is
+    corrupted. No business rules run twice.
+    <span class="callout-subhead">Compensating actions</span>
+    If registered-company creation fails after approval is recorded, the process
+    manager moves to <code>CompensatingAction</code> and issues a corrective
+    command — recording the failure, alerting operations, ensuring no
+    inconsistent state. This is the <em>Saga pattern</em> (described in detail in Chris Richardson's
+    <em>Microservices Patterns</em>) — a sequence of local transactions where
+    each step emits an event triggering the next, and failures trigger
+    explicit repair actions. In this registry, compensation does not alter or
+    delete legal facts that have already been recorded. It records the failure,
+    alerts operations, and allows the missing registration step to be retried.
+    The event-sourced FSM makes each step explicit, auditable, and recoverable.
+    <span class="callout-subhead">Timeouts</span>
+    If registered-company creation or applicant notification has not completed
+    within a configured threshold, the process manager records a timeout and
+    retries or alerts operations. The timeout is tracked against the process
+    manager's own event stream timestamp — no separate timer infrastructure
+    needed.
+  </div>
+</div>
+
+<!-- STEP 05 -->
+<div class="step" data-n="05">
+  <p class="step-tag">Inside the server</p>
+  <p class="step-title">The server processes the submit command</p>
+  <p>
+    The request has passed Cloudflare, been authenticated, and arrived
+    at the registry's Clojure backend. Now everything happens in memory
+    — fast, pure, and auditable. Let us follow it step by step.
+  </p>
+
+  <div class="callout">
+    <strong class="label">1. The middleware stack</strong>
+    Before the request reaches any business logic, it passes through
+    a stack of middleware functions. Each one does one specific job.
+    <span class="callout-subhead">Token validation</span>
+    The session cookie is read. The backend looks up the session ID in
+    Redis, retrieves the encrypted payload, calls OpenBao's Transit
+    engine to decrypt it, and validates the access token using the
+    cached JWKS public key. If anything fails — missing cookie, expired
+    token, invalid signature — a <code>401</code> is returned immediately
+    and nothing else happens.
+    <span class="callout-subhead">Correlation ID</span>
+    The middleware reads the <code>x-correlation-id</code> header from
+    the request. If one is present it is used. If not, a new UUIDv7 is
+    generated. It is attached to the request and will flow through every
+    subsequent operation — every log line, every event, every database
+    write — for the lifetime of this request.
+    <span class="callout-subhead">JSON deserialisation</span>
+    The request body is parsed from JSON into a Clojure map.
+  </div>
+
+  <div class="callout">
+    <strong class="label">2. The router</strong>
+    Reitit — the routing library — matches the URL path to the correct
+    handler function. <code>POST /api/v1/drafts/{id}/submit</code> maps
+    to the <code>submit-draft</code> handler. The draft ID is extracted
+    from the path.
+  </div>
+
+  <div class="callout">
+    <strong class="label">3. The handler</strong>
+    The handler is deliberately thin. It does four things only:
+    <br><br>
+    — Extracts the draft ID from the path<br>
+    — Extracts the applicant identity from the verified session<br>
+    — Builds a command map:<br>
+    <br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    {:command/type :SubmitDraft<br>
+    &nbsp;:draft-id     "01966b3e-..."<br>
+    &nbsp;:applicant-id "a7f21c..."}
+    </code>
+    — Passes it to the runner
+    <br><br>
+    No business logic lives in the handler. It knows nothing about state
+    machines, business rules, or events. It is purely a translation layer
+    between HTTP and commands.
+    <br><br>
+    This separation — handler, runner, Decider — reflects the
+    <em>Hexagonal Architecture</em> pattern (also called Ports and Adapters,
+    described by Alistair Cockburn). The Decider is the pure domain core.
+    The runner is the application layer. The handler is the adapter that
+    connects HTTP to the application. Each layer depends only on the layer
+    inside it, never the other way around.
+  </div>
+
+  <div class="callout">
+    <strong class="label">4. The runner enriches the command</strong>
+    Before the command reaches the Decider, the runner adds two fields:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    {:command/type           :SubmitDraft<br>
+    &nbsp;:command/id             "01966b3f-..."  ← new UUIDv7<br>
+    &nbsp;:command/correlation-id "x-corr-id..."  ← from request<br>
+    &nbsp;:draft-id               "01966b3e-..."<br>
+    &nbsp;:applicant-id           "a7f21c..."}
+    </code>
+    The <code>command/id</code> is the idempotency key. It will become
+    the <code>causation-id</code> on every event this command produces.
+    The <code>correlation-id</code> flows from the original HTTP request
+    all the way into the event store.
+  </div>
+
+  <div class="callout">
+    <strong class="label">5. Loading the aggregate from the event store</strong>
+    The runner loads all past events for this draft from Postgres:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    SELECT event_data FROM draft_events<br>
+    WHERE  aggregate_id = ?<br>
+    ORDER  BY sequence_number ASC
+    </code>
+    It then <em>folds</em> those events through the Decider's
+    <code>evolve</code> function, one by one, to rebuild the current state
+    of the draft entirely in memory. Folding is a functional programming
+    concept: starting from an empty initial state, each event is applied
+    to the current state to produce the next state. The <code>evolve</code>
+    function takes the current state and one event, and returns the new
+    state. After all events are folded, the result is the current state
+    of the aggregate — complete, correct, and rebuilt entirely from its
+    history. There is no draft table with a current
+    state column. The state is always derived by replaying history. This
+    is <em>Event Sourcing</em> — the event store is an <em>append-only
+    log</em>. Events are written but never updated or deleted. Current state
+    is always a derived view, rebuilt on demand by folding events. This
+    pattern was described by Martin Fowler and Greg Young and is the
+    foundation of the system's auditability guarantees.
+    <br><br>
+    For a draft that has been created and updated a few times, this might
+    be three or four events. Replaying them takes microseconds.
+  </div>
+
+  <div class="callout">
+    <strong class="label">6. The Decider</strong>
+    The runner passes the rebuilt state and the command to the Decider's
+    <code>decide</code> function. This is where all business logic lives.
+    It runs in two layers, in strict order:
+    <span class="callout-subhead">State machine check — first</span>
+    Is this command legal in the current state? A draft in
+    <code>Active</code> state can accept <code>SubmitDraft</code>.
+    A draft in <code>Cancelled</code> or <code>Expired</code> state
+    cannot. If the state machine rejects the command, the Decider returns
+    an error immediately. No business rules are checked. Nothing is saved.
+    <span class="callout-subhead">Business rules — second</span>
+    If the state machine allows it, the business rules run. For
+    <code>SubmitDraft</code> this means checking that all required fields
+    are present and valid — company name, at least two directors, every
+    director has a verified-person record and is a natural person, the
+    applicant has a verified natural-person identity, and a registered office
+    address is present. Each failing check returns a specific error code.
+    <span class="callout-subhead">Events — if all checks pass</span>
+    The Decider returns a list of events to record. For a successful
+    submission this is a single event:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    {:event/id             "01966b40-..."<br>
+    &nbsp;:event/type           :DraftSubmitted<br>
+    &nbsp;:event/causation-id   "01966b3f-..."  ← the command/id<br>
+    &nbsp;:event/correlation-id "x-corr-id..."<br>
+    &nbsp;:draft-id             "01966b3e-..."<br>
+    &nbsp;:applicant-id         "a7f21c..."<br>
+    &nbsp;:company-name         "Acme Ltd"<br>
+    &nbsp;:directors            [...]<br>
+    &nbsp;:registered-office    {...}<br>
+    &nbsp;:occurred-at          "2026-05-26T..."}
+    </code>
+    The Decider is a pure function. It has no side effects. It does not
+    touch the database, the message broker, or any infrastructure. Given
+    the same state and command it will always return the same events.
+    This makes it trivial to test and reason about.
+    <br><br>
+    This pattern — a pure function that takes state and a command and
+    returns events — is known as the <em>Functional Event Sourcing
+    Decider</em> pattern, described by Jérémie Chassaing. It is the
+    foundation of how all three aggregates in this system work.
+  </div>
+
+  <div class="callout">
+    <strong class="label">7. Saving events to Postgres</strong>
+    The runner takes the events returned by the Decider and writes them
+    to the <code>draft_events</code> table inside a single database
+    transaction:
+    <br><br>
+    — The event is assigned the next sequence number for this aggregate<br>
+    — The command ledger prevents duplicate command handling<br>
+    — The event records the command ID as <code>causation_id</code> for traceability<br>
+    — <code>published = false</code> — the outbox pattern flags it for delivery<br>
+    — If two concurrent requests try to write the same sequence number,
+    Postgres rejects the second — this is the <em>Optimistic Concurrency
+    Control</em> pattern: no locks are held, but conflicts are detected
+    and rejected at write time<br>
+    <br>
+    If this transaction succeeds, the events and command outcome are durably
+    recorded. If it fails for any reason — constraint violation, database
+    error, server crash — the events are not saved and the command can be
+    safely retried.
+    <br><br>
+    The handler returns <code>200 OK</code> to the browser.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">8. The outbox publisher delivers the event</strong>
+    The event is now in Postgres with <code>published = false</code>.
+    A background thread — the outbox publisher — polls for unpublished
+    events every 200 milliseconds. When it finds the
+    <code>DraftSubmitted</code> event, it publishes it to RabbitMQ
+    and marks it <code>published = true</code>.
+    <br><br>
+    This solves the <em>dual-write problem</em> using the
+    <em>Transactional Outbox</em> pattern. The event is saved to Postgres
+    and published to RabbitMQ as two separate operations — but if the
+    publisher crashes after saving and before publishing, it simply retries
+    on the next poll cycle. Because commands are idempotent and events carry
+    stable event IDs plus causation/correlation metadata, consumers can handle
+    duplicates safely.
+    <br><br>
+    The process manager, listening on RabbitMQ, sees the
+    <code>DraftSubmitted</code> event and issues a
+    <code>CreateRegistrationApplication</code> command. A new aggregate
+    is born — the registration application — with its own ID, its own
+    event stream, and its own lifecycle. That is step 06.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Domain events vs integration events — what RabbitMQ actually carries</strong>
+    There is an important distinction worth understanding here, because
+    the two terms are often confused.
+    <span class="callout-subhead">Domain events</span>
+    A domain event is a fact that happened inside a bounded context,
+    recorded by an aggregate. <code>DraftSubmitted</code>,
+    <code>RegistrationApplicationCreated</code>,
+    <code>RegisteredCompanyCreated</code>. These are stored in Postgres in the
+    event store. They are the source of truth. They are immutable. They
+    exist to record the legal and operational history of the system.
+    They are what rebuilds aggregate state when you replay events.
+    <span class="callout-subhead">Integration events</span>
+    An integration event is a notification published across
+    <em>Bounded Context</em> boundaries — or to external systems — to tell
+    them something happened. A Bounded Context (a DDD term coined by Eric
+    Evans) is a clearly defined part of the system with its own language,
+    model, and ownership. In this project the registry is the bounded
+    context; Draft, RegistrationApplication, and RegisteredCompany are
+    aggregate boundaries inside it. Integration events travel on RabbitMQ
+    and are derived from domain events.
+    It is consumed by the process manager, the projectors, and any future
+    external system that needs to react to registry activity.
+    <span class="callout-subhead">The relationship in this system</span>
+    The domain event is stored first — durably, in Postgres, in the
+    transaction that validates and saves the command result. Only then
+    does the outbox publisher promote it to an integration event and
+    publish it to RabbitMQ. This ordering is deliberate and critical:
+    <br><br>
+    <code style="display: block; margin: 0.5rem 0; font-size: 0.78rem;">
+    Domain event → Postgres (source of truth)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓ outbox publisher<br>
+    Integration event → RabbitMQ (transport)
+    </code>
+    <br>
+    RabbitMQ is the transport layer, not the source of truth. If RabbitMQ
+    were lost entirely, nothing would be lost from the domain record —
+    all events are safe in Postgres. The outbox publisher would simply
+    re-publish them once RabbitMQ recovered.
+    <br><br>
+    In this system the domain event and the integration event carry the
+    same data — they are not different shapes. But they serve different
+    purposes and live in different places. A future external system —
+    a tax authority integration, a public API, an analytics pipeline —
+    consumes integration events from RabbitMQ. It never touches the
+    Postgres event store directly. The event store is internal. RabbitMQ
+    is the public boundary.
+  </div>
+
+  <div class="callout">
+    <strong class="label">At-least-once delivery — what it means and what it guarantees</strong>
+    RabbitMQ with a durable resilient cluster and persistent messages
+    provides <em>at-least-once delivery</em>. This is a precise term
+    worth understanding exactly.
+    <br><br>
+    <strong style="color: var(--text)">What it guarantees:</strong>
+    every message that is accepted by the broker will be delivered to a
+    consumer at least once. If RabbitMQ goes down before a consumer reads
+    a message, the message survives in the durable queue and is delivered
+    when the broker recovers. A message is never silently lost.
+    <br><br>
+    <strong style="color: var(--text)">What it does not guarantee:</strong>
+    a message will be delivered exactly once. RabbitMQ re-delivers any
+    message that was not acknowledged by its consumer. If a consumer reads
+    a message, begins processing it, and then crashes before sending an
+    acknowledgement, RabbitMQ will re-deliver that message to the next
+    available consumer. The message will be processed again.
+    <br><br>
+    This is correct and expected behaviour — not a bug. It means every consumer in this system must implement the
+    <em>Idempotent Consumer</em> pattern: processing the same message twice
+    must produce the same result as processing it once. This is a
+    well-established pattern described by Gregor Hohpe and Bobby Woolf in
+    <em>Enterprise Integration Patterns</em>.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Do we need an inbox pattern?</strong>
+    An inbox is the consumer-side equivalent of the outbox. Before
+    processing a message, the consumer writes it to a local inbox table.
+    If it crashes mid-processing, it recovers from its own inbox rather
+    than waiting for RabbitMQ to re-deliver.
+    <br><br>
+    With a durable RabbitMQ cluster and idempotent consumers this system
+    does not need a full inbox pattern. Instead it uses a lighter approach
+    that gives equivalent guarantees at lower complexity.
+    <span class="callout-subhead">Process manager and projectors</span>
+    These write to the event store or to read model tables. Commands that
+    append events are protected by the command ledger, and projectors are
+    protected by their own projection keys. If a
+    <code>CreateRegistrationApplication</code> command is issued twice with
+    the same command ID, the command ledger returns the previously recorded
+    outcome and no second write is attempted. If a projector tries to write
+    the same row to the examiner work queue twice, the primary key
+    constraint rejects it. No event-store-wide constraint on causation metadata is needed.
+    <span class="callout-subhead">External side effects — email, external APIs</span>
+    These require a different approach because there is no database
+    constraint to catch duplicates. For each such consumer, a lightweight
+    <code>processed_messages</code> table is maintained, keyed on the
+    message or event ID being consumed. Before processing, the consumer checks
+    this table. If the message ID is already there, it acknowledges the
+    message and stops — the work was already done. If not, it processes
+    the message, records the message ID, and acknowledges. This is
+    the inbox pattern in its minimal form.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">The guarantees this approach gives us — precisely stated</strong>
+    <span class="callout-subhead">No domain event is ever lost</span>
+    Domain events are written to Postgres before anything else happens.
+    If the system crashes at any point after that write, the event is
+    safe. The outbox publisher will deliver it when the system recovers.
+    This is an absolute guarantee — not probabilistic.
+    <span class="callout-subhead">No integration event is silently dropped</span>
+    RabbitMQ's durable cluster ensures every accepted message survives
+    broker restarts. The outbox pattern ensures every domain event is
+    eventually published. Together they guarantee that every domain event
+    becomes an integration event — eventually. Delivery may be delayed
+    by an outage, but it will happen.
+    <span class="callout-subhead">Every consumer is safe to retry</span>
+    Because every consumer checks message or event IDs before acting, re-delivery
+    of a message produces no additional side effects. A crashed and
+    restarted consumer picks up where it left off safely.
+    <span class="callout-subhead">What this approach does not guarantee</span>
+    It does not guarantee real-time delivery. If RabbitMQ is down for
+    an hour, integration events queue up in the outbox and are delivered
+    when it recovers. Consumers dependent on those events — email
+    notifications, the examiner work queue — will be delayed by the
+    same duration. For a national registry processing company registrations
+    this is an acceptable trade-off. For a real-time payment system it
+    might not be.
+    <span class="callout-subhead">The term to remember</span>
+    This architecture provides <em>at-least-once delivery with idempotent
+    consumers</em>. This is the standard, proven pattern for reliable
+    event-driven systems. It is what most serious event-driven architectures
+    use in production. Exactly-once delivery — the alternative — is
+    significantly harder to achieve and comes with substantial performance
+    and complexity costs that are rarely justified.
+  </div>
+</div>
+</html>
+
+<!-- STEP 06 -->
+<div class="step" data-n="06">
+  <p class="step-tag">Inside the server — event-driven</p>
+  <p class="step-title">The process manager creates the registration application</p>
+  <p>
+    The <code>DraftSubmitted</code> event has been published by the outbox
+    publisher. The process manager — a component that listens to the event
+    stream — picks it up and responds. This is the event-driven part of the
+    architecture in action.
+  </p>
+
+  <div class="callout">
+    <strong class="label">What a process manager is</strong>
+    A process manager listens for specific events and issues commands in
+    response. It coordinates work that spans more than one aggregate without
+    either aggregate knowing about the other.
+    <br><br>
+    In this case the process manager listens for <code>DraftSubmitted</code>
+    and responds by issuing a <code>CreateRegistrationApplication</code>
+    command. The Draft aggregate does not know this happens. The Registration
+    Application aggregate does not know where it came from. The process
+    manager is the only thing that knows about both.
+    <br><br>
+    This decoupling is intentional. It means either aggregate can change
+    independently. New reactions to <code>DraftSubmitted</code> — a
+    confirmation email, a supervisor alert, a statistics counter — can be
+    added by writing a new listener, with no changes to any existing code.
+  </div>
+
+  <div class="callout">
+    <strong class="label">What the process manager does</strong>
+    When the process manager sees a <code>DraftSubmitted</code> event it:
+    <span class="callout-subhead">1. Checks for idempotency</span>
+    Before doing anything, it checks whether it has already processed this
+    event. It does this by querying whether a registration application
+    already exists with this draft ID as its source. If one exists, it
+    stops — this event has already been handled. This is the process
+    manager's own idempotency guard, separate from the command ledger.
+    <span class="callout-subhead">2. Generates a new aggregate ID</span>
+    The registration application gets a brand new UUIDv7 — completely
+    separate from the draft ID. These are two different aggregates with
+    two different identities.
+    <span class="callout-subhead">3. Issues the command</span>
+    The process manager issues a <code>CreateRegistrationApplication</code>
+    command to the runner, carrying the new aggregate ID, the draft ID as
+    an audit reference, and the full content copied from the draft:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    {:command/type           :CreateRegistrationApplication<br>
+    &nbsp;:command/id             "01966b41-..."  ← new UUIDv7<br>
+    &nbsp;:command/correlation-id "x-corr-id..."  ← same as the original request<br>
+    &nbsp;:application-id         "01966b42-..."  ← new aggregate ID<br>
+    &nbsp;:source-draft-id        "01966b3e-..."  ← audit trail back to draft<br>
+    &nbsp;:company-name           "Acme Ltd"<br>
+    &nbsp;:proposed-directors     [...]<br>
+    &nbsp;:registered-office      {...}}
+    </code>
+    Notice the correlation ID is the same one that arrived in the original
+    HTTP request. It flows through the draft command, into the draft event,
+    into the process manager, and now into this new command. Every operation
+    triggered by that original browser request shares the same correlation ID.
+    <span class="callout-subhead">4. The runner processes the command</span>
+    The runner follows exactly the same path as step 05 — enrich the command,
+    load events (none yet, this is a new aggregate), call the Decider, save
+    events to Postgres. The Registration Application Decider accepts the
+    command, since a new aggregate starts in its initial state where
+    <code>create-registration-application</code> is the only permitted command.
+    <span class="callout-subhead">5. The event is saved</span>
+    A <code>RegistrationApplicationCreated</code> event is written to the
+    <code>registration_application_events</code> table with
+    <code>published = false</code>. The outbox publisher will pick it up
+    and publish it. The examiner work queue projector, listening for this
+    event, will write a row to the <code>examiner_work_queue</code> read
+    model — making the application visible to examiners.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">The correlation ID across the entire journey so far</strong>
+    From a single click of Submit in the browser, the following has happened:
+    <br><br>
+    Browser sends request with <code>x-correlation-id: abc-123</code><br>
+    → <code>DraftSubmitted</code> event stored with <code>correlation_id: abc-123</code><br>
+    → Process manager issues command with <code>correlation-id: abc-123</code><br>
+    → <code>RegistrationApplicationCreated</code> event stored with <code>correlation_id: abc-123</code><br>
+    → <code>200 OK</code> returned to browser with <code>x-correlation-id: abc-123</code>
+    <br><br>
+    If anything goes wrong at any point — hours or days later — a developer
+    can query the event store for <code>correlation_id = abc-123</code> and
+    see the complete causal chain of everything that happened as a result of
+    that one request. This is <em>Distributed Tracing</em> built into the
+    data model itself — the same concept used by tools like OpenTelemetry and
+    Jaeger, but implemented here through the event store rather than a
+    separate tracing infrastructure.
+  </div>
+
+  <div class="callout">
+    <strong class="label">What the applicant sees</strong>
+    From the applicant's point of view, clicking Submit produces one of
+    two outcomes:
+    <br><br>
+    <strong style="color: var(--green)">Success</strong> — the browser
+    receives <code>200 OK</code> and the UI shows a confirmation: their
+    application has been lodged and is awaiting examination. The applicant
+    is given their registration application reference number.
+    <br><br>
+    <strong style="color: var(--amber)">Validation failure</strong> — the
+    browser receives <code>422 Unprocessable Entity</code> with a specific
+    error code explaining what is missing. The draft is unchanged. The
+    applicant corrects the issue and tries again.
+    <br><br>
+    The applicant does not see — and does not need to see — that a process
+    manager created a second aggregate behind the scenes. From their
+    perspective, they submitted their details and received a reference
+    number. The architecture is invisible.
+  </div>
+</div>
+
+
+<!-- STEP 07 -->
+<div class="step" data-n="07">
+  <p class="step-tag">Examiner → API</p>
+  <p class="step-title">The examiner picks up the application</p>
+  <p>
+    The registration application now exists. The outbox publisher has
+    published the <code>RegistrationApplicationCreated</code> event to
+    RabbitMQ. The examiner work queue projector — a consumer listening
+    on that event — has written a row to the
+    <code>examiner_work_queue</code> read model in Postgres. The
+    application is now visible to examiners.
+  </p>
+
+  <div class="callout">
+    <strong class="label">The read model — CQRS in practice</strong>
+    This is CQRS made concrete. The <em>write side</em> is the event
+    store — <code>registration_application_events</code> in Postgres.
+    The <em>read side</em> is the examiner work queue table — a
+    denormalised, query-optimised projection of the same data.
+    <br><br>
+    The examiner does not query the event store to see applications.
+    They query the read model. It is deliberately <em>denormalised</em>
+    — data that is split across multiple event streams is combined into
+    a single flat table optimised for querying. In a normalised database
+    you avoid repeating data to save space. In a read model you repeat
+    data freely to make queries fast and simple. The examiner's query
+    is a single table scan, not a join across event streams. The two
+    sides have different jobs and different shapes. This is why they
+    are separated.
+    <br><br>
+    The read model is not the source of truth. If it were lost entirely
+    it could be rebuilt by replaying all
+    <code>RegistrationApplicationCreated</code> events from the event
+    store through the projector. This is one of the most powerful
+    properties of event sourcing — read models are disposable and
+    rebuildable.
+    <br><br>
+    The component that listens to events and writes to a read model is
+    called an <em>Event Projector</em> (or simply a projector). It is a
+    pure consumer — it never issues commands, never modifies the event
+    store. Its only job is to maintain a read-optimised view of the
+    domain. A system can have many projectors for the same event stream,
+    each building a different read model for a different purpose.
+  </div>
+
+  <div class="callout">
+    <strong class="label">The examiner's work queue</strong>
+    An examiner logs into the registry system. They see a list of
+    submitted applications waiting for examination, oldest first. They
+    select one. The browser sends:
+  </div>
+
+  <pre>POST /api/v1/registration-applications/{id}/begin-examination</pre>
+
+  <div class="callout">
+    <strong class="label">What begin-examination does</strong>
+    The command flows through exactly the same path as every other
+    command — middleware, router, handler, runner, Decider.
+    <br><br>
+    The Registration Application Decider checks the state machine:
+    is <code>begin-examination</code> permitted in the
+    <code>Submitted</code> state? Yes. No business rules apply — any
+    examiner can pick up any submitted application. The Decider emits:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    {:event/type           :ExaminationStarted<br>
+    &nbsp;:application-id        "01966b42-..."<br>
+    &nbsp;:examiner-id           "examiner-007"<br>
+    &nbsp;:event/causation-id    "..."<br>
+    &nbsp;:event/correlation-id  "..."<br>
+    &nbsp;:occurred-at           "2026-05-26T..."}
+    </code>
+    The event is saved. The application is now in
+    <code>UnderExamination</code> state. The examiner work queue
+    projector updates the read model row — the application moves from
+    <code>waiting</code> to <code>in-progress</code> and is no longer
+    visible to other examiners. It is now this examiner's responsibility.
+  </div>
+
+  <div class="callout">
+    <strong class="label">What the examiner does</strong>
+    The examiner reviews the application details against the Companies
+    Registration Act. They check the proposed company name, the proposed
+    directors, their verified-person records, and the registered office
+    address. They may consult external sources — the national address
+    database, the existing register — to verify that the address is valid
+    and the name is unique.
+    <br><br>
+    This examination is a human process. The system does not automate the
+    decision. The Registrar makes the final call. The examiner's role is
+    to prepare the case for that decision — checking everything the law
+    requires before it reaches the Registrar.
+    <br><br>
+    When examination is complete, the examiner escalates to the Registrar.
+    The Registrar will either approve or reject. That is step 08.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">Authorisation — RBAC at the handler level</strong>
+    The system enforces <em>Role-Based Access Control (RBAC)</em> at the
+    handler level using <em>Claims-based Identity</em>. The identity token
+    from the OIDC broker carries the user's roles, permissions, and verified
+    natural-person identity claim as <em>claims</em> — key-value pairs
+    embedded in the signed token that assert facts about the user. Because
+    the token is cryptographically signed by the identity broker, claims
+    cannot be forged by a client. The middleware extracts these from the
+    decrypted Redis session and attaches them to the request.
+    <br><br>
+    An applicant cannot call <code>BeginExamination</code>. An examiner
+    cannot call <code>ApproveApplication</code> — only a
+    Registrar can. A Registrar cannot create or submit drafts on behalf
+    of an applicant.
+    <br><br>
+    These checks happen in the handler — before the command reaches the
+    runner or the Decider. The Decider itself does not check roles. Its
+    job is business rules and state machine logic. Role enforcement is
+    the handler's job. The two concerns are deliberately separated — this
+    is the <em>Separation of Concerns</em> principle applied architecturally.
+    Security policy and domain logic can change independently without
+    affecting each other.
+  </div>
+</div>
+
+
+<!-- STEP 08 -->
+<div class="step" data-n="08">
+  <p class="step-tag">Registrar → API</p>
+  <p class="step-title">The Registrar approves the application</p>
+  <p>
+    The examiner has reviewed the application and is satisfied it complies
+    with the Act. The case is escalated to the Registrar. The Registrar
+    reviews the application and clicks <em>Approve Application</em>.
+    This is a decision about the application — not yet the act of
+    registration. The browser sends:
+  </p>
+
+  <pre>POST /api/v1/registration-applications/{id}/approve</pre>
+
+  <div class="callout">
+    <strong class="label">The approval command</strong>
+    The command carries the Registrar's identity from the verified
+    session, never from the request body. The handler injects two
+    functions required for the approval business rules:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    {:command/type       :ApproveApplication<br>
+    &nbsp;:registrar-id       "registrar-001"<br>
+    &nbsp;:company-name       "Acme Ltd"<br>
+    &nbsp;:proposed-directors [...]<br>
+    &nbsp;:registered-office  {...}<br>
+    &nbsp;:name-available-fn  (fn [name] ...)  ← checks the authoritative Register write path<br>
+    &nbsp;:address-valid-fn   (fn [addr] ...)  ← calls address service}
+    </code>
+    These injected functions allow the Decider to check BR-AP-007,
+    BR-AP-009, and BR-AP-010 while remaining a pure function. The Decider
+    does not know how they are implemented, but the name check must use
+    authoritative write-side Register facts, not a stale read model. The name
+    check is deliberately non-reserving in this contract: it does not lock the
+    proposed name.
+  </div>
+
+  <div class="callout">
+    <strong class="label">The Decider runs its most important checks</strong>
+    State machine check: is <code>ApproveApplication</code>
+    permitted in <code>ReadyForDecision</code>? Yes. Then business rules:
+    <br><br>
+    BR-AP-001 — company name stated<br>
+    BR-AP-002 — at least two proposed directors<br>
+    BR-AP-003 — proposed directors are distinct persons<br>
+    BR-AP-004 — registered office address stated<br>
+    BR-AP-005 — all proposed directors are natural persons<br>
+    BR-AP-006 — all proposed directors have verified-person records<br>
+    BR-AP-007 — company name does not already exist in the Register<br>
+    BR-AP-008 — company name is not prohibited<br>
+    BR-AP-009 — registered office address is plausible and valid<br>
+    BR-AP-010 — company name is not a protected former name
+    <br><br>
+    BR-AP-001 through BR-AP-006 repeat submission checks because the
+    Registrar's decision must be made against the authoritative record.
+    Identity verification records do not expire in this contract; revocation
+    is out of scope.
+    <br><br>
+    If any check fails the command is rejected. The application stays
+    in <code>ReadyForDecision</code>. Nothing is recorded.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">One event — the decision fact</strong>
+    If all checks pass, the Decider emits exactly one event:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    RegistrationApplicationApproved<br>
+    &nbsp;← the decision fact: the Registrar decided this application complies<br>
+    &nbsp;:application-id      "01966b42-..."<br>
+    &nbsp;:registrar-id        "registrar-001"<br>
+    &nbsp;:event/causation-id  "..."<br>
+    &nbsp;:occurred-at         "2026-05-26T14:47:23Z"
+    </code>
+    The application transitions to <code>Approved</code> — a terminal
+    state. The application lifecycle is complete. The
+    <code>RegistrationApplication</code> aggregate will never receive
+    another command.
+    <br><br>
+    Notice what this event does <em>not</em> contain: a registration
+    number, a company ID, any assertion that the company now exists.
+    That is deliberate. This event records a decision about an
+    application. It says nothing about a company. The company does not
+    yet exist in the system at this moment.
+    <br><br>
+    The question of why — when CRA §14 directs registration upon approval
+    and §15 creates legal existence on assignment of the Registration
+    Number — is answered in the next step.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Why not emit RegisteredCompanyCreated here?</strong>
+    This is a deliberate architectural decision worth understanding
+    carefully. There are two options:
+    <br><br>
+    <strong style="color: var(--text)">Option A (chosen):</strong>
+    The <code>RegistrationApplication</code> Decider emits only
+    <code>RegistrationApplicationApproved</code>. A process manager
+    reacts to this event and creates a new <code>RegisteredCompany</code>
+    aggregate, which emits <code>RegisteredCompanyCreated</code> on its
+    own event stream.
+    <br><br>
+    <strong style="color: var(--text)">Option B (rejected):</strong>
+    The <code>RegistrationApplication</code> Decider emits both
+    <code>RegistrationApplicationApproved</code> and
+    <code>RegisteredCompanyCreated</code> atomically.
+    <br><br>
+    Option B was rejected for three reasons:
+    <span class="callout-subhead">1. Aggregates should own only their own facts</span>
+    A <code>RegisteredCompanyCreated</code> event is a fact about a company —
+    not a fact about an application. Placing it on the application's
+    event stream conflates two different domain concepts. The
+    <code>RegistrationApplication</code> aggregate's job ends with the
+    decision. The company's existence is a separate concern that belongs
+    on a separate aggregate.
+    <span class="callout-subhead">2. A registered company has its own ongoing lifecycle</span>
+    After registration, a company can change directors, change its
+    registered office, file annual returns, and eventually be struck
+    off or dissolved. These commands and events belong on a
+    <code>RegisteredCompany</code> aggregate with its own state machine.
+    If the company's existence were recorded on the application's
+    event stream, you would have to keep adding commands to a terminal
+    aggregate — one that is supposed to be finished.
+    <span class="callout-subhead">3. The identifier changes</span>
+    A <code>RegistrationApplication</code> is identified by a UUIDv7.
+    A <code>RegisteredCompany</code> is identified by its registration
+    number — the permanent legal identity of the company. These are
+    different things with different identifiers. They should be different
+    aggregates.
+  </div>
+</div>
+
+<!-- STEP 09 -->
+<div class="step" data-n="09">
+  <p class="step-tag">Process Manager → RegisteredCompany aggregate</p>
+  <p class="step-title">The process manager creates the registered company</p>
+  <p>
+    The outbox publisher picks up the
+    <code>RegistrationApplicationApproved</code> event and publishes it
+    to RabbitMQ as an integration event. The approval process manager
+    — which has been coordinating this workflow — receives it.
+  </p>
+
+  <div class="callout">
+    <strong class="label">What the process manager does</strong>
+    The process manager transitions from
+    <code>AwaitingApprovalConfirmation</code> to
+    <code>CreatingRegisteredCompany</code> and issues a
+    <code>CreateRegisteredCompany</code> command to the runner:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    {:command/type           :CreateRegisteredCompany<br>
+    &nbsp;:command/id             "01966b51-..."  ← new UUIDv7<br>
+    &nbsp;:command/correlation-id "x-corr-id..."  ← same original correlation ID<br>
+    &nbsp;:registration-number    "IE-2026-01966b50"  ← generated here<br>
+    &nbsp;:source-application-id  "01966b42-..."  ← audit trail<br>
+    &nbsp;:company-name           "Acme Ltd"<br>
+    &nbsp;:proposed-directors     [...]<br>
+    &nbsp;:registered-office      {...}<br>
+    &nbsp;:approved-at            "2026-05-26T14:47:23Z"}
+    </code>
+    The registration number is generated by the process manager at this
+    point — not by the application Decider. It is the permanent legal
+    identifier of the company. It must be unique across the entire
+    register and must never be reused.
+    <br><br>
+    The command is still subject to the final write-side Register guard:
+    the registered company cannot be created unless the company name remains
+    unique against current and protected former names in the authoritative
+    Register. This is a final legal invariant check, not a read-model query.
+    Because name reservation is parked for future legal/product design, this
+    final check is the first point at which the system can make the name
+    legally unavailable to every other registration.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">Parked concern — name reservation and locking</strong>
+    A fuller registry would likely check availability during draft preparation
+    and lock the proposed name when the draft is successfully submitted. That
+    lock would then be consumed by registration, or released if the application
+    is withdrawn or rejected.
+    <br><br>
+    This is deliberately parked in this contract because it needs explicit
+    legal footing in the Act and a careful product model. The current workflow
+    performs non-reserving checks at approval and a final write-side guard
+    before <code>RegisteredCompanyCreated</code>. If that final guard fails,
+    no Registration Number is assigned, no company exists, no applicant
+    registration notification is sent, and the approval process manager records
+    an operational exception for manual resolution.
+  </div>
+
+  <div class="callout amber">
+    <strong class="label">The RegisteredCompany aggregate is created</strong>
+    The <code>RegisteredCompany</code> Decider accepts the
+    <code>CreateRegisteredCompany</code> command — a new aggregate in
+    its initial state accepts this as its first command, after the final
+    Register name check has passed — and emits:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    RegisteredCompanyCreated<br>
+    &nbsp;← the existence fact: this company legally exists<br>
+    &nbsp;:registration-number   "IE-2026-01966b50"  ← the aggregate ID<br>
+    &nbsp;:source-application-id "01966b42-..."<br>
+    &nbsp;:company-name          "Acme Ltd"<br>
+    &nbsp;:directors             [...]<br>
+    &nbsp;:registered-office     {...}<br>
+    &nbsp;:event/causation-id    "..."<br>
+    &nbsp;:event/correlation-id  "x-corr-id..."  ← still the original<br>
+    &nbsp;:occurred-at           "2026-05-26T14:47:23Z"
+    </code>
+    This is the most important event in the system. From this moment,
+    the company legally exists. The registration number is its permanent
+    identity — it will never be reused even if the company is later
+    struck off or dissolved.
+    <br><br>
+    The <code>RegisteredCompany</code> aggregate now has its own event
+    stream, its own state machine, and its own lifecycle. Future commands
+    — changing directors, changing the registered office, filing annual
+    returns — will be issued against this aggregate using the registration
+    number as the identifier:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    POST /api/v1/registered-companies/{reg-number}/change-director<br>
+    POST /api/v1/registered-companies/{reg-number}/change-registered-office<br>
+    POST /api/v1/registered-companies/{reg-number}/file-annual-return<br>
+    POST /api/v1/registered-companies/{reg-number}/strike-off
+    </code>
+  </div>
+
+  <div class="callout">
+    <strong class="label">The event store is the Register — the read model is derived</strong>
+    The authoritative Register is not a database table. It is the event
+    store itself — specifically, the set of
+    <code>registered_company_events</code> streams that contain a
+    <code>RegisteredCompanyCreated</code> event.
+    <br><br>
+    If you want to know whether a company legally exists, the ground
+    truth is the event store. If <code>RegisteredCompanyCreated</code>
+    exists in that company's event stream, the company exists.
+    <br><br>
+    The <code>register</code> table in Postgres is a <em>read model
+    projection</em> — derived data, shaped for querying. The Register
+    projector consumes registered-company events such as
+    <code>RegisteredCompanyCreated</code>, <code>DirectorChanged</code>,
+    <code>RegisteredOfficeChanged</code>, <code>CompanyStruckOff</code>,
+    and <code>CompanyDissolved</code>, then writes the current query shape
+    to this table. It is queryable, searchable, and fast. But it is not
+    the source of truth.
+    <br><br>
+    If the <code>register</code> table were destroyed, no company would
+    cease to exist. The Register projector could replay every
+    registered-company events from the event store and
+    rebuild it completely. The read model is disposable. The event store
+    is not.
+    <br><br>
+    The <code>register</code> table must never be written to directly.
+    Only the Register projector may write to it, only in response to
+    registered-company events. Any direct write would
+    create a divergence between the read model and the source of truth.
+  </div>
+
+  <div class="callout">
+    <strong class="label">The complete audit trail — from draft to registered company</strong>
+    The full chain now exists across three aggregate event streams:
+    <br><br>
+    <code style="display:block; margin: 0.5rem 0; font-size: 0.78rem;">
+    draft_events/{draft-id}:<br>
+    &nbsp;&nbsp;DraftCreated<br>
+    &nbsp;&nbsp;DraftUpdated (×n)<br>
+    &nbsp;&nbsp;DraftSubmitted<br>
+    <br>
+    registration_application_events/{application-id}:<br>
+    &nbsp;&nbsp;RegistrationApplicationCreated  ← source-draft-id links back<br>
+    &nbsp;&nbsp;ExaminationStarted<br>
+    &nbsp;&nbsp;RegistrationApplicationApproved ← decision fact, terminal<br>
+    <br>
+    registered_company_events/{registration-number}:<br>
+    &nbsp;&nbsp;RegisteredCompanyCreated        ← existence fact, The Register<br>
+    &nbsp;&nbsp;  (future events...)<br>
+    </code>
+    Each event stream is owned by its aggregate. Each aggregate records
+    only its own facts. The source-application-id on
+    <code>RegisteredCompanyCreated</code> links back to the application.
+    The draft ID on the application links back to the draft. The full
+    legal history of how this company came to exist is traceable across
+    all three streams by correlation ID and causation ID.
+    <br><br>
+    This is not just good engineering. For a national registry, it is a
+    legal requirement.
+  </div>
+</div>
+
+
+<!-- SUMMARY -->
+<div class="step" data-n="∑">
+  <p class="step-tag">Summary</p>
+  <p class="step-title">Key principles for new developers</p>
+  <p>
+    You have followed a single registration from a person clicking a button
+    all the way to a company entering the Register. Here are the principles
+    that shaped every decision along the way.
+  </p>
+
+  <div class="callout">
+    <strong class="label">1. The law is the specification</strong>
+    Every state, every transition, every business rule traces back to a
+    section of the Companies Registration Act. Before writing any code,
+    the legal instrument was read, the state machine was drawn, and a
+    lawyer was asked to confirm it. The code enforces the law — not a
+    developer's interpretation of it.
+    <br><br>
+    When the law changes, the change starts at the state machine, not
+    in the code. The state machine is the specification. The code is the
+    implementation of the specification.
+  </div>
+
+  <div class="callout">
+    <strong class="label">2. Aggregates own their own facts</strong>
+    There are three aggregates in the registration domain:
+    <code>Draft</code>, <code>RegistrationApplication</code>, and
+    <code>RegisteredCompany</code>. Each owns exactly the events that
+    happened to it. None of them knows about the others directly.
+    <br><br>
+    A <code>Draft</code> does not know that submitting it creates a
+    <code>RegistrationApplication</code>. A
+    <code>RegistrationApplication</code> does not know that approving it
+    creates a <code>RegisteredCompany</code>. This decoupling is
+    intentional. Adding a new reaction to any event requires no changes
+    to the aggregate that emitted it.
+  </div>
+
+  <div class="callout">
+    <strong class="label">3. The event store is the source of truth</strong>
+    Events are facts. Once recorded, they are never changed or deleted.
+    The current state of any aggregate is always derived by replaying its
+    event stream — not by reading a state column from a database table.
+    <br><br>
+    The Register itself is the set of
+    <code>registered_company_events</code> streams containing
+    <code>RegisteredCompanyCreated</code>. Every read model — the
+    examiner work queue, the register table, the applicant's draft list
+    — is a disposable projection derived from the event store. If any
+    read model were destroyed it could be rebuilt completely by replaying
+    events. The event store cannot be rebuilt from the read models.
+  </div>
+
+  <div class="callout">
+    <strong class="label">4. Commands are decisions, events are facts</strong>
+    A command is a request. It can be rejected. It produces no permanent
+    record if it fails. An event is a fact that has already happened. It
+    is permanent, immutable, and represents ground truth.
+    <br><br>
+    The Decider enforces this boundary. It takes a command and current
+    state, runs the state machine and business rules, and returns either
+    events or an error. It never touches storage. It never has side
+    effects. Given the same state and command it always returns the same
+    result. This makes it trivially testable and completely auditable.
+  </div>
+
+  <div class="callout">
+    <strong class="label">5. Every command is idempotent</strong>
+    Every command carries a unique ID. The command ledger records that ID
+    and the command outcome. Events caused by the command record the same
+    ID as their causation ID for traceability, but causation ID is not
+    globally unique in the event store. If the same command arrives twice
+    — from a retry, a network duplicate, or a process manager re-delivery
+    — the command ledger returns the first result and no side effect is
+    repeated. Nothing is recorded twice. Retrying is always safe.
+  </div>
+
+  <div class="callout">
+    <strong class="label">6. Process managers coordinate without coupling</strong>
+    Workflows that span more than one aggregate are handled by process
+    managers — event-sourced finite state machines that listen for events
+    and issue commands in response. They are the only components that know
+    about more than one aggregate.
+    <br><br>
+    Process managers save their coordination state durably as events in
+    their own event stream. On crash and restart they replay their events
+    to recover their exact position in the workflow. They never restart
+    from the beginning. They never duplicate work.
+  </div>
+
+  <div class="callout">
+    <strong class="label">7. Domain events and integration events are different things</strong>
+    Domain events are stored in Postgres in the event store. They are the
+    source of truth. Integration events are published to RabbitMQ by the
+    outbox publisher. They are the transport mechanism that notifies other
+    parts of the system.
+    <br><br>
+    RabbitMQ provides at-least-once delivery. Consumers must be idempotent.
+    The outbox pattern ensures no domain event is ever silently lost — even
+    if RabbitMQ is unavailable, events accumulate in Postgres and are
+    delivered when the broker recovers. Every consumer checks message or event
+    IDs before acting. Processing the same event twice produces the same result
+    as processing it once.
+  </div>
+
+  <div class="callout">
+    <strong class="label">8. The URL structure reflects the domain model</strong>
+    Each URL segment corresponds to a DDD aggregate. Action names follow
+    the Stripe convention — POST to the aggregate root creates a new
+    instance, POST to <code>/{id}/{action}</code> performs a named task
+    on an existing one. The URL tells you the aggregate, the instance, and
+    the exact task. No documentation is needed to understand what an
+    endpoint does. The name is the documentation.
+    <br><br>
+    All endpoints use POST. All commands are idempotent. All requests
+    carry a correlation ID. These are conventions — not suggestions.
+  </div>
+
+  <div class="callout">
+    <strong class="label">9. Security is layered — each layer assumes the others can fail</strong>
+    Cloudflare is the outer perimeter — WAF, DDoS, bot protection, rate
+    limiting, with no open inbound ports on the registry server via
+    Cloudflare Tunnel. Authentication via OIDC PKCE BFF ensures tokens
+    never reach the browser — they live in Redis, encrypted by OpenBao
+    Transit, keyed by a session ID in an HttpOnly cookie. Role enforcement
+    happens in the handler. Business rule enforcement happens in the
+    Decider. The command ledger enforces idempotency at the application
+    boundary.
+    <br><br>
+    No single layer is sufficient. Each assumes the others can be
+    bypassed. Compromise one layer and the others still hold.
+  </div>
+
+  <div class="callout">
+    <strong class="label">10. Auditability is built into the data model</strong>
+    Every event records who did it, when, with what outcome, and which
+    command caused it (causation ID) and which original request triggered
+    the whole chain (correlation ID). The full legal history of how any
+    company came to exist is traceable across three aggregate event
+    streams — from the first click of a button to the moment the company
+    entered the Register.
+    <br><br>
+    This is not instrumentation added after the fact. It is the
+    architecture. Event sourcing, CQRS, causation IDs, and correlation
+    IDs are not engineering preferences. For a system on which the
+    national economy depends, they are legal requirements.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Domain modelling</strong>
+    <span class="callout-subhead">11. Ubiquitous language is not optional</span>
+    Every term in the code — every command name, event name, aggregate
+    name, state name — must match the language lawyers and business
+    analysts use exactly. When code drifts from the language, the domain
+    model drifts from the law. <code>RegistrationApplication</code> is
+    not <code>ApplicationForm</code>. <code>RegisteredCompany</code> is
+    not <code>Company</code>. The names are precise because the domain
+    is precise.
+    <span class="callout-subhead">12. Terminal states are legal facts</span>
+    When an aggregate reaches a terminal state — <code>Approved</code>,
+    <code>Rejected</code>, or <code>Withdrawn</code> on a
+    <code>RegistrationApplication</code>; <code>Submitted</code>,
+    <code>Cancelled</code>, or <code>Expired</code> on a
+    <code>Draft</code> — that is not just a technical flag. It is a legal conclusion. The
+    system enforces it by refusing all further commands. This is not a
+    technical limitation — it is the law.
+    <span class="callout-subhead">13. Draft the state machine before writing requirements</span>
+    Most requirements fall out of the state machine naturally. If you
+    cannot draw the state machine, you do not understand the domain well
+    enough to write code. The state machine is reviewable by a lawyer.
+    The code is not.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Event sourcing</strong>
+    <span class="callout-subhead">14. Never update or delete events</span>
+    Events are facts. Facts do not change. If something was recorded
+    incorrectly, the correction is a new event — a compensating fact —
+    not an edit to the original. The audit trail must be complete and
+    tamper-evident.
+    <span class="callout-subhead">15. Snapshots are an optimisation, not an architecture</span>
+    If replaying a long event stream becomes slow, snapshots can
+    short-circuit the replay. But snapshots are a performance optimisation
+    applied to a working system — not something to design around upfront.
+    Start without them.
+    <span class="callout-subhead">16. Projections are cheap. Events are precious.</span>
+    You can always add a new read model projection by replaying events.
+    You cannot recover events you failed to record. When in doubt about
+    whether to record something as an event, record it.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Distributed systems</strong>
+    <span class="callout-subhead">17. Design for failure, not for success</span>
+    Every component — the database, the message broker, the identity
+    broker, the address validation service — can fail at any time. The
+    architecture assumes failure is normal. The outbox pattern, idempotent
+    consumers, process manager state persistence, and at-least-once
+    delivery are all responses to this assumption.
+    <span class="callout-subhead">18. Eventual consistency is a feature, not a bug</span>
+    The examiner work queue read model will not reflect a new submission
+    instantly — it will reflect it when the projector processes the
+    integration event. For a registry processing company registrations
+    this delay is measured in milliseconds and is completely acceptable.
+    Designing for strict consistency everywhere would make the system
+    fragile and slow.
+    <span class="callout-subhead">19. Make implicit assumptions explicit</span>
+    Every assumption about ordering, timing, and consistency that is not
+    enforced by the architecture will eventually be violated in production.
+    The command ledger, the sequence number uniqueness constraint,
+    and the process manager idempotency check all exist because the
+    implicit assumption — "this will only happen once" — is not safe to
+    leave implicit.
+  </div>
+
+  <div class="callout">
+    <strong class="label">Operations</strong>
+    <span class="callout-subhead">20. Observability is not optional</span>
+    Correlation IDs, causation IDs, structured logs, and metrics are not
+    nice-to-haves. For a national registry, when something goes wrong at
+    2am, a developer must be able to trace exactly what happened and why
+    using the data already in the system. If the data is not there, the
+    answer is not there.
+    <span class="callout-subhead">21. The read model is always suspect</span>
+    A read model can be stale, partially rebuilt, or temporarily
+    inconsistent. Any feature that depends on a read model being perfectly
+    up to date is fragile. Design the UI and the API to tolerate eventual
+    consistency in read models. When you need the ground truth, go to the
+    event store.
+    <span class="callout-subhead">22. Configuration, not code</span>
+    Values that will change — the draft expiry period, the maximum number
+    of active drafts per applicant, rate limits — must be configuration,
+    not hardcoded constants. The law may change. Policy may change. The
+    system must be able to change with it without a deployment.
+  </div>
+</div>
+
+</body>
+</html>

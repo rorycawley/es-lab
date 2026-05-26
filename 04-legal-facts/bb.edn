@@ -1,0 +1,163 @@
+{:paths ["."]
+ :tasks
+ {:requires ([babashka.process :refer [shell]]
+             [clojure.string :as str])
+
+  :init (do
+          (defn sh [& args]
+            (binding [*out* *err*]
+              (apply println "+" (remove map? args)))
+            (apply shell args))
+
+          (defn assert-no-running-containers! []
+            (let [result (shell {:out :string}
+                                "docker" "compose" "ps" "--services" "--filter" "status=running")]
+              (when-not (str/blank? (:out result))
+                (throw (ex-info "docker compose still has running containers"
+                                {:containers (:out result)})))))
+
+          (defn assert-no-project-volume! []
+            (let [result (shell {:out :string} "docker" "volume" "ls" "-q")]
+              (when (some (fn [v] (str/includes? v "04-legal-facts_postgres-data"))
+                          (str/split-lines (:out result)))
+                (throw (ex-info "project Postgres volume still exists after down"
+                                {:volumes (:out result)}))))))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task             (do (println "")
+                         (println "Prerequisites:")
+                         (println "  1. Install mise: curl https://mise.run | sh")
+                         (println "  2. Run: bb install")
+                         (println "")
+                         (println "Then:")
+                         (println "  bb tasks         (list all available tasks)")
+                         (println "  bb test:backend  (run backend tests)")
+                         (println "")
+                         (println "After bb up, the stack is available at:")
+                         (println "  http://localhost:8080/health  backend health endpoint")
+                         (println "  http://localhost:8080/openapi.json backend OpenAPI spec")
+                         (println "  http://localhost:8080/swagger-ui   backend API browser")
+                         (println "  http://localhost:15672        RabbitMQ management UI (guest/guest)")
+                         (println "")
+                         (println "Rancher Desktop users — one-time machine setup for bb test:backend:")
+                         (println "  Adapter tests use Testcontainers. Rancher Desktop places the Docker socket at")
+                         (println "  ~/.rd/docker.sock and requires API version >=1.41, but docker-java defaults to")
+                         (println "  1.32. Fix with two properties files (create if missing):")
+                         (println "")
+                         (println "  ~/.docker-java.properties")
+                         (println "    api.version=1.44")
+                         (println "")
+                         (println "  ~/.testcontainers.properties")
+                         (println "    docker.host=unix:///Users/$USER/.rd/docker.sock")
+                         (println "    ryuk.disabled=true")
+                         (println "    checks.disable=true")
+                         (println "")
+                         (println "  Also ensure Rancher Desktop is using dockerd (moby), not containerd.")
+                         (println ""))}
+
+  install
+  {:doc  "Install tools via mise"
+   :task (sh "mise" "install")}
+
+  db:up
+  {:doc  "Start Postgres, RabbitMQ, and apply migrations (for local backend development)"
+   :task (sh "docker" "compose" "up" "-d" "--wait" "postgres" "rabbitmq" "migrate")}
+
+  db:down
+  {:doc  "Stop and remove the local infrastructure containers"
+   :task (do (sh "docker" "compose" "stop" "postgres" "rabbitmq")
+             (sh "docker" "compose" "rm" "-f" "postgres" "rabbitmq" "migrate"))}
+
+  up
+  {:doc  "Build and start the full stack"
+   :task (do (sh "docker" "compose" "up" "-d" "--build" "--wait")
+             (println "")
+             (println "Stack is up:")
+             (println "  http://localhost:8080/health  backend health endpoint")
+             (println "  http://localhost:8080/openapi.json backend OpenAPI spec")
+             (println "  http://localhost:8080/swagger-ui   backend API browser")
+             (println "  http://localhost:15672        RabbitMQ management UI (guest/guest)")
+             (println ""))}
+
+  down
+  {:doc  "Stop the full stack and remove the Postgres data volume"
+   :task (do (sh "docker" "compose" "down" "-v")
+             (assert-no-running-containers!)
+             (assert-no-project-volume!))}
+
+  clean
+  {:doc  "Remove build artefacts"
+   :task (sh "rm" "-rf" "backend/target" "backend/.cpcache" "perf/target")}
+
+  test:perf
+  {:doc  "Run Gatling performance tests against the live stack"
+   :task (do (sh "docker" "compose" "up" "-d" "--build" "--wait")
+             (sh {:dir "perf"} "mise" "exec" "--" "mvn" "gatling:test"))}
+
+  spec:export
+  {:doc  "Start the stack, fetch the live OpenAPI spec, and write api/openapi.json"
+   :requires ([babashka.http-client :as http])
+   :task (do
+           (sh "docker" "compose" "up" "-d" "--build" "--wait")
+           (let [body   (:body (http/get "http://localhost:8080/openapi.json"))
+                 pretty (:out (clojure.java.shell/sh
+                               "python3" "-c"
+                               "import json,sys; print(json.dumps(json.load(sys.stdin), indent=2, sort_keys=True))"
+                               :in body))]
+             (clojure.java.io/make-parents "api/openapi.json")
+             (spit "api/openapi.json" pretty))
+           (println "Spec written to api/openapi.json"))}
+
+  spec:check
+  {:doc  "Verify the live OpenAPI spec matches the committed api/openapi.json snapshot"
+   :requires ([babashka.http-client :as http])
+   :task (do
+           (sh "docker" "compose" "up" "-d" "--build" "--wait")
+           (let [normalise (fn [s] (:out (clojure.java.shell/sh
+                                         "python3" "-c"
+                                         "import json,sys; print(json.dumps(json.load(sys.stdin), indent=2, sort_keys=True))"
+                                         :in s)))
+                 live      (normalise (:body (http/get "http://localhost:8080/openapi.json")))
+                 committed (normalise (slurp "api/openapi.json"))]
+             (if (= live committed)
+               (println "✓ OpenAPI spec matches committed snapshot")
+               (do (println "✗ OpenAPI spec has drifted! Run 'bb spec:export' to update.")
+                   (System/exit 1)))))}
+
+  check:lint
+  {:doc  "Lint backend with clj-kondo"
+   :task (sh "mise" "exec" "--" "clj-kondo" "--parallel" "--lint" "backend/src:backend/test")}
+
+  check:fmt
+  {:doc  "Check backend formatting with cljfmt"
+   :task (sh "mise" "exec" "--" "cljfmt" "check" "backend/src" "backend/test")}
+
+  check
+  {:doc     "Lint and check formatting"
+   :depends [check:lint check:fmt]}
+
+  fix
+  {:doc  "Fix backend formatting"
+   :task (sh "mise" "exec" "--" "cljfmt" "fix" "backend/src" "backend/test")}
+
+  all
+  {:doc     "Install tools and run the full test suite"
+   :depends [install test:backend]}
+
+  test:backend
+  {:doc  "Run backend unit, integration, and adapter tests (adapter tests require Docker)"
+   :task (let [docker-host (System/getenv "DOCKER_HOST")
+               host-ip     (or (System/getenv "TESTCONTAINERS_HOST_OVERRIDE")
+                               (try (str/trim
+                                      (:out (clojure.java.shell/sh "rdctl" "info" "--field" "ip-address")))
+                                    (catch Exception _ nil)))]
+           ; Only forward DOCKER_HOST if already set — otherwise let ~/.testcontainers.properties drive discovery.
+           ; TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE tells Testcontainers where to mount the Docker socket
+           ; inside helper containers (required for Rancher Desktop, harmless elsewhere).
+           (sh {:dir "backend"
+                :extra-env (cond-> {"TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" "/var/run/docker.sock"}
+                             docker-host (assoc "DOCKER_HOST" docker-host)
+                             host-ip     (assoc "TESTCONTAINERS_HOST_OVERRIDE" host-ip))}
+               "clojure" "-M:test"))}}}

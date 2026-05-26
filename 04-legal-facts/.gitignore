@@ -1,0 +1,8 @@
+.clj-kondo/.cache/
+
+# Clojure build/cache output
+backend/.cpcache/
+backend/target/
+
+# Perf test build and reports
+perf/target/

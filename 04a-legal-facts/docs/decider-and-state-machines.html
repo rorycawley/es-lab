@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deciders and State Machines — Developer Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
+
+  :root {
+    --bg:        #0f1117;
+    --bg2:       #181c27;
+    --border:    #2a2f3f;
+    --accent:    #4f8ef7;
+    --accent2:   #7eb8f7;
+    --green:     #4ecb8d;
+    --amber:     #f7c948;
+    --red:       #f77b72;
+    --muted:     #6b7494;
+    --text:      #d8ddf0;
+    --text-soft: #9aa3c2;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 300;
+    line-height: 1.7;
+    padding: 2rem 1.5rem 6rem;
+    max-width: 700px;
+    margin: 0 auto;
+  }
+
+  .doc-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+    font-weight: 500;
+    color: #fff;
+    line-height: 1.3;
+    margin-bottom: 1rem;
+  }
+
+  h2 {
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: #fff;
+    margin: 2.5rem 0 0.75rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .subtitle {
+    color: var(--text-soft);
+    font-size: 0.92rem;
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  p {
+    color: var(--text-soft);
+    font-size: 0.9rem;
+    margin-bottom: 0.75rem;
+  }
+
+  p:last-child { margin-bottom: 0; }
+
+  pre {
+    background: #0a0d14;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--accent2);
+    overflow-x: auto;
+    margin: 0.85rem 0;
+    line-height: 1.6;
+  }
+
+  pre.green  { border-left-color: var(--green); }
+  pre.amber  { border-left-color: var(--amber); }
+  pre.red    { border-left-color: var(--red);   }
+
+  code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8em;
+    background: #1a1f2e;
+    color: var(--accent2);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+
+  .callout {
+    background: #111827;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--green);
+    border-radius: 4px;
+    padding: 0.85rem 1rem;
+    margin: 0.85rem 0;
+    font-size: 0.86rem;
+    color: var(--text-soft);
+    line-height: 1.6;
+  }
+
+  .callout strong.label {
+    color: var(--green);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 0.4rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .callout.amber { border-left-color: var(--amber); }
+  .callout.amber strong.label { color: var(--amber); }
+  .callout.red   { border-left-color: var(--red);   }
+  .callout.red   strong.label { color: var(--red);   }
+  .callout.blue  { border-left-color: var(--accent); }
+  .callout.blue  strong.label { color: var(--accent); }
+
+  .callout-subhead {
+    color: var(--text);
+    font-size: 0.84em;
+    font-weight: 500;
+    display: block;
+    margin-top: 0.85rem;
+    margin-bottom: 0.2rem;
+  }
+
+  em { font-style: italic; color: var(--text); }
+  strong { color: var(--text); font-weight: 500; }
+
+  .toc {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 2.5rem;
+    font-size: 0.82rem;
+  }
+
+  .toc-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+  }
+
+  .toc ol {
+    padding-left: 1.25rem;
+    color: var(--text-soft);
+    line-height: 2;
+  }
+
+  .toc a {
+    color: var(--accent2);
+    text-decoration: none;
+  }
+
+  .toc a:hover { text-decoration: underline; }
+
+  .diagram {
+    background: #0a0d14;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1rem;
+    margin: 0.85rem 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-soft);
+    line-height: 1.8;
+  }
+
+  .diagram .state   { color: var(--green); }
+  .diagram .arrow   { color: var(--muted); }
+  .diagram .command { color: var(--accent2); }
+  .diagram .label   { color: var(--amber); }
+
+  .rule-ref {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--amber);
+    background: #1a1500;
+    border: 1px solid #3a3000;
+    padding: 0.1em 0.4em;
+    border-radius: 3px;
+  }
+
+  section { margin-bottom: 3rem; }
+</style>
+</head>
+<body>
+
+<p class="doc-label">Developer Guide</p>
+<h1>Deciders and State Machines</h1>
+<p class="subtitle">
+  This document explains two concepts that appear throughout this codebase:
+  <em>state machines</em> and the <em>Functional Event Sourcing Decider</em>
+  pattern. If you are new to the project, read this before reading any
+  aggregate code. Everything else will make more sense.
+</p>
+
+<div class="toc">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><a href="#why">Why we have state machines</a></li>
+    <li><a href="#fsm">What a state machine is</a></li>
+    <li><a href="#decider">The Decider pattern</a></li>
+    <li><a href="#three-functions">The three functions</a></li>
+    <li><a href="#runner">The runner — how it all connects</a></li>
+    <li><a href="#example-draft">Full example: the Draft aggregate</a></li>
+    <li><a href="#example-regapp">Full example: the Registration Application aggregate</a></li>
+    <li><a href="#rules">How business rules map to Decider code</a></li>
+    <li><a href="#testing">Testing a Decider</a></li>
+    <li><a href="#mistakes">Common mistakes</a></li>
+    <li><a href="#aggregates">All aggregates in this system</a></li>
+  </ol>
+</div>
+
+<!-- 1 -->
+<section id="why">
+<h2>1. Why we have state machines</h2>
+<p>
+  This is a national companies registry. Every action in the system has legal
+  consequences. A registration application that is approved when it should have
+  been rejected is not a bug — it is a legal liability. A draft that is
+  submitted twice creates a duplicate application. A company that can be struck
+  off after it has already been dissolved corrupts the legal record.
+</p>
+<p>
+  We prevent these outcomes not by writing defensive if-statements scattered
+  through the codebase, but by encoding the rules in one place: the state
+  machine. The state machine defines precisely which actions are permitted in
+  which situations. If an action is not in the state machine, it cannot happen.
+  Full stop.
+</p>
+<div class="callout">
+  <strong class="label">The core principle</strong>
+  Every aggregate in this system has a state machine. The state machine is the
+  law made code. Before any business rule is checked, the state machine is
+  consulted. If the requested action is not permitted in the current state, the
+  request is rejected — no exceptions, no special cases, no workarounds.
+</div>
+</section>
+
+<!-- 2 -->
+<section id="fsm">
+<h2>2. What a state machine is</h2>
+<p>
+  A state machine is a model of a system that can be in exactly one of a
+  finite set of <em>states</em> at any time. It moves between states via
+  <em>transitions</em>, which are triggered by <em>commands</em>. Each
+  transition is only permitted when the system is in a specific state.
+</p>
+<p>
+  Here is the Draft aggregate's state machine in full:
+</p>
+<div class="diagram">
+  <span class="state">Active</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">Submitted</span>
+  <span class="label">   (SubmitDraft — validation must pass)</span><br>
+  <span class="state">Active</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">Cancelled</span>
+  <span class="label">  (CancelDraft — Applicant only)</span><br>
+  <span class="state">Active</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">Expired</span>
+  <span class="label">   (ExpireDraft — scheduler only)</span><br><br>
+  <span class="arrow">All states except Active are terminal.</span>
+</div>
+<p>
+  This tells us everything we need to know about what is allowed:
+</p>
+<p>
+  A draft in <span class="rule-ref">Active</span> state can be submitted,
+  cancelled, or expired. Nothing else.
+  A draft in <span class="rule-ref">Submitted</span>,
+  <span class="rule-ref">Cancelled</span>, or
+  <span class="rule-ref">Expired</span> state cannot do anything — these are
+  terminal. Any command against a terminal draft is rejected before a single
+  business rule is evaluated.
+</p>
+<div class="callout amber">
+  <strong class="label">Terminal states</strong>
+  A terminal state is one from which there are no outgoing transitions. Once
+  reached, the aggregate is done. It will never change again. In this system,
+  terminal states carry legal significance — a cancelled draft is a permanent
+  legal record that no one may alter. The state machine enforces this by
+  simply having no transitions out of <code>Cancelled</code>.
+</div>
+</section>
+
+<!-- 3 -->
+<section id="decider">
+<h2>3. The Decider pattern</h2>
+<p>
+  The <em>Functional Event Sourcing Decider</em> is a pattern described by
+  Jérémie Chassaing. It gives a precise, functional structure to the business
+  logic of an event-sourced aggregate.
+</p>
+<p>
+  The central idea is this: the aggregate's business logic is a <em>pure
+  function</em>. Given the current state of the aggregate and a command, it
+  returns a list of events. Nothing else. No database calls. No side effects.
+  No network requests. The same inputs always produce the same outputs.
+</p>
+<div class="callout">
+  <strong class="label">Why a pure function?</strong>
+  A pure function is trivially testable — you call it with inputs and check
+  the outputs. There is no mocking, no database setup, no test containers.
+  Just data in, data out.
+  <br><br>
+  It is also the only correct approach for event sourcing. The business logic
+  must not touch infrastructure. If it did, replaying events to rebuild state
+  would trigger side effects. The Decider enforces this discipline structurally.
+</div>
+</section>
+
+<!-- 4 -->
+<section id="three-functions">
+<h2>4. The three functions</h2>
+<p>
+  Every Decider in this system implements exactly three functions:
+</p>
+
+<div class="callout blue">
+  <strong class="label">initialState</strong>
+  Returns the starting state for a brand new aggregate — one that has never
+  received any events.
+<pre class="green" style="margin-top:0.6rem">
+;; Draft starts with no information
+(defn initial-state []
+  {:status  :new
+   :name    nil
+   :directors []
+   :address nil})</pre>
+</div>
+
+<div class="callout blue">
+  <strong class="label">evolve — (state, event) → state</strong>
+  Takes the current state and one event. Returns the new state.
+  This is how aggregate state is rebuilt from the event history.
+  It must be a pure function — no side effects.
+<pre class="green" style="margin-top:0.6rem">
+(defn evolve [state event]
+  (case (:event/type event)
+    :DraftCreated     (assoc state :status :active
+                                   :applicant-id (:applicant-id event))
+    :DraftUpdated     (merge state (select-keys event [:name :directors :address]))
+    :DraftSubmitted   (assoc state :status :submitted)
+    :DraftCancelled   (assoc state :status :cancelled)
+    :DraftExpired     (assoc state :status :expired)
+    ;; unknown events are ignored — forward compatibility
+    state))</pre>
+</div>
+
+<div class="callout blue">
+  <strong class="label">decide — (state, command) → [events] or error</strong>
+  Takes the current state and a command. Returns a list of events to record,
+  or throws an error if the command is rejected. This is where the state
+  machine and business rules live.
+<pre class="green" style="margin-top:0.6rem">
+(defn decide [state command]
+  (case (:command/type command)
+
+    :SubmitDraft
+    (do
+      ;; 1. State machine check — ALWAYS FIRST
+      (when-not (= :active (:status state))
+        (throw (ex-info "Draft cannot be submitted"
+                        {:error :invalid-state
+                         :current-state (:status state)})))
+      ;; 2. Business rules — only if state permits
+      (when-not (:name state)
+        (throw (ex-info "Company name required" {:error :BR-SB-001})))
+      (when (< (count (:directors state)) 2)
+        (throw (ex-info "At least two directors required" {:error :BR-SB-002})))
+      ;; ... more rules ...
+      ;; 3. Return events
+      [{:event/type   :DraftSubmitted
+        :draft-id     (:draft-id state)
+        :applicant-id (:applicant-id state)}])
+
+    :CancelDraft
+    (do
+      (when-not (= :active (:status state))
+        (throw (ex-info "Draft cannot be cancelled"
+                        {:error :invalid-state})))
+      [{:event/type   :DraftCancelled
+        :draft-id     (:draft-id state)
+        :applicant-id (:applicant-id state)}])
+
+    ;; Unknown command
+    (throw (ex-info "Unknown command" {:command (:command/type command)}))))</pre>
+</div>
+
+<div class="callout amber">
+  <strong class="label">The two-layer check in decide — this order is mandatory</strong>
+  The state machine check always comes first. If the current state does not
+  permit this command, we stop immediately. We do not run business rules.
+  We do not look at the data. We return an error.
+  <br><br>
+  Only if the state machine permits the command do we run business rules.
+  This is not a convention — it is a requirement. Running business rules
+  on a command that the state machine has already rejected wastes computation
+  and can produce misleading error messages.
+</div>
+</section>
+
+<!-- 5 -->
+<section id="runner">
+<h2>5. The runner — how it all connects</h2>
+<p>
+  The Decider knows nothing about the database, the network, or the HTTP
+  request. Something else must load events, call the Decider, and save the
+  results. That something is the <em>runner</em>.
+</p>
+<p>
+  The runner follows the same steps for every command, for every aggregate:
+</p>
+<pre>
+1. Load all past events for this aggregate from the event store
+   SELECT * FROM draft_events
+   WHERE  aggregate_id = ?
+   ORDER  BY sequence_number ASC
+
+2. Fold events through evolve to rebuild current state
+   state = reduce evolve (initial-state) events
+
+3. Enrich the command with a command ID and correlation ID
+   command = assoc command :command/id (new-uuid)
+
+4. Call decide(state, command) → [new-events] or error
+
+5. Save new-events to the event store
+   (optimistic concurrency: reject if sequence number conflict)
+   (outbox: mark published=false for delivery to RabbitMQ)
+
+6. Return success to the caller</pre>
+<div class="callout">
+  <strong class="label">Fold — rebuilding state from history</strong>
+  Folding is a functional programming concept. Starting from
+  <code>initial-state</code>, each event is applied to the current state
+  using <code>evolve</code> to produce the next state. After all events are
+  folded, the result is the exact current state of the aggregate.
+<pre class="green" style="margin-top:0.6rem">
+;; Pseudocode — the runner does this
+(defn load-state [aggregate-id]
+  (let [events (load-events aggregate-id)]
+    (reduce evolve (initial-state) events)))</pre>
+  There is no state column in the database. There is no snapshot of "current
+  state." The state is always computed from the event history. This is event
+  sourcing. The event store is the ground truth.
+</div>
+<div class="callout amber">
+  <strong class="label">Optimistic Concurrency Control</strong>
+  When saving events, the runner checks that the sequence number of the last
+  event it read is still the last event in the store. If another process wrote
+  events in the meantime, the sequence number will have advanced and the write
+  is rejected. The command can be retried. This prevents two concurrent
+  operations from corrupting the aggregate's state without using database locks.
+</div>
+</section>
+
+<!-- 6 -->
+<section id="example-draft">
+<h2>6. Full example: the Draft aggregate</h2>
+<p>
+  The Draft is the simplest aggregate in the system. Here is its complete
+  Decider, matching exactly what the business rules specify.
+</p>
+<pre>
+(ns registry.draft.decider)
+
+;; ── State ─────────────────────────────────────────────────────────────────
+
+(defn initial-state []
+  {:status       :new        ;; before DraftCreated is processed
+   :draft-id     nil
+   :applicant-id nil
+   :name         nil
+   :directors    []
+   :address      nil})
+
+;; ── Evolve ────────────────────────────────────────────────────────────────
+
+(defn evolve [state {:event/keys [type] :as event}]
+  (case type
+    :DraftCreated    (assoc state
+                            :status       :active
+                            :draft-id     (:draft-id event)
+                            :applicant-id (:applicant-id event))
+    :DraftUpdated    (merge state
+                            (select-keys event [:name :directors :address]))
+    :DraftSubmitted  (assoc state :status :submitted)
+    :DraftCancelled  (assoc state :status :cancelled)
+    :DraftExpired    (assoc state :status :expired)
+    state))  ;; unknown events → no change
+
+;; ── Decide ────────────────────────────────────────────────────────────────
+
+(defmulti decide (fn [_state command] (:command/type command)))
+
+(defmethod decide :CreateDraft
+  [state {:keys [draft-id applicant-id]}]
+  ;; State machine: only :new accepts :CreateDraft
+  (when-not (= :new (:status state))
+    (throw (ex-info "Draft already exists" {:error :invalid-state})))
+  [{:event/type   :DraftCreated
+    :draft-id     draft-id
+    :applicant-id applicant-id}])
+
+(defmethod decide :UpdateDraft
+  [state {:keys [name directors address]}]
+  ;; BR-DR-006/007/008: only active drafts may be updated
+  (when-not (= :active (:status state))
+    (throw (ex-info "Only active drafts may be updated"
+                    {:error :invalid-state :current (:status state)})))
+  [{:event/type :DraftUpdated
+    :draft-id   (:draft-id state)
+    :name       name
+    :directors  directors
+    :address    address}])
+
+(defmethod decide :CancelDraft
+  [state {:keys [requesting-applicant-id]}]
+  ;; BR-DR-005: active only
+  (when-not (= :active (:status state))
+    (throw (ex-info "Only active drafts may be cancelled"
+                    {:error :invalid-state})))
+  ;; BR-DR-011: own drafts only
+  (when-not (= (:applicant-id state) requesting-applicant-id)
+    (throw (ex-info "Cannot cancel another applicant's draft"
+                    {:error :forbidden})))
+  [{:event/type   :DraftCancelled
+    :draft-id     (:draft-id state)
+    :applicant-id (:applicant-id state)}])
+
+(defmethod decide :ExpireDraft
+  [state _command]
+  ;; BR-DR-004: only active drafts expire
+  (when-not (= :active (:status state))
+    (throw (ex-info "Only active drafts may be expired"
+                    {:error :invalid-state})))
+  [{:event/type   :DraftExpired
+    :draft-id     (:draft-id state)
+    :applicant-id (:applicant-id state)}])
+
+(defmethod decide :SubmitDraft
+  [state _command]
+  ;; 1. State machine
+  (when-not (= :active (:status state))
+    (throw (ex-info "Only active drafts may be submitted"
+                    {:error :invalid-state})))
+  ;; 2. Business rules (BR-SB-001 to BR-SB-006)
+  (let [errors
+        (cond-> []
+          (not (:name state))
+          (conj {:error :BR-SB-001 :message "Company name required"})
+
+          (< (count (:directors state)) 2)
+          (conj {:error :BR-SB-002 :message "At least two directors required"})
+
+          (not (apply distinct? (map :verification-id (:directors state))))
+          (conj {:error :BR-SB-003 :message "Directors must be distinct persons"})
+
+          (not (:address state))
+          (conj {:error :BR-SB-004 :message "Registered office address required"})
+
+          (not (every? :natural-person? (:directors state)))
+          (conj {:error :BR-SB-005 :message "All directors must be natural persons"})
+
+          (not (every? :verified? (:directors state)))
+          (conj {:error :BR-SB-006 :message "All directors must be identity-verified"}))]
+    (when (seq errors)
+      (throw (ex-info "Submission validation failed" {:errors errors}))))
+  ;; 3. Return event
+  [{:event/type   :DraftSubmitted
+    :draft-id     (:draft-id state)
+    :applicant-id (:applicant-id state)
+    :name         (:name state)
+    :directors    (:directors state)
+    :address      (:address state)}])
+
+;; ── Terminal? ─────────────────────────────────────────────────────────────
+
+(defn terminal? [state]
+  (contains? #{:submitted :cancelled :expired} (:status state)))</pre>
+</section>
+
+<!-- 7 -->
+<section id="example-regapp">
+<h2>7. Full example: the Registration Application aggregate</h2>
+<p>
+  The Registration Application has a more complex state machine with four
+  non-terminal states. The structure is identical to the Draft — the pattern
+  scales cleanly.
+</p>
+<div class="diagram">
+  <span class="state">Submitted</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">UnderExamination</span>
+  <span class="label">      (BeginExamination)</span><br>
+  <span class="state">UnderExamination</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">AwaitingRequisitionResponse</span>
+  <span class="label"> (RaiseRequisition)</span><br>
+  <span class="state">AwaitingRequisitionResponse</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">UnderExamination</span>
+  <span class="label">      (RequisitionAnswered)</span><br>
+  <span class="state">UnderExamination</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">ReadyForDecision</span>
+  <span class="label">      (ReferToRegistrar)</span><br>
+  <span class="state">ReadyForDecision</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">Approved</span>
+  <span class="label">             (ApproveApplication)</span><br>
+  <span class="state">ReadyForDecision</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">Rejected</span>
+  <span class="label">             (RejectApplication)</span><br>
+  <span class="state">Submitted|UnderExamination|</span><br>
+  <span class="state">  AwaitingRequisitionResponse|</span><br>
+  <span class="state">  ReadyForDecision</span>
+  <span class="arrow"> →→ </span>
+  <span class="state">Withdrawn</span>
+  <span class="label">           (WithdrawApplication)</span><br><br>
+  <span class="arrow">Terminal: Approved, Rejected, Withdrawn</span>
+</div>
+<p>
+  Notice that all four non-terminal states permit
+  <code>WithdrawApplication</code>. This reflects §11 of the Act — withdrawal
+  is permitted at any time before a decision. The state machine enforces the
+  law.
+</p>
+<pre>
+(defn evolve [state {:event/keys [type] :as event}]
+  (case type
+    :RegistrationApplicationCreated
+    (assoc state
+           :status         :submitted
+           :application-id (:application-id event)
+           :source-draft-id (:source-draft-id event)
+           :name           (:name event)
+           :directors      (:directors event)
+           :address        (:address event)
+           :applicant-id   (:applicant-id event))
+
+    :ExaminationStarted
+    (assoc state
+           :status      :under-examination
+           :examiner-id (:examiner-id event))
+
+    :RequisitionRaised
+    (-> state
+        (assoc :status :awaiting-requisition-response)
+        (update :open-requisitions conj (:requisition-id event)))
+
+    :RequisitionAnswered
+    (let [remaining (remove #{(:requisition-id event)}
+                            (:open-requisitions state))]
+      (cond-> state
+        true           (update :open-requisitions disj (:requisition-id event))
+        (empty? remaining) (assoc :status :under-examination)))
+
+    :ReferredToRegistrar
+    (assoc state :status :ready-for-decision)
+
+    :RegistrationApplicationApproved
+    (assoc state :status :approved :registrar-id (:registrar-id event))
+
+    :RegistrationApplicationRejected
+    (assoc state :status :rejected :rejection-reason (:reason event))
+
+    :RegistrationApplicationWithdrawn
+    (assoc state :status :withdrawn)
+
+    state))
+
+;; The decide function follows exactly the same two-layer pattern:
+;; 1. State machine check
+;; 2. Business rules (only if state permits)
+;; 3. Return events</pre>
+<div class="callout">
+  <strong class="label">The Decider has no knowledge of who is calling it</strong>
+  Role enforcement — checking that only an Examiner can begin examination,
+  or only the Registrar can approve — happens in the <em>handler</em>, before
+  the command reaches the runner. The Decider receives a fully validated
+  command. It trusts that the caller has already been authorised.
+  <br><br>
+  This is the Separation of Concerns principle applied to security. Security
+  policy lives in the handler. Domain logic lives in the Decider. They never
+  mix.
+</div>
+</section>
+
+<!-- 8 -->
+<section id="rules">
+<h2>8. How business rules map to Decider code</h2>
+<p>
+  Every business rule in the Business Rules document has a code location.
+  The mapping is direct and intentional.
+</p>
+<div class="callout">
+  <strong class="label">State machine checks → top of each decide method</strong>
+  Rules like BR-DR-006 ("a submitted draft may not be updated") map to the
+  state machine check at the top of the <code>:UpdateDraft</code> method.
+  If the status is not <code>:active</code>, throw immediately.
+</div>
+<div class="callout">
+  <strong class="label">Business rules → validation block after state check</strong>
+  Rules like BR-SB-001 ("draft must state a company name") map to the
+  validation block inside the <code>:SubmitDraft</code> method. They run
+  only after the state machine has permitted the command.
+</div>
+<div class="callout">
+  <strong class="label">Injected functions for external checks</strong>
+  Rules like BR-AP-007 (name uniqueness against the Register) and BR-AP-009
+  (address validation) cannot be checked by the Decider alone — they require
+  authoritative external facts. These are passed into the command as functions:
+<pre class="green" style="margin-top:0.6rem">
+;; The handler injects these — the Decider calls them
+{:command/type      :ApproveApplication
+ :name-available-fn (fn [name] (register-write-side/name-available? store name))
+ :address-valid-fn (fn [addr] (address-service/valid? addr))}</pre>
+  The Decider calls them and uses the result. It never calls the database
+  or the address service directly. The Decider remains pure — the injected
+  functions are its only window onto the outside world, and the handler
+  is responsible for providing correct implementations. The name check must
+  use authoritative write-side Register facts, not a stale read model. In this
+  contract it is a non-reserving check: name locking at draft or submission
+  time is parked for future legal and product design.
+</div>
+<div class="callout amber">
+  <strong class="label">The "Previously" column is gone — use BR IDs in code comments</strong>
+  Every business rule check in the Decider should reference its BR ID in
+  a comment. When a developer reads the code, they can look up the rule in
+  the Business Rules document and find the Act section it derives from.
+  This is the traceability chain: Act → Business Rules → Code.
+<pre class="green" style="margin-top:0.6rem">
+;; BR-SB-001: company name must be stated (§8)
+(when-not (:name state)
+  (throw (ex-info "Company name required" {:error :BR-SB-001})))</pre>
+</div>
+</section>
+
+<!-- 9 -->
+<section id="testing">
+<h2>9. Testing a Decider</h2>
+<p>
+  Because the Decider is a pure function, testing is simple. No mocks.
+  No database. No test containers. Just data.
+</p>
+<pre>
+(deftest submit-draft-test
+
+  (testing "happy path — all rules pass"
+    (let [state  (build-valid-active-draft)
+          command {:command/type :SubmitDraft}
+          events (decide state command)]
+      (is (= 1 (count events)))
+      (is (= :DraftSubmitted (:event/type (first events))))))
+
+  (testing "BR-DR-006 — cannot submit a cancelled draft"
+    (let [state   (assoc (build-draft) :status :cancelled)
+          command {:command/type :SubmitDraft}]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"invalid-state"
+            (decide state command)))))
+
+  (testing "BR-SB-001 — company name required"
+    (let [state   (assoc (build-valid-active-draft) :name nil)
+          command {:command/type :SubmitDraft}
+          ex      (try (decide state command)
+                       (catch Exception e e))]
+      (is (= :BR-SB-001 (:error (ex-data ex))))))
+
+  (testing "state machine check runs before business rules"
+    ;; A cancelled draft with missing name should fail on state machine,
+    ;; not on BR-SB-001
+    (let [state   (assoc (build-draft) :status :cancelled :name nil)
+          command {:command/type :SubmitDraft}
+          ex      (try (decide state command) (catch Exception e e))]
+      (is (= :invalid-state (:error (ex-data ex)))))))</pre>
+<p>
+  The last test is important. It verifies that the state machine check runs
+  before business rules. A cancelled draft should always fail on state, not
+  on data — regardless of what data it contains.
+</p>
+</section>
+
+<!-- 10 -->
+<section id="mistakes">
+<h2>10. Common mistakes</h2>
+
+<div class="callout red">
+  <strong class="label">Mistake 1 — putting business rules before the state machine check</strong>
+<pre class="red" style="margin-top:0.6rem">
+;; WRONG — business rule checked before state machine
+(defmethod decide :SubmitDraft [state command]
+  (when-not (:name state)            ;; ← business rule runs first
+    (throw ...))
+  (when-not (= :active (:status state))  ;; ← state machine check too late
+    (throw ...))
+  ...)</pre>
+  This means a cancelled draft with a missing name will produce the wrong
+  error. Always check the state machine first.
+</div>
+
+<div class="callout red">
+  <strong class="label">Mistake 2 — side effects inside the Decider</strong>
+<pre class="red" style="margin-top:0.6rem">
+;; WRONG — the Decider calls the database directly
+(defmethod decide :ApproveApplication [state command]
+  (when-not (= :ready-for-decision (:status state)) (throw ...))
+  (let [exists? (db/name-exists? (:db command) (:name state))]  ;; ← NO
+    ...)</pre>
+  Pass a function into the command instead. The Decider calls the function,
+  not the database. This keeps the Decider pure and testable without a
+  database.
+</div>
+
+<div class="callout red">
+  <strong class="label">Mistake 3 — storing state outside the event stream</strong>
+<pre class="red" style="margin-top:0.6rem">
+;; WRONG — saving current state to a separate table
+(defmethod decide :SubmitDraft [state command]
+  ...
+  (db/update-draft-status! (:draft-id state) :submitted)  ;; ← NO
+  [{:event/type :DraftSubmitted ...}])</pre>
+  State is rebuilt by replaying events. There is no state table. Writing to
+  one creates a second source of truth that will drift from the event stream.
+</div>
+
+<div class="callout red">
+  <strong class="label">Mistake 4 — ignoring unknown events in evolve</strong>
+<pre class="red" style="margin-top:0.6rem">
+;; WRONG — throwing on unknown events
+(defn evolve [state event]
+  (case (:event/type event)
+    :DraftCreated   ...
+    :DraftUpdated   ...
+    (throw (ex-info "Unknown event" {:type (:event/type event)})))  ;; ← NO</pre>
+  The correct behaviour is to return the state unchanged for unknown events.
+  This is forward compatibility — a future version of the system may emit
+  new event types that an older consumer should simply ignore.
+</div>
+
+<div class="callout red">
+  <strong class="label">Mistake 5 — bypassing the Decider for scheduled jobs</strong>
+<pre class="red" style="margin-top:0.6rem">
+;; WRONG — scheduler writes events directly
+(defn expire-drafts! [db]
+  (doseq [draft-id (find-expired-drafts db)]
+    (db/insert-event! db {:event/type :DraftExpired    ;; ← bypasses Decider
+                          :draft-id draft-id})))</pre>
+  The expiry scheduler must issue an <code>ExpireDraft</code> command to
+  the runner. The runner calls the Decider. The Decider checks the state
+  machine and emits the event. Bypassing this path bypasses the audit trail,
+  the state machine, and any business logic — all of which may be legally
+  significant in this system.
+</div>
+</section>
+
+<!-- 11 -->
+<section id="aggregates">
+<h2>11. All aggregates in this system</h2>
+<p>
+  There are three domain aggregates and one process manager family in this
+  system.
+</p>
+
+<div class="callout">
+  <strong class="label">Draft</strong>
+  The Applicant's private workspace. Enforces the 5-draft limit, expiry,
+  and all submission validation rules.
+  <span class="callout-subhead">Non-terminal states</span>
+  <code>Active</code>
+  <span class="callout-subhead">Terminal states</span>
+  <code>Submitted</code>, <code>Cancelled</code>, <code>Expired</code>
+  <span class="callout-subhead">Decider</span>
+  <code>registry.draft.decider</code>
+</div>
+
+<div class="callout">
+  <strong class="label">Registration Application</strong>
+  The formal lodgement under examination. Manages the examination workflow
+  including requisitions, referral, and the Registrar's decision.
+  <span class="callout-subhead">Non-terminal states</span>
+  <code>Submitted</code>, <code>UnderExamination</code>,
+  <code>AwaitingRequisitionResponse</code>, <code>ReadyForDecision</code>
+  <span class="callout-subhead">Terminal states</span>
+  <code>Approved</code>, <code>Rejected</code>, <code>Withdrawn</code>
+  <span class="callout-subhead">Decider</span>
+  <code>registry.registration-application.decider</code>
+</div>
+
+<div class="callout">
+  <strong class="label">Registered Company</strong>
+  The legal entity. Records director changes, address changes, annual returns,
+  and the end of the company's life (strike-off or dissolution).
+  <span class="callout-subhead">Non-terminal states</span>
+  <code>Registered</code>
+  <span class="callout-subhead">Terminal states</span>
+  <code>StruckOff</code>, <code>Dissolved</code>
+  <span class="callout-subhead">Decider</span>
+  <code>registry.registered-company.decider</code>
+</div>
+
+<div class="callout amber">
+  <strong class="label">Process Managers — coordination, not domain</strong>
+  Process managers are event-sourced finite state machines, but they are not
+  domain aggregates. They coordinate work across aggregates by listening for
+  events and issuing commands. They use the same Decider structure — evolve,
+  decide, initial-state — but their state represents coordination progress,
+  not domain facts.
+  <br><br>
+  Current process managers:
+  <br><br>
+  <code>DraftSubmissionProcessManager</code> — listens for
+  <code>DraftSubmitted</code>, creates the RegistrationApplication<br>
+  <code>ApprovalProcessManager</code> — listens for
+  <code>RegistrationApplicationApproved</code>, creates the RegisteredCompany<br>
+  <br>
+  Process managers must persist their coordination state durably. If they
+  crash between receiving an event and issuing the resulting command, they
+  must recover to exactly the right position. They never restart from the
+  beginning. This is why they are event-sourced.
+</div>
+
+<div class="callout">
+  <strong class="label">Further reading</strong>
+  <span class="callout-subhead">The Decider pattern</span>
+  Jérémie Chassaing — <em>Functional Event Sourcing Decider</em><br>
+  thinkbeforecoding.com
+  <span class="callout-subhead">Event sourcing</span>
+  Martin Fowler — <em>Event Sourcing</em> (martinfowler.com)<br>
+  Greg Young — <em>CQRS Documents</em>
+  <span class="callout-subhead">Process managers and sagas</span>
+  Chris Richardson — <em>Microservices Patterns</em>, Chapter 4<br>
+  Gregor Hohpe, Bobby Woolf — <em>Enterprise Integration Patterns</em>
+  <span class="callout-subhead">Hexagonal architecture</span>
+  Alistair Cockburn — <em>Hexagonal Architecture</em><br>
+  The handler is the adapter. The runner is the application layer.
+  The Decider is the domain core.
+</div>
+
+</section>
+
+</body>
+</html>
