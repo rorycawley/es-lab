@@ -1,45 +1,42 @@
 # Approach
 
 This document is the entry point for the `04a-legal-facts` project. It
-explains the golden thread — the ordered chain of artifacts that runs from
-**WHY** the system exists through **WHAT** it must do to **HOW** it is built —
+explains the golden thread - the ordered chain of artifacts that runs from
+**WHY** the system exists through **WHAT** it must do to **HOW** it is built -
 and the rationale for that order. Later artifacts always build on decisions
 already made in earlier ones.
 
----
 
 ## The Golden Thread
 
 The documents in this project are numbered to make the reading order explicit:
 
 ```
-00  The law — the source of all requirements
-01  WHY: Vision and Mission — what the world looks like when we succeed, and why we exist
-02  WHY: Strategic Goals — what success looks like in this period
-03  WHY: Business Drivers — why the system is shaped this way
-04  WHAT: Domain Discovery — shared language, boundaries, aggregates, events
-05  HOW: Architecture Principles — standing rules that govern every decision
-06  HOW: Architectural Characteristics — NFRs and the fitness functions that verify them
-07  WHAT: Business Rules — enforceable rules derived from the Act, including FSMs
-08  WHAT: User Stories — observable behaviour with acceptance criteria
-09  HOW: Testing Strategy — test layers, git gates, mocking, CI configuration
-     adrs/  — Structural decisions that user stories and rules do not explain
+00  The law - the source of all requirements
+01  WHY: Vision and Mission - what the world looks like when we succeed, and why we exist
+02  WHY: Strategic Goals - what success looks like in this period
+03  WHY: Business Drivers - why the system is shaped this way
+04  WHAT: Domain Discovery - shared language, boundaries, aggregates, events
+05  HOW: Architecture Principles - standing rules that govern every decision
+06  HOW: Architectural Characteristics - NFRs and the fitness functions that verify them
+07  WHAT: Business Rules - enforceable rules derived from the Act, including FSMs
+08  WHAT: User Stories - observable behaviour with acceptance criteria
+09  HOW: Testing Strategy - test layers, git gates, mocking, CI configuration
+     adrs/  - Structural decisions that user stories and rules do not explain
 ```
 
-The unnumbered documents — `APPROACH.md` (this file) and `adrs/README.md` — are
+The unnumbered documents - `APPROACH.md` (this file) and `adrs/README.md` - are
 navigation aids, not part of the golden thread.
 
----
 
 ## Guiding Idea
 
 The law is the requirements document. Every rule must trace to a legal source.
 Every test must trace to a rule. Every architecture decision must trace to a
 characteristic. Without this chain, you cannot answer "why does this code
-exist?" six months later — and in a regulated system, that question will
+exist?" six months later - and in a regulated system, that question will
 be asked.
 
----
 
 ## Artifact Sequence and Rationale
 
@@ -52,13 +49,12 @@ user stories, and acceptance criteria are traceable to sections of the Act.
 
 **Document:** [`00-companies-registration-act.md`](00-companies-registration-act.md)
 
----
 
 ### 1. Vision and Mission
 
 *What does the world look like when we have fully succeeded? Why do we exist?*
 
-The **Vision** is the long-term aspiration — the 10–20 year horizon that gives
+The **Vision** is the long-term aspiration - the 10–20 year horizon that gives
 the organisation its sense of direction. It does not describe features or
 systems; it describes the state of the world the organisation exists to bring
 about.
@@ -68,12 +64,11 @@ organisation does every day and who it serves. Goals must be justifiable by the
 Mission. Work that cannot be traced to the Mission should not exist.
 
 The document also defines the full strategic hierarchy: Vision, Mission,
-Drivers, Goals, Objectives, KPIs — and explains what each level means and why
+Drivers, Goals, Objectives, KPIs - and explains what each level means and why
 they are distinct.
 
 **Document:** [`01-vision-and-mission.md`](01-vision-and-mission.md)
 
----
 
 ### 2. Strategic Goals
 
@@ -86,7 +81,6 @@ basis for prioritisation.
 
 **Document:** [`02-strategic-goals.md`](02-strategic-goals.md)
 
----
 
 ### 3. Business Drivers
 
@@ -94,13 +88,12 @@ basis for prioritisation.
 around the requirements?*
 
 Business drivers explain the motivation behind structural choices. They are not
-the same as requirements (which describe behaviour) — they explain why certain
+the same as requirements (which describe behaviour) - they explain why certain
 qualities matter more than others. Without drivers, architectural characteristics
 have no grounding and ADRs cannot be justified.
 
 **Document:** [`03-business-drivers.md`](03-business-drivers.md)
 
----
 
 ### 4. Domain Discovery
 
@@ -117,21 +110,19 @@ For this project, the bounded contexts are: **Draft**, **RegistrationApplication
 
 **Document:** [`04-domain-discovery.md`](04-domain-discovery.md)
 
----
 
 ### 5. Architecture Principles
 
 *What rules guide all decisions?*
 
 Principles come before characteristics and ADRs. A principle is a standing
-rule that applies to every decision — "domain logic is pure",
+rule that applies to every decision - "domain logic is pure",
 "the Register is always authoritative", "events are institutional facts".
 Characteristics and ADRs must be consistent with principles. If an ADR appears
 to contradict a principle, the ADR must explicitly justify the exception.
 
 **Document:** [`05-architecture-principles.md`](05-architecture-principles.md)
 
----
 
 ### 6. Architectural Characteristics (NFRs)
 
@@ -140,12 +131,11 @@ to contradict a principle, the ADR must explicitly justify the exception.
 Architectural characteristics are the cross-functional requirements that
 constrain the design: legal integrity, auditability, idempotency, fault
 tolerance, rebuildability. They are derived from business drivers. Each
-characteristic has mandatory fitness functions — tests that run continuously
+characteristic has mandatory fitness functions - tests that run continuously
 and fail the build if the characteristic is violated.
 
 **Document:** [`06-architectural-characteristics.md`](06-architectural-characteristics.md)
 
----
 
 ### 7. Business Rules
 
@@ -157,7 +147,6 @@ commands are legal in each aggregate state.
 
 **Document:** [`07-business-rules.md`](07-business-rules.md)
 
----
 
 ### 8. Architectural Decision Records (ADRs)
 
@@ -170,7 +159,6 @@ Architecture Principles.
 
 **Directory:** [`adrs/`](adrs/README.md)
 
----
 
 ### 9. Event Modeling
 
@@ -183,14 +171,13 @@ is a sequence-ordered map of: **Commands → Events → Read Models → Process
 Manager triggers → next Commands**. This directly informs the user stories,
 the aggregate boundaries, and the integration tests.
 
-Event modeling should happen alongside or before user stories — it reveals the
+Event modeling should happen alongside or before user stories - it reveals the
 command/event vocabulary that user stories rely on.
 
 **Status in this project:** To be completed. Event model to be created using
 a dedicated tool (EventModeling.org notation or equivalent) and its artefacts
 stored in `docs/event-model/`.
 
----
 
 ### 10. User Stories with Acceptance Criteria
 
@@ -209,7 +196,6 @@ See **Traceability** section below for the format.
 
 **Document:** [`08-user-stories.md`](08-user-stories.md)
 
----
 
 ### 11. Architecture Descriptions and Diagrams
 
@@ -231,7 +217,6 @@ render in GitHub and most editors without external tooling.
 
 **Document:** [`10-architecture.md`](10-architecture.md)
 
----
 
 ### 12. TDD Implementation with CI and Trunk-Based Development
 
@@ -253,7 +238,6 @@ until it is complete enough to be harmless.
 
 **Document:** [`09-testing-strategy.md`](09-testing-strategy.md)
 
----
 
 ## Traceability
 
@@ -303,7 +287,6 @@ Every test that verifies an acceptance criterion is named with the AC ID:
 This means any test failure can be immediately traced back to a requirement,
 and any requirement can be immediately traced forward to its test.
 
----
 
 ## Repeatable Model
 
@@ -321,13 +304,12 @@ framework adds more overhead than value. Before applying it, ask: does this
 system need to answer "why did this happen?" five years from now? If yes,
 apply the full framework. If no, apply only the parts that add value.
 
----
 
 ## Document Index
 
 | Document | Purpose |
 |----------|---------|
-| [`00-companies-registration-act.md`](00-companies-registration-act.md) | Source law — all rules and stories trace here |
+| [`00-companies-registration-act.md`](00-companies-registration-act.md) | Source law - all rules and stories trace here |
 | [`01-vision-and-mission.md`](01-vision-and-mission.md) | Long-term aspiration, enduring purpose, constituencies, and the strategic hierarchy explained |
 | [`02-strategic-goals.md`](02-strategic-goals.md) | Strategic goals, measurable objectives, KPIs |
 | [`03-business-drivers.md`](03-business-drivers.md) | Pressures, constraints, and motivation behind structural choices |
@@ -342,7 +324,6 @@ apply the full framework. If no, apply only the parts that add value.
 | [`adrs/README.md`](adrs/README.md) | Index of all architectural decision records |
 | `docs/event-model/` | Event model artifacts *(to be created)* |
 
----
 
 ## Parked Scope
 
@@ -350,7 +331,6 @@ Several important registry concerns are deliberately deferred. Parked concerns
 are named, not silently ignored. See [`03-business-drivers.md`](03-business-drivers.md)
 for the full parked list.
 
----
 
 ## References
 

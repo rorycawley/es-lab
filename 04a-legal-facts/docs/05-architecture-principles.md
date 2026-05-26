@@ -5,12 +5,11 @@
 
 These principles apply to the registry system and to any enduring software
 that must record and protect legal or institutional facts over long periods.
-They are not preferences — they are rules that inform every structural and
+They are not preferences - they are rules that inform every structural and
 implementation decision. ADRs must be consistent with them; where an ADR
 appears to contradict a principle, the ADR must explicitly state why the
 exception is justified.
 
----
 
 ## Domain Integrity
 
@@ -35,7 +34,6 @@ Approving an application and creating a legal entity are causally related but
 legally distinct facts. Never conflate them. The process manager that chains
 them is explicit, observable, and recoverable.
 
----
 
 ## System Design
 
@@ -70,7 +68,6 @@ State machines over boolean flags. Named commands over generic updates. Named
 events over raw row mutations. An event called `DraftCancelled` is
 self-documenting; a row with `status = 'cancelled'` is not.
 
----
 
 ## Implementation
 
@@ -89,7 +86,7 @@ Postgres event store tomorrow without changing a line of domain code.
 **Requirements describe WHAT and WHY, never HOW.**
 User stories and business rules constrain behaviour by purpose, not
 implementation. A story that says "the system must use a relational database"
-is not a requirement — it is an ADR written in the wrong place. ADRs explain
+is not a requirement - it is an ADR written in the wrong place. ADRs explain
 structural decisions; requirements explain observable behaviour.
 
 **Event schemas are permanent contracts.**
@@ -98,7 +95,6 @@ schema in place. Introduce a versioned successor and write an evolver (upcaster)
 that transforms old versions at read time. This is non-negotiable for
 event-sourced systems.
 
----
 
 ## Delivery and Observability
 
@@ -116,7 +112,7 @@ is necessary but insufficient.
 
 **Tests are specifications.**
 A behaviour that is not tested is not specified. Acceptance criteria map
-directly to tests — the same ID, the same Given/When/Then structure. Fitness
+directly to tests - the same ID, the same Given/When/Then structure. Fitness
 functions are tests that run continuously, not periodic architectural reviews.
 
 **Small steps, always releasable.**
@@ -134,7 +130,6 @@ Key architectural qualities are tested continuously, not reviewed periodically.
 Every fitness function is a test that runs in CI and fails the build if the
 system drifts from its architectural constraints.
 
----
 
 ## Enduring Software
 

@@ -21,7 +21,7 @@ Use claims-based authorisation with four layers applied in sequence:
 Coarse-grained gate at the API endpoint and command boundary. Each role has a
 set of permitted commands. A command not in the role's permission set is
 rejected before the FSM or Decider is reached. Roles are extracted from the
-trusted OIDC session claims — never from the request body.
+trusted OIDC session claims - never from the request body.
 
 **2. Attribute-based access control (ABAC)**
 Ownership and attribute checks applied inside the command handler, after the

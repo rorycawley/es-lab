@@ -5,12 +5,11 @@
 
 These rules are the authoritative specification for the Decider functions,
 process managers, projectors, and schedulers in the registry system. Each
-rule references the Act section from which it is derived. Rules marked `—`
+rule references the Act section from which it is derived. Rules marked `-`
 are architectural constraints with no direct Act reference.
 
----
 
-## Group 1 — Identity Verification
+## Group 1 - Identity Verification
 
 Every natural person who acts in the Registry system, or who appears in
 company data as a director or Authorised Officer, must have a verified
@@ -42,9 +41,8 @@ verification through a trusted third-party provider, and resumes examination
 only after confirmation is received. That workflow is not implemented in this
 contract.
 
----
 
-## Group 2 — Draft Aggregate
+## Group 2 - Draft Aggregate
 
 Enforced by: `DraftDecider`
 
@@ -55,17 +53,17 @@ a registration application. It has no legal existence.
 |------|-------------|-----|
 | BR-DR-001 | A draft is active if it has not been submitted, cancelled, or expired | §4 |
 | BR-DR-002 | An Applicant may not hold more than 5 active drafts at any time | §4 |
-| BR-DR-003 | A draft expires after the configured expiry period if not submitted — the default is 30 days; the period is set by the Registrar by order and must never be hardcoded | §5 |
-| BR-DR-004 | Draft expiry is triggered by a scheduled job that issues an `ExpireDraft` command through the Decider — business logic and the audit trail must never be bypassed | §5 |
-| BR-DR-005 | A draft may be cancelled by the Applicant at any time while it is in the `Active` state | — |
-| BR-DR-006 | A draft that has been submitted may not be updated, cancelled, or resubmitted | — |
-| BR-DR-007 | A draft that has been cancelled may not be updated or submitted | — |
-| BR-DR-008 | A draft that has been expired may not be updated, cancelled, or submitted | — |
+| BR-DR-003 | A draft expires after the configured expiry period if not submitted - the default is 30 days; the period is set by the Registrar by order and must never be hardcoded | §5 |
+| BR-DR-004 | Draft expiry is triggered by a scheduled job that issues an `ExpireDraft` command through the Decider - business logic and the audit trail must never be bypassed | §5 |
+| BR-DR-005 | A draft may be cancelled by the Applicant at any time while it is in the `Active` state | - |
+| BR-DR-006 | A draft that has been submitted may not be updated, cancelled, or resubmitted | - |
+| BR-DR-007 | A draft that has been cancelled may not be updated or submitted | - |
+| BR-DR-008 | A draft that has been expired may not be updated, cancelled, or submitted | - |
 | BR-DR-009 | All drafts are retained permanently regardless of their status | §6 |
 | BR-DR-010 | A draft has no legal existence and confers no rights or obligations | §3 |
-| BR-DR-011 | An Applicant may only cancel their own drafts | — |
-| BR-DR-012 | The Registry shall notify an Applicant when their draft is approaching its expiry date — the warning period is set by the Registrar by order and must never be hardcoded | §5 |
-| BR-DR-013 | A cancelled or expired draft may not be reinstated — the Applicant must create a new draft | §4, §6 |
+| BR-DR-011 | An Applicant may only cancel their own drafts | - |
+| BR-DR-012 | The Registry shall notify an Applicant when their draft is approaching its expiry date - the warning period is set by the Registrar by order and must never be hardcoded | §5 |
+| BR-DR-013 | A cancelled or expired draft may not be reinstated - the Applicant must create a new draft | §4, §6 |
 | BR-DR-014 | A draft may only be created by an identity-verified Applicant | §2, §3 |
 
 **State machine:**
@@ -73,9 +71,9 @@ a registration application. It has no legal existence.
 ```edn
 {:transitions
  {[:active :submit-draft]  :submitted  ;; ordered flow: see Submission ordered flow below
-  [:active :cancel-draft]  :cancelled  ;; BR-DR-011 — Applicant only
-  [:active :expire-draft]  :expired}   ;; BR-DR-004 — scheduler only, through Decider
- :terminal-states #{:submitted :cancelled :expired}} ;; BR-DR-013 — terminal states are irreversible
+  [:active :cancel-draft]  :cancelled  ;; BR-DR-011 - Applicant only
+  [:active :expire-draft]  :expired}   ;; BR-DR-004 - scheduler only, through Decider
+ :terminal-states #{:submitted :cancelled :expired}} ;; BR-DR-013 - terminal states are irreversible
 ```
 
 All states except `:active` are terminal. Terminal states are irreversible
@@ -84,15 +82,14 @@ All states except `:active` are terminal. Terminal states are irreversible
 **Submission ordered flow:**
 
 ```
-1. Validate BR-SB-001 through BR-SB-006 — reject if any fail; no fee taken
+1. Validate BR-SB-001 through BR-SB-006 - reject if any fail; no fee taken
 2. Present fee amount and non-refundable notice to Applicant (BR-FE-005, BR-FE-008)
 3. Take payment (BR-FE-001)
 4. Create registration application
 ```
 
----
 
-## Group 3 — Filing Fee
+## Group 3 - Filing Fee
 
 The filing fee is a precondition of submission. It is enforced in the
 submission flow after validation passes. It has no aggregate of its own.
@@ -102,15 +99,14 @@ submission flow after validation passes. It has no aggregate of its own.
 | BR-FE-001 | A filing fee must be paid before a registration application is created | §12A |
 | BR-FE-002 | The filing fee amount is set by the Registrar by order and must never be hardcoded | §12A |
 | BR-FE-003 | The filing fee is non-refundable once the registration application has been formally created, regardless of the subsequent outcome of the application | §12A |
-| BR-FE-004 | If submission is retried with the same command ID, no second payment shall be taken | — |
+| BR-FE-004 | If submission is retried with the same command ID, no second payment shall be taken | - |
 | BR-FE-005 | The Applicant must be clearly informed of the fee amount and its non-refundable nature before payment is taken | §12A |
-| BR-FE-006 | If the filing fee is successfully deducted but the registration application is not created due to a system failure, the fee shall be refunded — this is the sole exception to BR-FE-003 | §12A |
+| BR-FE-006 | If the filing fee is successfully deducted but the registration application is not created due to a system failure, the fee shall be refunded - this is the sole exception to BR-FE-003 | §12A |
 | BR-FE-007 | The Registry shall issue a payment receipt to the Applicant upon successful payment, stating the amount paid, the payment date, and the draft ID | §12A |
-| BR-FE-008 | Submission validation rules BR-SB-001 through BR-SB-006 must pass before the filing fee is presented — payment is never requested for a draft that fails validation | §12A |
+| BR-FE-008 | Submission validation rules BR-SB-001 through BR-SB-006 must pass before the filing fee is presented - payment is never requested for a draft that fails validation | §12A |
 
----
 
-## Group 4 — Submission Validation
+## Group 4 - Submission Validation
 
 Enforced by: `DraftDecider` (on the `SubmitDraft` command, before fee payment)
 
@@ -122,18 +118,17 @@ created.
 |------|-------------|-----|
 | BR-SB-001 | The draft must state a proposed company name | §7, §8 |
 | BR-SB-002 | The draft must name at least two proposed directors | §8 |
-| BR-SB-003 | Each proposed director must be a distinct person as determined by their Registry verification record ID — the same ID may not appear more than once | §8, §9 |
+| BR-SB-003 | Each proposed director must be a distinct person as determined by their Registry verification record ID - the same ID may not appear more than once | §8, §9 |
 | BR-SB-004 | The draft must state a registered office address | §8 |
 | BR-SB-005 | Every proposed director must be a natural person | §9 |
 | BR-SB-006 | Every proposed director must have a verified-person record accepted by the Registry before the draft is submitted | §9 |
 
 *Note: Company name uniqueness (BR-AP-007, BR-AP-010) and address validity
-(BR-AP-009) are not checked at submission — they are the Registrar's legal
+(BR-AP-009) are not checked at submission - they are the Registrar's legal
 responsibility at approval under §14.*
 
----
 
-## Group 5 — Requisitions
+## Group 5 - Requisitions
 
 Enforced by: `RegistrationApplicationDecider`
 
@@ -151,17 +146,16 @@ additional information.
 | BR-RQ-006 | A requisition response must be submitted before the stated deadline | §13 |
 | BR-RQ-007 | When all open requisitions have received responses, the application transitions back to `UnderExamination` and the assigned Examiner is notified | §13 |
 | BR-RQ-008 | Every requisition and its response are permanently recorded on the application | §20 |
-| BR-RQ-009 | When a requisition deadline passes without a response, the assigned Examiner is notified once automatically — the system takes no further automatic action | §13 |
+| BR-RQ-009 | When a requisition deadline passes without a response, the assigned Examiner is notified once automatically - the system takes no further automatic action | §13 |
 | BR-RQ-010 | An application with open requisitions may not be referred to the Registrar for decision | §13 |
 | BR-RQ-011 | An application in the `AwaitingRequisitionResponse` state may be withdrawn by the Applicant | §11 |
-| BR-RQ-012 | The deadline for a requisition response must not exceed the maximum period set by the Registrar by order — this maximum must never be hardcoded | §13 |
-| BR-RQ-013 | An Examiner may close a requisition without requiring a response where it was raised in error — the closure must state a reason and the Applicant must be notified; the closure is permanently recorded | §13 |
+| BR-RQ-012 | The deadline for a requisition response must not exceed the maximum period set by the Registrar by order - this maximum must never be hardcoded | §13 |
+| BR-RQ-013 | An Examiner may close a requisition without requiring a response where it was raised in error - the closure must state a reason and the Applicant must be notified; the closure is permanently recorded | §13 |
 | BR-RQ-014 | After a requisition deadline passes without a response, only the assigned Examiner may record the next action; the action and reason must be permanently recorded | §13, §20 |
 | BR-RQ-015 | A missed-deadline next action may extend the deadline and notify the Applicant, or proceed toward referral to the Registrar with the missed deadline recorded in the case history | §13 |
 
----
 
-## Group 6 — Registration Application Aggregate
+## Group 6 - Registration Application Aggregate
 
 Enforced by: `RegistrationApplicationDecider`
 
@@ -171,13 +165,13 @@ legal act.
 
 | Rule | Description | Act |
 |------|-------------|-----|
-| BR-RA-001 | A registration application is created by a process manager reacting to a `DraftSubmitted` event — it is never created directly by a user command | — |
-| BR-RA-002 | A registration application permanently records the ID of the draft that created it | — |
-| BR-RA-003 | An Applicant may withdraw their registration application at any time before the Registrar makes a decision — withdrawal is permitted in the `Submitted`, `UnderExamination`, `AwaitingRequisitionResponse`, and `ReadyForDecision` states | §11 |
-| BR-RA-004 | An Applicant may only withdraw their own registration application | — |
+| BR-RA-001 | A registration application is created by a process manager reacting to a `DraftSubmitted` event - it is never created directly by a user command | - |
+| BR-RA-002 | A registration application permanently records the ID of the draft that created it | - |
+| BR-RA-003 | An Applicant may withdraw their registration application at any time before the Registrar makes a decision - withdrawal is permitted in the `Submitted`, `UnderExamination`, `AwaitingRequisitionResponse`, and `ReadyForDecision` states | §11 |
+| BR-RA-004 | An Applicant may only withdraw their own registration application | - |
 | BR-RA-005 | All registration applications are retained permanently regardless of their status | §12 |
-| BR-RA-006 | Only an Examiner may begin examination of an application | — |
-| BR-RA-007 | Once examination has begun, the application is assigned to that Examiner and is no longer available to other Examiners | — |
+| BR-RA-006 | Only an Examiner may begin examination of an application | - |
+| BR-RA-007 | Once examination has begun, the application is assigned to that Examiner and is no longer available to other Examiners | - |
 | BR-RA-008 | Only the assigned Examiner may refer a completed application to the Registrar for decision | §13 |
 | BR-RA-009 | An application may only be referred to the Registrar when it is in `UnderExamination` and has no open requisitions | §13 |
 | BR-RA-010 | Only the Registrar may approve or reject an application, and only when it is in the `ReadyForDecision` state | §14, §16 |
@@ -205,9 +199,8 @@ Non-terminal states: `:submitted`, `:under-examination`,
 
 Terminal states: `:approved`, `:rejected`, `:withdrawn`
 
----
 
-## Group 7 — Approval Business Rules
+## Group 7 - Approval Business Rules
 
 Enforced by: `RegistrationApplicationDecider` (on the `ApproveApplication`
 command)
@@ -227,18 +220,17 @@ records do not expire in this contract; revocation is out of scope.
 | BR-AP-006 | Every proposed director must have a verified-person record accepted by the Registry | §9, §14 |
 | BR-AP-007 | The proposed company name must not be identical to the current name of any company in the authoritative Register. This check must use write-side Register facts, not the Register read model. This approval check is non-reserving: it does not lock the name | §10, §14 |
 | BR-AP-008 | The proposed company name must not fall within a prohibited category prescribed by the Registrar by order | §10, §14 |
-| BR-AP-009 | The registered office address must be verified against the national address database, must not be a PO box, and must be usable as a registered office — if the address validation service is unavailable at approval, the system records the unavailability and the Registrar must make an explicit confirmatory decision before approval proceeds | §13, §14 |
+| BR-AP-009 | The registered office address must be verified against the national address database, must not be a PO box, and must be usable as a registered office - if the address validation service is unavailable at approval, the system records the unavailability and the Registrar must make an explicit confirmatory decision before approval proceeds | §13, §14 |
 | BR-AP-010 | The proposed company name must not be identical to any former name of a company that is within the protected period set by the Registrar by order. This check must use write-side Register facts, not the Register read model. This approval check is non-reserving: it does not lock the name | §10, §14 |
 
----
 
-## Group 7A — Four-Eyes Rule (Separation of Examination and Decision)
+## Group 7A - Four-Eyes Rule (Separation of Examination and Decision)
 
 The four-eyes rule is the requirement under §13A that no single natural person
 may both examine and decide on the same registration application. It is an
 institutional integrity control: the person who prepares the case must not be
 the person who closes it. Role separation alone (Examiner role vs Registrar
-role) is insufficient — the system must also prevent the same natural person
+role) is insufficient - the system must also prevent the same natural person
 from acting in both capacities on the same application, even if they hold
 both roles.
 
@@ -249,9 +241,8 @@ both roles.
 | BR-4E-003 | A decision to approve or reject an application where the acting Registrar is the same natural person as the Examiner is invalid and must be rejected with a permanent record of the attempted breach | §13A |
 | BR-4E-004 | The four-eyes check is an ABAC rule applied after RBAC and before the state machine guard. A Registrar who passes RBAC but fails the four-eyes check receives a distinct rejection reason (`four-eyes-violation`) that is recorded in the audit log | §13A |
 
----
 
-## Group 8 — Authorised Officers
+## Group 8 - Authorised Officers
 
 An Authorised Officer is a person authorised to act on behalf of a
 registered company for post-registration obligations. The initial
@@ -264,29 +255,27 @@ application.
 | BR-AO-002 | An Authorised Officer must be an identity-verified natural person | §1, §2 |
 | BR-AO-003 | Only an Authorised Officer of a company may submit director change notifications, address change notifications, annual returns, or dissolution applications on behalf of that company | §1, §21, §22, §24 |
 | BR-AO-004 | The Registry shall maintain a current record of Authorised Officers per registered company | §1 |
-| BR-AO-005 | Authorised Officer status is recorded as an event on the registered company's event stream | — |
+| BR-AO-005 | Authorised Officer status is recorded as an event on the registered company's event stream | - |
 | BR-AO-006 | When a director change notification removes a director, that person's Authorised Officer status is simultaneously revoked, unless they have been separately authorised in writing by the remaining directors | §1, §21 |
 | BR-AO-007 | When a director change notification adds a new director, that person is automatically recorded as an Authorised Officer upon the change being recorded | §1, §21 |
 
----
 
-## Group 9 — Registration and Registration Number
+## Group 9 - Registration and Registration Number
 
 Enforced by: `RegisteredCompanyDecider` (on the `CreateRegisteredCompany`
 command, issued by the approval process manager)
 
 | Rule | Description | Act |
 |------|-------------|-----|
-| BR-RG-001 | A registered company is created by a process manager reacting to a `RegistrationApplicationApproved` event — it is never created directly by a user command | — |
+| BR-RG-001 | A registered company is created by a process manager reacting to a `RegistrationApplicationApproved` event - it is never created directly by a user command | - |
 | BR-RG-002 | The Registration Number is assigned at the moment of registration by the process manager | §15 |
 | BR-RG-003 | The Registration Number is permanent and must never be reused or reassigned, even after strike-off or dissolution | §15, §23, §24 |
 | BR-RG-004 | A company becomes a legal entity upon assignment of its Registration Number | §15 |
-| BR-RG-005 | The registered company's event stream permanently records the ID of the registration application that created it | — |
+| BR-RG-005 | The registered company's event stream permanently records the ID of the registration application that created it | - |
 | BR-RG-006 | `CreateRegisteredCompany` must enforce final company-name uniqueness in the authoritative Register before recording `RegisteredCompanyCreated`. A failure here prevents company creation, no Registration Number is assigned, and no registration notification is sent. Because name reservation is parked for future amendment, this is a known operational exception path rather than a solved workflow | §10, §10A, §15, §17 |
 
----
 
-## Group 10 — Registered Company Aggregate
+## Group 10 - Registered Company Aggregate
 
 Enforced by: `RegisteredCompanyDecider`
 
@@ -312,8 +301,8 @@ Enforced by: `RegisteredCompanyDecider`
 
 ```edn
 {:transitions
- {[:registered :strike-off] :struck-off  ;; BR-RC-004 — Registrar only
-  [:registered :dissolve]   :dissolved}  ;; BR-RC-005, BR-RC-006 — Registrar only, following AO application
+ {[:registered :strike-off] :struck-off  ;; BR-RC-004 - Registrar only
+  [:registered :dissolve]   :dissolved}  ;; BR-RC-005, BR-RC-006 - Registrar only, following AO application
  :terminal-states #{:struck-off :dissolved}}
 ```
 
@@ -323,34 +312,32 @@ All states except `:registered` are terminal.
 recorded as events on the RegisteredCompany aggregate but do not change its
 top-level state.*
 
----
 
-## Group 11 — The Register
+## Group 11 - The Register
 
-The Register is the event store — specifically the set of `RegisteredCompany`
+The Register is the event store - specifically the set of `RegisteredCompany`
 event streams containing a `RegisteredCompanyCreated` event. It is the legal
 source of truth. A company exists because that event exists. The event store
 is the write model.
 
-The **Register read model** — the `register` table in Postgres — is a
+The **Register read model** - the `register` table in Postgres - is a
 queryable projection of the Register, maintained by the Register projector.
 It serves public inspection and search. It is derived, disposable, and
 rebuildable from the event store. It is not the Register.
 
 | Rule | Description | Act |
 |------|-------------|-----|
-| BR-RI-001 | The Register is the authoritative legal record of registered companies — it is the set of `RegisteredCompany` event streams in the event store | §17 |
+| BR-RI-001 | The Register is the authoritative legal record of registered companies - it is the set of `RegisteredCompany` event streams in the event store | §17 |
 | BR-RI-002 | A company exists as a legal entity if and only if a `RegisteredCompanyCreated` event exists in the event store for that company | §17 |
-| BR-RI-003 | The Register shall be open to public inspection — this obligation is discharged through the Register read model | §19 |
-| BR-RI-004 | No event in the Register's event streams may be altered or deleted — the Register is an append-only legal record | §20 |
-| BR-RI-005 | The Register read model must never be written to directly — only the Register projector may write to it, and only in response to: `RegisteredCompanyCreated`, `DirectorChanged`, `RegisteredOfficeChanged`, `CompanyStruckOff`, `CompanyDissolved` | §18, §20, §21 |
+| BR-RI-003 | The Register shall be open to public inspection - this obligation is discharged through the Register read model | §19 |
+| BR-RI-004 | No event in the Register's event streams may be altered or deleted - the Register is an append-only legal record | §20 |
+| BR-RI-005 | The Register read model must never be written to directly - only the Register projector may write to it, and only in response to: `RegisteredCompanyCreated`, `DirectorChanged`, `RegisteredOfficeChanged`, `CompanyStruckOff`, `CompanyDissolved` | §18, §20, §21 |
 | BR-RI-006 | Company name uniqueness must be enforced in the authoritative write-side Register path before a `RegisteredCompanyCreated` event is recorded. A database unique constraint on the Register read model may exist as defensive projection protection, but the read model is not the legal concurrency guard | §10, §17 |
 | BR-RI-007 | The Register read model must reflect both the current state of each company (current directors, current address, current status) and retain the particulars as they stood at the date of registration, including all former names with the dates they were in use | §18 |
 | BR-RI-008 | For basic public director-name search, "current directors" means the latest recorded directors in the company's event stream, even where the company's current status is `StruckOff` or `Dissolved`. Former directors removed before that latest recorded state are not returned by basic search | §18, §19 |
 
----
 
-## Group 14 — Data Classification
+## Group 14 - Data Classification
 
 These rules define the classification taxonomy, assign classifications to data
 fields and document types, and govern logging behaviour. They are derived from
@@ -415,15 +402,15 @@ Document classification may change at lifecycle transitions (see BR-DC-007).
 | BR-DC-004 | A field classified Restricted must not be returned in any response to a caller whose claims do not include an authorised Registry role | §20 |
 | BR-DC-005 | Where a director's home address is used as the registered office address, it retains Confidential classification and must not appear on the public Register; a substitute service address must be recorded for public disclosure | §9 |
 | BR-DC-006 | A document classified Confidential must not be accessible via any endpoint available to applicants or the public | §20 |
-| BR-DC-007 | Document classification may be promoted from Restricted to Public only at a defined lifecycle transition (e.g. registration approval). Classification may never be demoted from a higher to a lower level | — |
-| BR-DC-008 | Any field classified Restricted, Confidential, or Sealed must be replaced with the classification marker `[RESTRICTED]`, `[CONFIDENTIAL]`, or `[SEALED]` respectively at the point of emission into application logs | — |
-| BR-DC-009 | Application logs must not contain plaintext values for: director home addresses, dates of birth, payment references, identity verification results, or any uploaded document content | — |
+| BR-DC-007 | Document classification may be promoted from Restricted to Public only at a defined lifecycle transition (e.g. registration approval). Classification may never be demoted from a higher to a lower level | - |
+| BR-DC-008 | Any field classified Restricted, Confidential, or Sealed must be replaced with the classification marker `[RESTRICTED]`, `[CONFIDENTIAL]`, or `[SEALED]` respectively at the point of emission into application logs | - |
+| BR-DC-009 | Application logs must not contain plaintext values for: director home addresses, dates of birth, payment references, identity verification results, or any uploaded document content | - |
 | BR-DC-010 | The audit log records full-fidelity values for all fields, regardless of classification. No masking is applied to the audit log | §20 |
 | BR-DC-011 | Access to the audit log is restricted to the `admin` role and to external auditors via a dedicated read-only database connection using the `audit_reader` database role. No application API endpoint may return audit log rows | §20 |
-| BR-DC-012 | Access to application logs is restricted to operations and infrastructure personnel. Application logs must not be accessible to domain staff (examiners, registrars, applicants) through any Registry user interface or API | — |
-| BR-DC-013 | A Sealed record may only be unsealed by explicit order from the Registry authority or by court order, recorded as a new event in the event store | — |
+| BR-DC-012 | Access to application logs is restricted to operations and infrastructure personnel. Application logs must not be accessible to domain staff (examiners, registrars, applicants) through any Registry user interface or API | - |
+| BR-DC-013 | A Sealed record may only be unsealed by explicit order from the Registry authority or by court order, recorded as a new event in the event store | - |
 
-## Parked Rules — Name Reservation
+## Parked Rules - Name Reservation
 
 Name reservation and name locking are a known gap in this contract. The likely
 future model is:
@@ -445,9 +432,8 @@ Act. It is deliberately not implemented in the current rules.
 | BR-NR-P003 | Parked | A name lock should prevent another draft or application from locking the same name before registration is completed or the lock is released | §10A |
 | BR-NR-P004 | Parked | A name lock should be consumed when `RegisteredCompanyCreated` is recorded, and released if the application is withdrawn or rejected | §10A |
 
----
 
-## Parked Rules — Fuller Outstanding Obligations
+## Parked Rules - Fuller Outstanding Obligations
 
 The Act uses the broader phrase "outstanding obligations under this Act".
 For this micro-registry contract, active dissolution blocking is deliberately
@@ -461,24 +447,22 @@ registry would need a fuller obligations model before voluntary dissolution.
 | BR-OB-P003 | Parked | Unresolved compliance action or pending strike-off proceedings should block voluntary dissolution until closed or explicitly overridden by the Registrar | §23, §24 |
 | BR-OB-P004 | Parked | Outstanding penalties, late-filing charges, or other statutory debts should block voluntary dissolution until paid or remitted | §22, §24 |
 
----
 
-## Group 12 — Command Idempotency
+## Group 12 - Command Idempotency
 
 These rules are cross-cutting. They apply to commands handled by every
 Decider and process manager.
 
 | Rule | Description | Act |
 |------|-------------|-----|
-| BR-ID-001 | Every command must carry a stable command ID | — |
-| BR-ID-002 | Command idempotency is enforced by a command ledger keyed by command ID, not by a global uniqueness constraint on event causation ID | — |
-| BR-ID-003 | If a command with the same command ID is received again, the system must return the previously recorded command outcome and must not repeat side effects such as payment, event appends, notifications, or registered-company creation | — |
-| BR-ID-004 | Event causation ID records the command that caused an event. Multiple events may legitimately share the same causation ID when they are caused by the same command | — |
-| BR-ID-005 | Correlation ID records the original request that triggered a chain of commands, events, and process-manager actions | — |
+| BR-ID-001 | Every command must carry a stable command ID | - |
+| BR-ID-002 | Command idempotency is enforced by a command ledger keyed by command ID, not by a global uniqueness constraint on event causation ID | - |
+| BR-ID-003 | If a command with the same command ID is received again, the system must return the previously recorded command outcome and must not repeat side effects such as payment, event appends, notifications, or registered-company creation | - |
+| BR-ID-004 | Event causation ID records the command that caused an event. Multiple events may legitimately share the same causation ID when they are caused by the same command | - |
+| BR-ID-005 | Correlation ID records the original request that triggered a chain of commands, events, and process-manager actions | - |
 
----
 
-## Group 13 — Audit and Retention
+## Group 13 - Audit and Retention
 
 These rules are cross-cutting. They apply to every aggregate, every event,
 and every action in the system.
@@ -491,5 +475,5 @@ and every action in the system.
 | BR-AU-004 | The Registry shall maintain a complete and tamper-evident record of all events across all aggregates | §20 |
 | BR-AU-005 | Every event must record the identity of the person who caused it | §20 |
 | BR-AU-006 | Every event must record the date and time at which it occurred | §20 |
-| BR-AU-007 | Every event must record the command that caused it (causation ID) and the original request that triggered the chain (correlation ID) | — |
+| BR-AU-007 | Every event must record the command that caused it (causation ID) and the original request that triggered the chain (correlation ID) | - |
 | BR-AU-008 | No event may ever be altered or deleted from the event store | §20 |

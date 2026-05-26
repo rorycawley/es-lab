@@ -5,7 +5,7 @@
 
 This document is the output of domain discovery for the companies registry
 system. It establishes the shared language, boundaries, and model that all
-other documents — the Act, business rules, user stories, ADRs, and code —
+other documents - the Act, business rules, user stories, ADRs, and code -
 must remain consistent with.
 
 Domain discovery happens before implementation because the boundaries and
@@ -13,7 +13,6 @@ language established here are the hardest and most expensive things to change
 later. A wrong aggregate boundary costs weeks; a wrong table name costs
 minutes.
 
----
 
 ## The Domain
 
@@ -27,9 +26,9 @@ This is not a CRUD application. It is a legal fact-recording system. The
 central tension in the domain is between two concerns that must be kept
 deliberately separate:
 
-- **The process of registration** — transient, workflow-driven, produces a
+- **The process of registration** - transient, workflow-driven, produces a
   legal decision.
-- **The Register itself** — permanent, append-only, the authoritative record
+- **The Register itself** - permanent, append-only, the authoritative record
   of legal facts that the process produced.
 
 Conflating these two concerns is the most common modelling mistake in registry
@@ -37,13 +36,12 @@ systems. A company does not exist because an application was approved. It
 exists because `RegisteredCompanyCreated` was recorded in the Register. These
 are causally linked but legally and structurally distinct facts.
 
----
 
 ## Subdomains
 
 | Subdomain | Type | Description |
 |-----------|------|-------------|
-| **Registration Workflow** | Core | The process by which a draft becomes a registration application, is examined, decided on, and — if approved — triggers the creation of a registered company. This is where the Registry's institutional competence lives. |
+| **Registration Workflow** | Core | The process by which a draft becomes a registration application, is examined, decided on, and - if approved - triggers the creation of a registered company. This is where the Registry's institutional competence lives. |
 | **The Register** | Core | The authoritative, permanent, append-only record of registered companies and their ongoing particulars. The source of truth for legal existence. |
 | **Compliance Enforcement** | Supporting | Annual returns, director/address notifications, strike-off, and voluntary dissolution. Keeps the Register accurate after registration. |
 | **Public Register Inspection** | Supporting | Public-facing search and lookup. An eventually-consistent read projection of the Register, open to all without authentication. |
@@ -53,7 +51,7 @@ are causally linked but legally and structurally distinct facts.
 | **Notifications** | Generic | Delivery of notifications to applicants, examiners, and registrars at state transition points. |
 | **Address Validation** | Generic | External service that verifies a proposed registered office address is plausible, valid, within the jurisdiction, and usable for service of legal notices. |
 
-**Core subdomains** represent the Registry's institutional purpose — they are
+**Core subdomains** represent the Registry's institutional purpose - they are
 the reason the organisation exists and the place where modelling mistakes
 have legal consequences. Invest the most design effort here.
 
@@ -61,9 +59,8 @@ have legal consequences. Invest the most design effort here.
 exists. They can be simplified or deferred without undermining the core.
 
 **Generic subdomains** are commodity concerns. They should be bought,
-wrapped, or replaced — not built from scratch.
+wrapped, or replaced - not built from scratch.
 
----
 
 ## Ubiquitous Language
 
@@ -116,7 +113,6 @@ be overloaded, narrowed, or replaced by a technical synonym.
 | **Masking** | The replacement of a field value with a classification marker (e.g. `[RESTRICTED]`, `[CONFIDENTIAL]`) in application logs to prevent accidental disclosure of sensitive data in operational tooling. Masking applies only to application logs; the audit log always records full-fidelity values |
 | **Four-Eyes Rule** | The legal requirement under §13A that the natural person who examines a registration application must not be the same natural person who approves or rejects it. Enforced as an ABAC check comparing the `verified_person_id` of the assigned Examiner against that of the acting Registrar at decision time. A breach is invalid and of no legal effect |
 
----
 
 ## Bounded Contexts
 
@@ -141,7 +137,6 @@ directors. Translated at the boundary via an Anticorruption Layer.
 **Consumes from Payment:** Filing fee payment confirmation before creating the
 Registration Application.
 
----
 
 ### Register
 
@@ -161,7 +156,6 @@ to those containing `RegisteredCompanyCreated`, **are** the Register.
 **Consumes from Registration Workflow:** `RegistrationApplicationApproved`
 (via the Approval Process Manager) to trigger `CreateRegisteredCompany`.
 
----
 
 ### Public Inspection
 
@@ -177,7 +171,6 @@ Register context, not because a row exists in this read model.
 **Consumes from Register:** Domain events from `RegisteredCompany` streams,
 projected by the Register Projector.
 
----
 
 ### Compliance Enforcement
 
@@ -191,7 +184,6 @@ Registrar's strike-off and voluntary dissolution decisions.
 **Consumes from Register:** `AnnualReturnFiled`, `DirectorChanged`,
 `RegisteredOfficeChanged`, `RegisteredCompanyCreated` to establish obligations.
 
----
 
 ### Identity
 
@@ -207,7 +199,6 @@ This context is largely external. The Registry consumes it via an
 Anticorruption Layer that translates OIDC claims and verified-person records
 into the Registry's own identity vocabulary.
 
----
 
 ### Payment
 
@@ -220,7 +211,6 @@ in the system-failure exception path (BR-FE-006).
 **This context is a boundary, not an internal domain.** The payment gateway
 (e.g. Stripe) is external. The Registry instructs it; it does not control it.
 
----
 
 ### Notifications
 
@@ -233,7 +223,6 @@ event. Records sent notifications for deduplication.
 **Consumes from:** Registration Workflow and Register events via the internal
 event bus and outbox.
 
----
 
 ### Audit
 
@@ -246,19 +235,18 @@ Supports external auditor queries without requiring knowledge of event sourcing.
 **Consumes from:** All contexts via the transactional outbox (ADR-0005,
 ADR-0018).
 
----
 
 ## Context Map
 
 The context map shows the integration relationships between bounded contexts.
 Arrows point from upstream to downstream. Integration pattern labels:
 
-- **ACL** — Anticorruption Layer: downstream translates upstream model
-- **OHS/PL** — Open Host Service / Published Language: upstream provides a
+- **ACL** - Anticorruption Layer: downstream translates upstream model
+- **OHS/PL** - Open Host Service / Published Language: upstream provides a
   stable published protocol
-- **C/S** — Customer/Supplier: downstream is the customer; upstream adapts to
+- **C/S** - Customer/Supplier: downstream is the customer; upstream adapts to
   downstream needs within negotiated limits
-- **CF** — Conformist: downstream adopts upstream model with no influence
+- **CF** - Conformist: downstream adopts upstream model with no influence
 
 ```mermaid
 graph TD
@@ -312,7 +300,6 @@ graph TD
 | All core contexts | Notifications | OHS/PL | Notification triggers come from domain events |
 | Notifications | Email Delivery | C/S | Registry instructs email delivery; provider is an external supplier |
 
----
 
 ## Aggregates
 
@@ -381,7 +368,6 @@ stateDiagram-v2
 *Note: Director changes, address changes, and annual returns are recorded as
 events on the `RegisteredCompany` stream but do not change its top-level state.*
 
----
 
 ## Commands
 
@@ -393,7 +379,7 @@ one aggregate. A command is either accepted (produces events) or rejected
 
 | Command | Issued By | From State | To State |
 |---------|-----------|------------|----------|
-| `CreateDraft` | Applicant | — | `Active` |
+| `CreateDraft` | Applicant | - | `Active` |
 | `UpdateDraft` | Applicant | `Active` | `Active` |
 | `SubmitDraft` | Applicant (via submission flow) | `Active` | `Submitted` |
 | `CancelDraft` | Applicant | `Active` | `Cancelled` |
@@ -403,7 +389,7 @@ one aggregate. A command is either accepted (produces events) or rejected
 
 | Command | Issued By | From State | To State |
 |---------|-----------|------------|----------|
-| `CreateRegistrationApplication` | Submission Process Manager | — | `Submitted` |
+| `CreateRegistrationApplication` | Submission Process Manager | - | `Submitted` |
 | `BeginExamination` | Examiner | `Submitted` | `UnderExamination` |
 | `RaiseRequisition` | Examiner (assigned) | `UnderExamination` or `AwaitingRequisitionResponse` | `AwaitingRequisitionResponse` |
 | `CloseRequisition` | Examiner (assigned, raised in error) | `AwaitingRequisitionResponse` | `UnderExamination` (if no remaining open) |
@@ -418,7 +404,7 @@ one aggregate. A command is either accepted (produces events) or rejected
 
 | Command | Issued By | From State | Notes |
 |---------|-----------|------------|-------|
-| `CreateRegisteredCompany` | Approval Process Manager | — | Issues after `RegistrationApplicationApproved` |
+| `CreateRegisteredCompany` | Approval Process Manager | - | Issues after `RegistrationApplicationApproved` |
 | `NotifyDirectorChange` | Authorised Officer | `Registered` | Does not change top-level state |
 | `NotifyAddressChange` | Authorised Officer | `Registered` | Does not change top-level state |
 | `FileAnnualReturn` | Authorised Officer | `Registered` | Does not change top-level state |
@@ -426,7 +412,6 @@ one aggregate. A command is either accepted (produces events) or rejected
 | `StrikeOff` | Registrar | `Registered` | `→ StruckOff` |
 | `Dissolve` | Registrar | `Registered` | `→ Dissolved` |
 
----
 
 ## Events
 

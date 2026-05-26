@@ -34,7 +34,7 @@ rebuild is initiated.
 
 - The live read model remains available and consistent during a rebuild.
 - Any projection bug can be corrected by fixing the projector and triggering a
-  rebuild — no data is lost because the event store is the source of truth.
+  rebuild - no data is lost because the event store is the source of truth.
 - New projections can be introduced by running a projector against historical
   events.
 - Rebuild time scales linearly with event volume. For a proof-of-concept with

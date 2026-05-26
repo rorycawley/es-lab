@@ -9,15 +9,14 @@ referenced here are recorded in [`adrs/`](adrs/README.md). Diagrams are
 maintained as Mermaid source so they render in GitHub and most editors without
 external tooling.
 
----
 
-## C4 Level 1 — System Context
+## C4 Level 1 - System Context
 
 *Who uses the system, and what external systems does it depend on?*
 
 ```mermaid
 C4Context
-    title System Context — Companies Registry
+    title System Context - Companies Registry
 
     Person(applicant, "Applicant", "Submits company registration applications and pays fees")
     Person(examiner, "Examiner", "Reviews applications and prepares them for decision")
@@ -51,20 +50,19 @@ C4Context
 | Registry → Address Validation | Address is validated at draft submission, not at approval. The Registry records the validation outcome as a fact. |
 | Registry → Email Service | Notifications are published via the transactional outbox after domain events. The Registry does not call the email service directly from command handlers. (ADR-0005) |
 
----
 
-## C4 Level 2 — Containers
+## C4 Level 2 - Containers
 
 *What are the deployable units, and how do they communicate?*
 
 The Registry is a single deployable modular monolith (ADR-0012). There is no
-separate message broker — the event bus is in-process (ADR-0015). External
+separate message broker - the event bus is in-process (ADR-0015). External
 publication uses the transactional outbox pattern (ADR-0005), relayed by a
 background thread (ADR-0013).
 
 ```mermaid
 C4Container
-    title Containers — Companies Registry
+    title Containers - Companies Registry
 
     Person(applicant, "Applicant")
     Person(examiner, "Examiner")
@@ -78,7 +76,7 @@ C4Container
 
     System_Boundary(registry_system, "Companies Registry") {
         Container(api, "Web API", "Clojure / Reitit", "Versioned HTTP API. Authenticates requests, enforces authorisation, routes commands and queries to the application core.")
-        Container(app_core, "Application Core", "Clojure — Modular Monolith", "Contains all domain modules: Draft, RegistrationApplication, RegisteredCompany, Identity, Payment, Notifications, PublicRegister. Hosts in-process event bus and background job threads.")
+        Container(app_core, "Application Core", "Clojure - Modular Monolith", "Contains all domain modules: Draft, RegistrationApplication, RegisteredCompany, Identity, Payment, Notifications, PublicRegister. Hosts in-process event bus and background job threads.")
         ContainerDb(db, "PostgreSQL", "Postgres 16", "Stores: event store, command ledger, outbox, audit log, process manager state, and all read-model projections.")
     }
 
@@ -114,7 +112,6 @@ Commands and queries cross module boundaries only through defined ports
 published on the in-process bus are the only coupling between modules at
 runtime (ADR-0015).
 
----
 
 ## Data Architecture
 
@@ -263,7 +260,6 @@ Command received
   → Outbox worker (background thread) relays to external systems
 ```
 
----
 
 ## Security Architecture
 
@@ -337,18 +333,18 @@ FLS is driven by classification metadata annotated on response schemas (ADR-0025
 The full field-by-field classification table is in [`07-business-rules.md`](07-business-rules.md)
 under Group 14 (BR-DC-*).
 
-#### RBAC — Role Permissions
+#### RBAC - Role Permissions
 
 | Command / Query | applicant | examiner | registrar | admin | system |
 |---|---|---|---|---|---|
-| CreateDraft, AmendDraft, SubmitDraft, CancelDraft | own only | — | — | — | — |
-| RequestAmendment, MarkReadyForDecision | — | ✓ | — | — | — |
-| ApproveApplication, RejectApplication | — | — | ✓ | — | — |
-| StrikeOffCompany, DissolveCompany | — | — | ✓ | — | — |
-| GET /v1/companies (public register) | ✓ | ✓ | ✓ | ✓ | — |
-| GET /v1/companies/{id}/audit-log | — | — | — | ✓ | — |
+| CreateDraft, AmendDraft, SubmitDraft, CancelDraft | own only | - | - | - | - |
+| RequestAmendment, MarkReadyForDecision | - | ✓ | - | - | - |
+| ApproveApplication, RejectApplication | - | - | ✓ | - | - |
+| StrikeOffCompany, DissolveCompany | - | - | ✓ | - | - |
+| GET /v1/companies (public register) | ✓ | ✓ | ✓ | ✓ | - |
+| GET /v1/companies/{id}/audit-log | - | - | - | ✓ | - |
 
-#### ABAC — Ownership Rules
+#### ABAC - Ownership Rules
 
 | Resource | Rule |
 |----------|------|
@@ -365,19 +361,19 @@ Data classification (ADR-0025) governs what each surface is permitted to reveal:
 |---------|---------|--------|
 | Public API endpoints | FLS strips Restricted and above; only Public fields returned to unauthenticated callers | Open (unauthenticated) |
 | Internal API endpoints | FLS strips fields above the caller's permitted classification level | Authenticated Registry staff |
-| Application logs | Fields classified Restricted, Confidential, or Sealed replaced with `[RESTRICTED]`, `[CONFIDENTIAL]`, `[SEALED]` at log emission | Moderately restricted — operations/DevOps personnel only, controlled by log aggregation platform |
-| Audit log | No masking — full fidelity required as the legal record | Extremely restricted — `admin` role and external auditors via `audit_reader` DB role only; no API endpoint exposes audit log rows |
+| Application logs | Fields classified Restricted, Confidential, or Sealed replaced with `[RESTRICTED]`, `[CONFIDENTIAL]`, `[SEALED]` at log emission | Moderately restricted - operations/DevOps personnel only, controlled by log aggregation platform |
+| Audit log | No masking - full fidelity required as the legal record | Extremely restricted - `admin` role and external auditors via `audit_reader` DB role only; no API endpoint exposes audit log rows |
 
 #### Database Role Separation for Log Access
 
 ```
-registry_app   — INSERT/SELECT/UPDATE on events, commands, outbox, read models, process_instances
+registry_app   - INSERT/SELECT/UPDATE on events, commands, outbox, read models, process_instances
                  INSERT on audit_log   (write-only; cannot read back)
                  No access to audit_log SELECT
 
-audit_writer   — INSERT-only on audit_log (used by audit writer component)
+audit_writer   - INSERT-only on audit_log (used by audit writer component)
 
-audit_reader   — SELECT-only on audit_log (used by external auditors via direct DB session)
+audit_reader   - SELECT-only on audit_log (used by external auditors via direct DB session)
 ```
 
 This means a compromised application process cannot read or modify audit log
@@ -385,7 +381,7 @@ rows, and cannot expose them through any API endpoint.
 
 ### Audit Trail as a Security Control
 
-Every command execution — whether accepted or rejected — produces an audit log
+Every command execution - whether accepted or rejected - produces an audit log
 entry containing the actor identity, role, action taken, target resource,
 human-readable description, and timestamp. Entries are immutable. The audit log
 is written transactionally with domain events and cannot be bypassed.

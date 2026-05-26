@@ -8,7 +8,7 @@
 Multiple concurrent commands may attempt to append events to the same aggregate
 event stream simultaneously. Without a concurrency guard, two commands could
 each read the same aggregate state, both pass validation, and both append events
-— producing an inconsistent stream.
+- producing an inconsistent stream.
 
 Pessimistic locking (SELECT FOR UPDATE on the stream) would prevent this but
 would serialise all commands against the same aggregate, limiting throughput.

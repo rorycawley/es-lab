@@ -72,7 +72,7 @@ via the log aggregation platform's access controls.
 ### 4. Audit log: full fidelity, extremely restricted access
 
 The audit log is the legal record of Registry decisions (ADR-0018). It must
-record full-fidelity values — no masking is applied. An audit log entry that
+record full-fidelity values - no masking is applied. An audit log entry that
 masks the director's home address is useless to an auditor investigating whether
 a registration decision was lawful.
 
@@ -110,7 +110,7 @@ classification history of every document is permanent and auditable.
   Public-endpoint fields; a linter check catches missing annotations).
 - Adding a new role that should access Confidential fields requires an
   explicit change to the classification table in business rules, an ADR
-  amendment, and a code change — there is no implicit escalation path.
+  amendment, and a code change - there is no implicit escalation path.
 - External auditors require a direct database connection and the `audit_reader`
   credential. This is a procedural overhead worth accepting for the access
   control guarantee it provides.

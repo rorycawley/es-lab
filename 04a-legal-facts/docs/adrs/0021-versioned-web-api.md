@@ -34,6 +34,6 @@ every active version.
 - Route handlers may share domain logic but must maintain distinct request and
   response shapes per version.
 - Discipline is required not to increment the version number for non-breaking
-  changes — premature versioning fragments the API unnecessarily.
+  changes - premature versioning fragments the API unnecessarily.
 - API version deprecation must be communicated to clients and enforced with
   sunset headers before old versions are removed.

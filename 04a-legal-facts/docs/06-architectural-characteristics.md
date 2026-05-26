@@ -101,8 +101,8 @@ Internal facts such as command IDs, causation IDs, correlation IDs, payment
 references, session identifiers, operational exceptions, and process-manager
 state are Restricted-classified operational data, not public Register data.
 
-Sensitive personal data — director home addresses where used as registered
-office, identity document details, and payment reference numbers — is
+Sensitive personal data - director home addresses where used as registered
+office, identity document details, and payment reference numbers - is
 Confidential-classified and must not appear in public or internal API responses
 beyond the named roles permitted to see it.
 
@@ -159,13 +159,12 @@ Each has a stable ID used in user story traceability metadata.
 | FF-013 | The audit log is not accessible via any application API endpoint. | Data protection | Assert no API route exists that returns audit log rows; assert `audit_log` is not readable by the application DB role used for command handling or read models. |
 | FF-014 | The four-eyes rule is enforced: a Registrar who also examined the application cannot approve or reject it. | Security, controlled decision-making | Attempt to issue `ApproveApplication` and `RejectApplication` as a Registrar whose `verified_person_id` matches the assigned Examiner on that application; assert both commands are rejected with reason `four-eyes-violation` and that the attempt is recorded in the audit log. |
 
----
 
 ## Traceability Matrix
 
 This matrix maps each architectural characteristic to the ADRs that implement
 it, the user stories that exercise it, and the fitness functions that verify it.
-The reverse lookup — from user story or test back to characteristic — is in the
+The reverse lookup - from user story or test back to characteristic - is in the
 `Characteristics:` and `Fitness functions:` fields of each user story.
 
 | Characteristic | Implementing ADRs | Key User Stories | Fitness Functions |
@@ -181,7 +180,7 @@ The reverse lookup — from user story or test back to characteristic — is in 
 | Rebuildability | ADR-0002, ADR-0023 | US-PB-001, US-PB-002 | FF-002 |
 | Data protection | ADR-0020, ADR-0025 | All stories that expose personal data | FF-011, FF-012, FF-013 |
 | Controlled decision-making | ADR-0010, ADR-0020 | US-EX-001, US-EX-002, US-RE-001 | FF-006, FF-014 |
-| Scope control | — | All stories | FF-010 |
+| Scope control | - | All stories | FF-010 |
 | Testability | ADR-0010, ADR-0019 | All stories | FF-006 |
 
 ## Dependency Failure Expectations

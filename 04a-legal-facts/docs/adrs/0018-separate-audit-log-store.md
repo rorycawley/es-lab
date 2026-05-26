@@ -8,7 +8,7 @@
 Registries are regularly audited by external auditors who must verify the
 history of decisions and actions: who approved what, when, on whose authority,
 and with what outcome. The event store is the legal source of truth, but its
-structure is optimised for event sourcing — streams of typed events per
+structure is optimised for event sourcing - streams of typed events per
 aggregate. An auditor querying the event store must understand aggregate IDs,
 event types, causation chains, and stream structure. This is not a reasonable
 expectation for an external audit.

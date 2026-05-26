@@ -2,11 +2,10 @@
 
 *Fictional legal instrument. Created for use with the es-lab micro companies registry.*
 
----
 
-## Part 1 — Definitions
+## Part 1 - Definitions
 
-**Section 1 — Interpretation**
+**Section 1 - Interpretation**
 
 In this Act:
 
@@ -24,11 +23,10 @@ In this Act:
 - **Requisition** means a formal written request raised by an Examiner during the examination of a registration application, requiring the applicant to provide clarification or additional information.
 - **Identity-Verified Natural Person** means a natural person for whom the Registry holds a verified identity flag or record received from a trusted identity provider or Registry verification service.
 
----
 
-## Part 2 — Identity Verification
+## Part 2 - Identity Verification
 
-**Section 2 — Identity Verification by the Registry**
+**Section 2 - Identity Verification by the Registry**
 
 The Registry shall recognise trusted identity providers and Registry verification services through which natural persons may have their identity verified.
 
@@ -45,37 +43,35 @@ For users of the Registry system, identity verification may be supplied through 
 
 The detailed workflow by which unverified proposed directors are contacted and invited to complete identity verification during an application process is reserved for future amendment.
 
----
 
-## Part 3 — Drafts
+## Part 3 - Drafts
 
-**Section 3 — Draft Applications**
+**Section 3 - Draft Applications**
 
 An applicant may create a draft in the Registry system for the purpose of preparing a registration application.
 
 A draft has no legal existence. It is not an application. It is not visible to the Registry for examination purposes.
 
-**Section 4 — Limitations on Drafts**
+**Section 4 - Limitations on Drafts**
 
 An applicant may not hold more than five active drafts at any time. A draft is active if it has not been submitted, cancelled, or expired.
 
-**Section 5 — Draft Expiry**
+**Section 5 - Draft Expiry**
 
 A draft that has not been submitted as a registration application within thirty days of its creation shall be automatically expired by the Registry. The period of thirty days may be varied by the Registrar by order.
 
-**Section 6 — Retention of Drafts**
+**Section 6 - Retention of Drafts**
 
 All drafts, including those that have been submitted, cancelled, or expired, shall be retained by the Registry permanently. No draft shall be deleted from the Registry's records.
 
----
 
-## Part 4 — Registration Applications
+## Part 4 - Registration Applications
 
-**Section 7 — Eligibility**
+**Section 7 - Eligibility**
 
 A private limited company may be registered by one or more identity-verified natural persons.
 
-**Section 8 — Application Requirements**
+**Section 8 - Application Requirements**
 
 A registration application must state:
 
@@ -85,7 +81,7 @@ A registration application must state:
 
 A registration application that does not satisfy all requirements of this section shall not be created.
 
-**Section 9 — Proposed Directors**
+**Section 9 - Proposed Directors**
 
 Every proposed director named in a registration application must:
 
@@ -93,7 +89,7 @@ Every proposed director named in a registration application must:
 - Be a distinct person from every other proposed director named in the same application
 - Have a verified identity flag or record accepted by the Registry before the draft was submitted
 
-**Section 10 — Company Name**
+**Section 10 - Company Name**
 
 The proposed company name must not be identical to the name of any company currently entered in the Register, nor to any former name of a company that remains within the protected period prescribed by the Registrar by order.
 
@@ -101,19 +97,19 @@ The Register shall retain the former names of any company that has changed its n
 
 The Registrar may by order prescribe categories of names that are prohibited or that require prior consent, including names that are similar to existing registered companies, names implying a connection with the State, and names that are otherwise misleading.
 
-**Section 10A — Name Reservation**
+**Section 10A - Name Reservation**
 
 Reserved for future amendment. This Act does not yet create a name reservation or name-locking mechanism before registration. In a future workflow, the Registry may allow a proposed name to be checked during draft preparation and locked on successful submission until the registration application reaches a terminal state.
 
-**Section 11 — Withdrawal**
+**Section 11 - Withdrawal**
 
 An applicant may withdraw a registration application at any time before the Registrar makes a decision.
 
-**Section 12 — Retention of Applications**
+**Section 12 - Retention of Applications**
 
 All registration applications, including those that have been decided or withdrawn, shall be retained by the Registry permanently. No registration application shall be deleted from the Registry's records.
 
-**Section 12A — Filing Fee**
+**Section 12A - Filing Fee**
 
 An applicant shall pay a filing fee to the Registry upon submission of a registration application. The amount of the filing fee shall be set by the Registrar by order and may be varied from time to time.
 
@@ -121,11 +117,10 @@ The filing fee is due at the point of submission and is non-refundable once the 
 
 No registration application shall be created unless the filing fee has been paid.
 
----
 
-## Part 5 — Examination and Decision
+## Part 5 - Examination and Decision
 
-**Section 13 — Examination**
+**Section 13 - Examination**
 
 An Examiner shall examine every registration application for compliance with this Act and prepare a case for decision by the Registrar. Examination includes verification that:
 
@@ -133,11 +128,11 @@ An Examiner shall examine every registration application for compliance with thi
 - The registered office address is plausible, valid, and usable as a registered office
 - All requirements of Sections 8 and 9 are met
 
-During examination, an Examiner may raise a requisition requesting clarification or additional information from the applicant. The application shall be suspended pending the applicant's response — this is the awaiting requisition response phase. The Examiner shall specify a deadline by which the applicant must respond. If the deadline passes without a response, the Examiner shall be notified and shall determine the appropriate course of action.
+During examination, an Examiner may raise a requisition requesting clarification or additional information from the applicant. The application shall be suspended pending the applicant's response - this is the awaiting requisition response phase. The Examiner shall specify a deadline by which the applicant must respond. If the deadline passes without a response, the Examiner shall be notified and shall determine the appropriate course of action.
 
 When examination is complete and no requisitions are outstanding, the Examiner shall refer the application to the Registrar for decision. The application is then in the ready for decision phase, pending the Registrar's determination.
 
-**Section 13A — Separation of Examination and Decision**
+**Section 13A - Separation of Examination and Decision**
 
 No officer of the Registry shall both examine a registration application and decide on that same application.
 
@@ -147,33 +142,32 @@ This requirement applies regardless of whether one person holds both the Examine
 
 A decision to approve or reject a registration application made by the same natural person who examined that application is invalid and of no legal effect.
 
-**Section 14 — Approval**
+**Section 14 - Approval**
 
 The Registrar shall approve a registration application if it complies with this Act.
 
 Approval is a decision about the application. Upon approval, the Registrar shall direct the Registry to register the company under Section 15.
 
-**Section 15 — Registration**
+**Section 15 - Registration**
 
 Upon the Registrar's direction under Section 14, the Registry shall register the company and assign it a Registration Number. The company becomes a legal entity upon the assignment of its Registration Number.
 
 The Registration Number is permanent. It shall not be reused, reassigned, or revoked, even if the company is subsequently struck off or dissolved.
 
-**Section 16 — Rejection**
+**Section 16 - Rejection**
 
 The Registrar shall reject a registration application that does not comply with this Act, stating the reason.
 
----
 
-## Part 6 — The Register
+## Part 6 - The Register
 
-**Section 17 — The Register**
+**Section 17 - The Register**
 
 The Registrar shall maintain a register of all companies registered under this Act.
 
 The Register is the authoritative legal record of registered companies. A company exists as a legal entity if and only if it appears in the Register.
 
-**Section 18 — Contents of the Register**
+**Section 18 - Contents of the Register**
 
 The Register shall record in respect of each registered company:
 
@@ -185,21 +179,20 @@ The Register shall record in respect of each registered company:
 
 The Register shall also record the names of the directors and registered office address as they stood at the date of registration, and all former company names with the dates on which they were in use, which shall be retained as part of the permanent historical record.
 
-**Section 19 — Inspection**
+**Section 19 - Inspection**
 
 The Register shall be open to public inspection.
 
-**Section 20 — Integrity of the Register**
+**Section 20 - Integrity of the Register**
 
 No entry in the Register shall be altered or removed except as expressly provided by this Act.
 
 The Registry shall retain a complete and tamper-evident record of all events affecting any draft, registration application, or registered company, including the identity of the applicant, the Examiner, and the Registrar involved in each action, and the date and time of each action. This record shall be permanent and shall not be altered or deleted.
 
----
 
-## Part 7 — Registered Companies
+## Part 7 - Registered Companies
 
-**Section 21 — Changes to Registered Particulars**
+**Section 21 - Changes to Registered Particulars**
 
 A registered company shall, by its Authorised Officer, notify the Registry of any change to its directors or registered office address within the period prescribed by the Registrar by order.
 
@@ -209,17 +202,17 @@ A notified registered office address must be plausible, valid, within the jurisd
 
 The Registry shall record every such change in the Register.
 
-**Section 22 — Annual Returns**
+**Section 22 - Annual Returns**
 
 A registered company shall, by its Authorised Officer, file an annual return with the Registry in the form and within the period prescribed by the Registrar by order.
 
-**Section 23 — Strike-off**
+**Section 23 - Strike-off**
 
 The Registrar may strike a company off the Register if the company has failed to comply with its obligations under this Act. A company that has been struck off ceases to exist as a legal entity from the date of strike-off.
 
 Strike-off does not remove the company from the historical record of the Register. The Registration Number of a struck-off company shall not be reused.
 
-**Section 24 — Dissolution**
+**Section 24 - Dissolution**
 
 A registered company may, by its Authorised Officer, apply to the Registrar to be dissolved voluntarily, provided it has no outstanding obligations under this Act.
 

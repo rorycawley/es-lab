@@ -20,7 +20,7 @@ synchronous within a transaction boundary unless a consumer explicitly opts
 into async delivery.
 
 External publication (to message brokers consumed by systems outside this
-process) uses the transactional outbox (ADR-0005) — not the internal bus.
+process) uses the transactional outbox (ADR-0005) - not the internal bus.
 The outbox publisher is itself a consumer on the internal bus.
 
 ## Consequences

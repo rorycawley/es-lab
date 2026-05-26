@@ -17,9 +17,9 @@ the HTTP level to any other `PUT`.
 Design API endpoints as task-based commands that express explicit user intent.
 Each command maps to a dedicated endpoint:
 
-- `POST /drafts/{id}/cancel` — not `PUT /drafts/{id}` with `{status: cancelled}`
-- `POST /applications/{id}/withdraw` — not `PATCH /applications/{id}`
-- `POST /applications/{id}/begin-examination` — not `PUT /applications/{id}`
+- `POST /drafts/{id}/cancel` - not `PUT /drafts/{id}` with `{status: cancelled}`
+- `POST /applications/{id}/withdraw` - not `PATCH /applications/{id}`
+- `POST /applications/{id}/begin-examination` - not `PUT /applications/{id}`
 
 Endpoints accept the minimal payload needed for that command and nothing more.
 

@@ -29,7 +29,7 @@ is the canonical example of the completed format.*
 | AO | Authorised Officer | An identity-verified director or authorised representative acting on behalf of a registered company for post-registration obligations (defined in §1) |
 | EX | Examiner | A Registry officer who examines registration applications |
 | RE | Registrar | The Registry officer who makes decisions on applications and maintains the Register |
-| PB | Public | Any person inspecting the Register — no authentication required |
+| PB | Public | Any person inspecting the Register - no authentication required |
 | SY | System | Automated Registry processes (schedulers, process managers) |
 
 *Note: Every natural person who acts in the Registry system or appears in
@@ -37,11 +37,10 @@ company data must have a verified identity flag or record. The initial
 Authorised Officers upon registration are the directors named in the approved
 application (BR-AO-001).*
 
----
 
-## Part 1 — Authentication
+## Part 1 - Authentication
 
-### US-AP-016 — Authenticate with the Registry
+### US-AP-016 - Authenticate with the Registry
 
 *As any authenticated user (Applicant, Authorised Officer, Examiner, or
 Registrar), I want to log in using my identity account so that I can access
@@ -65,11 +64,10 @@ this project.*
 | AC-AP-016-006 | Given I am unauthenticated, when I attempt to access any protected feature, then I am redirected to the login page |
 | AC-AP-016-007 | Given the identity broker does not supply a verified natural-person identity claim, when I attempt to access a protected Registry feature, then access is rejected |
 
----
 
-## Part 2 — Identity Verification
+## Part 2 - Identity Verification
 
-### US-AP-001 — Hold a verified natural-person identity
+### US-AP-001 - Hold a verified natural-person identity
 
 *As a natural person, I want the Registry to recognise my verified identity so
 that I may act as an Applicant, be named as a proposed director, be recorded as
@@ -92,11 +90,10 @@ verification before approval can proceed.*
 | AC-AP-001-005 | Given a new director does not have a verified-person record, when a director change attempts to add that person, then the director change is rejected |
 | AC-AP-001-006 | Given a verified-person record exists, then it does not expire in this contract; revocation and re-verification are out of scope |
 
----
 
-## Part 3 — Drafts
+## Part 3 - Drafts
 
-### US-AP-002 — Create a draft
+### US-AP-002 - Create a draft
 
 *As an Applicant, I want to create a new draft so that I have a private
 workspace in which to prepare my registration application.*
@@ -113,9 +110,8 @@ BR-DR-010, BR-DR-014
 | AC-AP-002-005 | Given a draft is created with minimal information, then it is accepted without any completeness validation |
 | AC-AP-002-006 | Given my verified natural-person identity is not recorded or supplied by the trusted identity broker, when I request a new draft, then the request is rejected |
 
----
 
-### US-AP-003 — Update a draft
+### US-AP-003 - Update a draft
 
 *As an Applicant, I want to update the contents of my draft so that I can
 build up the required information across multiple sessions before submitting.*
@@ -131,9 +127,8 @@ build up the required information across multiple sessions before submitting.*
 | AC-AP-003-005 | Given my draft is in the `Expired` state, when I attempt to update it, then the request is rejected |
 | AC-AP-003-006 | Given I attempt to update another applicant's draft, then the request is rejected regardless of the draft's state |
 
----
 
-### US-AP-004 — Cancel a draft
+### US-AP-004 - Cancel a draft
 
 *As an Applicant, I want to cancel a draft I no longer intend to submit so
 that it is removed from my active drafts.*
@@ -150,11 +145,10 @@ BR-DR-011, BR-DR-013
 | AC-AP-004-005 | Given my draft is in the `Submitted` state, when I attempt to cancel it, then the request is rejected |
 | AC-AP-004-006 | Given my draft is in the `Expired` state, when I attempt to cancel it, then the request is rejected |
 | AC-AP-004-007 | Given I attempt to cancel another applicant's draft, then the request is rejected |
-| AC-AP-004-008 | Given my draft has been cancelled, then it may not be reinstated — I must create a new draft if I wish to proceed (BR-DR-013) |
+| AC-AP-004-008 | Given my draft has been cancelled, then it may not be reinstated - I must create a new draft if I wish to proceed (BR-DR-013) |
 
----
 
-### US-AP-005 — View own active drafts
+### US-AP-005 - View own active drafts
 
 *As an Applicant, I want to see a list of my active drafts so that I can
 manage my work in progress.*
@@ -168,9 +162,8 @@ manage my work in progress.*
 | AC-AP-005-003 | Given I have active drafts, then each entry shows the draft ID, creation date, expiry date, and a summary of the proposed company name if one has been entered |
 | AC-AP-005-004 | Given another applicant's drafts exist, then they do not appear in my list |
 
----
 
-### US-AP-006 — View a specific draft
+### US-AP-006 - View a specific draft
 
 *As an Applicant, I want to view the full details of one of my drafts so
 that I can review its contents before submitting.*
@@ -183,11 +176,10 @@ that I can review its contents before submitting.*
 | AC-AP-006-002 | Given I request another applicant's draft by ID, then the request is rejected |
 | AC-AP-006-003 | Given my draft does not exist, when I request it by ID, then I receive a not-found response |
 
----
 
-## Part 4 — Submission and Payment
+## Part 4 - Submission and Payment
 
-### US-AP-007 — Submit a draft as a registration application
+### US-AP-007 - Submit a draft as a registration application
 
 *As an Applicant, I want to submit my completed draft so that it becomes a
 formal registration application lodged with the Registry.*
@@ -222,7 +214,6 @@ BR-FE-008, BR-DR-006, BR-RA-001, BR-RA-002, BR-ID-001 to BR-ID-003
 | AC-AP-007-024 | Given the filing fee has been paid and the submission has been completed, then the fee is non-refundable under all circumstances including subsequent withdrawal of the application |
 | AC-AP-007-025 | Given the filing fee amount, when it is presented to the applicant before payment, then the amount and the non-refundable nature of the fee are clearly stated |
 
----
 
 **Payment traceability note**
 
@@ -233,14 +224,13 @@ submission so that my registration application is formally accepted.*
 BR-FE-005, BR-FE-006, BR-FE-007, BR-FE-008
 
 This is not a separate user story or workflow. Payment is part of
-`US-AP-007 — Submit a draft as a registration application`; see the
+`US-AP-007 - Submit a draft as a registration application`; see the
 payment-related criteria in that story.
 
----
 
-## Part 5 — Registration Application
+## Part 5 - Registration Application
 
-### US-AP-015 — View own registration applications
+### US-AP-015 - View own registration applications
 
 *As an Applicant, I want to see a list of my registration applications and
 their current status so that I can track the progress of my submissions.*
@@ -256,9 +246,8 @@ their current status so that I can track the progress of my submissions.*
 | AC-AP-015-005 | Given another applicant's applications exist, then they do not appear in my list |
 | AC-AP-015-006 | Given I have both active and terminal applications, then active applications appear first ordered by submission date, and terminal applications appear below clearly labelled with their outcome |
 
----
 
-### US-AP-008 — View status of own registration application
+### US-AP-008 - View status of own registration application
 
 *As an Applicant, I want to see the current status of a specific registration
 application so that I know where it is in the process.*
@@ -273,9 +262,8 @@ application so that I know where it is in the process.*
 | AC-AP-008-004 | Given my registration application has one or more open requisitions, when I view it, then I can see each requisition, its content, and the deadline by which I must respond |
 | AC-AP-008-005 | Given I request another applicant's registration application by ID, then the request is rejected |
 
----
 
-### US-AP-009 — Withdraw a registration application
+### US-AP-009 - Withdraw a registration application
 
 *As an Applicant, I want to withdraw my registration application before a
 decision is made so that I can stop the process if my circumstances change.*
@@ -290,9 +278,8 @@ decision is made so that I can stop the process if my circumstances change.*
 | AC-AP-009-004 | Given I attempt to withdraw another applicant's registration application, then the request is rejected |
 | AC-AP-009-005 | Given my registration application has been withdrawn after payment of the filing fee, then the filing fee is non-refundable and no refund is issued |
 
----
 
-### US-AP-010 — Receive notification of registration
+### US-AP-010 - Receive notification of registration
 
 *As an Applicant, I want to be notified when my approved registration
 application has resulted in a registered company so that I know my company
@@ -308,9 +295,8 @@ Registration Number.*
 | AC-AP-010-003 | Given `RegistrationApplicationApproved` has been recorded but `RegisteredCompanyCreated` has not yet been recorded, then the registration notification is not sent |
 | AC-AP-010-004 | Given a notification has already been sent for this registered company, when the notification system retries, then a duplicate notification is not sent |
 
----
 
-### US-AP-011 — Receive notification of rejection
+### US-AP-011 - Receive notification of rejection
 
 *As an Applicant, I want to be notified when my registration application is
 rejected so that I understand why and can take corrective action.*
@@ -323,11 +309,10 @@ rejected so that I understand why and can take corrective action.*
 | AC-AP-011-002 | Given the notification is sent, then it includes the application ID so I can reference it |
 | AC-AP-011-003 | Given a notification has already been sent for this rejection, when the notification system retries, then a duplicate notification is not sent |
 
----
 
-## Part 6 — Requisitions
+## Part 6 - Requisitions
 
-### US-EX-005 — Raise a requisition
+### US-EX-005 - Raise a requisition
 
 *As an Examiner, I want to raise a requisition against an application I am
 examining so that I can request clarification or additional information from
@@ -347,9 +332,8 @@ BR-RQ-008, BR-RQ-012, BR-RQ-013
 | AC-EX-005-007 | Given I set a requisition deadline that exceeds the maximum configured period, then the system rejects the deadline and informs me of the maximum permitted period |
 | AC-EX-005-008 | Given I raised a requisition in error, when I close it with a stated reason before a response is received, then the requisition is closed, the applicant is notified, and the closure is permanently recorded |
 
----
 
-### US-AP-018 — Respond to a requisition
+### US-AP-018 - Respond to a requisition
 
 *As an Applicant, I want to respond to a requisition raised by an Examiner
 so that I can provide the requested information and my application can
@@ -365,9 +349,8 @@ proceed.*
 | AC-AP-018-004 | Given a requisition deadline passes without a response from the applicant, then the Examiner is automatically notified by the system that the deadline has passed, so that they may take appropriate action |
 | AC-AP-018-005 | Given my application is not in the `AwaitingRequisitionResponse` state, when I attempt to submit a requisition response, then the request is rejected |
 
----
 
-### US-EX-007 — Decide next action after a missed requisition deadline
+### US-EX-007 - Decide next action after a missed requisition deadline
 
 *As an Examiner, I want to record the next action after a requisition deadline
 has passed without a response so that the application does not remain
@@ -383,11 +366,10 @@ unmanaged indefinitely.*
 | AC-EX-007-004 | Given I am not the assigned Examiner, when I attempt to record the next action after a missed deadline, then the request is rejected |
 | AC-EX-007-005 | Given the requisition has already been answered or closed, when I attempt to record a missed-deadline next action, then the request is rejected |
 
----
 
-## Part 7 — Examination
+## Part 7 - Examination
 
-### US-EX-001 — View work queue of submitted applications
+### US-EX-001 - View work queue of submitted applications
 
 *As an Examiner, I want to see a list of submitted applications awaiting
 examination so that I can select one to begin examining.*
@@ -401,9 +383,8 @@ examination so that I can select one to begin examining.*
 | AC-EX-001-003 | Given an application is in the `UnderExamination`, `AwaitingRequisitionResponse`, `ReadyForDecision`, `Approved`, `Rejected`, or `Withdrawn` state, then it does not appear in the general work queue |
 | AC-EX-001-004 | Given I am authenticated as an Applicant or Registrar, when I attempt to view the Examiner work queue, then the request is rejected |
 
----
 
-### US-EX-002 — Begin examination of an application
+### US-EX-002 - Begin examination of an application
 
 *As an Examiner, I want to begin examination of a submitted application so
 that it is assigned to me and removed from the general work queue.*
@@ -418,9 +399,8 @@ that it is assigned to me and removed from the general work queue.*
 | AC-EX-002-004 | Given an application is in any terminal state, when I attempt to begin examination, then the request is rejected |
 | AC-EX-002-005 | Given I am authenticated as an Applicant or Registrar, when I attempt to begin examination, then the request is rejected |
 
----
 
-### US-EX-004 — View applications assigned to me
+### US-EX-004 - View applications assigned to me
 
 *As an Examiner, I want to see all applications currently assigned to me so
 that I can manage and resume my in-progress work.*
@@ -434,9 +414,8 @@ that I can manage and resume my in-progress work.*
 | AC-EX-004-003 | Given applications assigned to other Examiners exist, then they do not appear in my list |
 | AC-EX-004-004 | Given I am authenticated as an Applicant or Registrar, when I attempt to view assigned applications, then the request is rejected |
 
----
 
-### US-EX-003 — View full application details during examination
+### US-EX-003 - View full application details during examination
 
 *As an Examiner, I want to view the complete details of an application
 assigned to me so that I can assess it against the Act.*
@@ -449,9 +428,8 @@ assigned to me so that I can assess it against the Act.*
 | AC-EX-003-002 | Given an application is assigned to me, when I view it, then I see the originating draft ID and the date of submission |
 | AC-EX-003-003 | Given an application is assigned to another Examiner, when I attempt to view its full details, then the request is rejected |
 
----
 
-### US-EX-006 — Complete examination and refer to Registrar
+### US-EX-006 - Complete examination and refer to Registrar
 
 *As an Examiner, I want to mark an application as fully examined and refer
 it to the Registrar for decision so that the Registrar can approve or
@@ -467,11 +445,10 @@ reject it.*
 | AC-EX-006-004 | Given an application is not in the `UnderExamination` state, when I attempt to complete examination, then the request is rejected |
 | AC-EX-006-005 | Given I attempt to complete examination on an application not assigned to me, then the request is rejected |
 
----
 
-## Part 8 — Decision
+## Part 8 - Decision
 
-### US-RE-001 — View cases prepared for decision
+### US-RE-001 - View cases prepared for decision
 
 *As a Registrar, I want to see a list of applications that have been fully
 examined and referred to me so that I can review and decide on them.*
@@ -484,9 +461,8 @@ examined and referred to me so that I can review and decide on them.*
 | AC-RE-001-002 | Given an application is in any state other than `ReadyForDecision`, then it does not appear in the Registrar's decision queue |
 | AC-RE-001-003 | Given I am authenticated as an Applicant or Examiner, when I attempt to view the Registrar's decision queue, then the request is rejected |
 
----
 
-### US-RE-002 — Approve a registration application
+### US-RE-002 - Approve a registration application
 
 *As a Registrar, I want to approve a registration application that complies
 with the Act so that the company is registered and enters the Register.*
@@ -521,9 +497,8 @@ BR-RG-006, BR-ID-001 to BR-ID-003
 | AC-RE-002-019 | Given an application is still in `UnderExamination` and has not been referred to the Registrar, when I attempt to approve it, then the request is rejected citing BR-RA-010 |
 | AC-RE-002-020 | Given final write-side name uniqueness fails during `CreateRegisteredCompany`, then `RegisteredCompanyCreated` is not recorded, no Registration Number is assigned, no applicant registration notification is sent, and the approval process manager records an operational exception for manual resolution |
 
----
 
-### US-RE-003 — Reject a registration application
+### US-RE-003 - Reject a registration application
 
 *As a Registrar, I want to reject a registration application that does not
 comply with the Act, stating the reason, so that the Applicant understands
@@ -540,11 +515,10 @@ what corrective action is needed.*
 | AC-RE-003-005 | Given I am authenticated as an Applicant or Examiner, when I attempt to reject an application, then the request is rejected |
 | AC-RE-003-006 | Given an application is still in `UnderExamination` and has not been referred to the Registrar, when I attempt to reject it, then the request is rejected citing BR-RA-010 |
 
----
 
-## Part 9 — Authorised Officer Obligations
+## Part 9 - Authorised Officer Obligations
 
-### US-AO-001 — Notify the Registry of a change of director
+### US-AO-001 - Notify the Registry of a change of director
 
 *As an Authorised Officer, I want to notify the Registry of a change to the
 company's directors so that the Register reflects the current position.*
@@ -561,9 +535,8 @@ BR-AO-003, BR-AO-004, BR-AO-006, BR-AO-007
 | AC-AO-001-005 | Given the director change would leave the company with fewer than two current directors, when I submit it, then the request is rejected citing BR-RC-010 |
 | AC-AO-001-006 | Given the director change would add a person who is not a distinct identity-verified natural person, when I submit it, then the request is rejected citing BR-RC-011 |
 
----
 
-### US-AO-002 — Notify the Registry of a change of registered office address
+### US-AO-002 - Notify the Registry of a change of registered office address
 
 *As an Authorised Officer, I want to notify the Registry of a change to the
 company's registered office address so that legal notices can be served at
@@ -580,9 +553,8 @@ BR-AO-004
 | AC-AO-002-004 | Given I attempt to notify a change on a company I am not authorised to act for, then the request is rejected |
 | AC-AO-002-005 | Given the new registered office address is not plausible, valid, within the jurisdiction, or usable for service of legal notices, when I submit the change, then the request is rejected citing BR-RC-012 |
 
----
 
-### US-AO-003 — File an annual return
+### US-AO-003 - File an annual return
 
 *As an Authorised Officer, I want to file the company's annual return with
 the Registry so that the company complies with its legal obligations.*
@@ -600,9 +572,8 @@ BR-AO-002, BR-AO-003, BR-AO-004
 | AC-AO-003-006 | Given an annual return has already been filed for the same company and return period, when I attempt to file another return for that period, then the request is rejected |
 | AC-AO-003-007 | Given the annual return form or filing period is changed by the Registrar's order, then the system applies the new configuration without a code deployment |
 
----
 
-### US-AO-004 — Apply for voluntary dissolution
+### US-AO-004 - Apply for voluntary dissolution
 
 *As an Authorised Officer, I want to apply to the Registrar to dissolve the
 company voluntarily so that it can be lawfully wound up.*
@@ -612,15 +583,14 @@ company voluntarily so that it can be lawfully wound up.*
 | ID | Acceptance Criterion |
 |----|----------------------|
 | AC-AO-004-001 | Given the company is in the `Registered` state, when I submit a dissolution application, then the application is recorded and the Registrar is notified for decision |
-| AC-AO-004-002 | Given the company has outstanding obligations in this micro-registry contract — unfiled annual returns or unpaid fees owed to the Registry — when I attempt to apply for dissolution, then the application is rejected stating which obligations remain |
+| AC-AO-004-002 | Given the company has outstanding obligations in this micro-registry contract - unfiled annual returns or unpaid fees owed to the Registry - when I attempt to apply for dissolution, then the application is rejected stating which obligations remain |
 | AC-AO-004-003 | Given I attempt to apply for dissolution on a company I am not authorised to act for, then the request is rejected |
 | AC-AO-004-004 | Given the company is in the `StruckOff` or `Dissolved` state, when I attempt to apply for dissolution, then the request is rejected |
 
----
 
-## Part 10 — Registered Company Lifecycle (Registrar)
+## Part 10 - Registered Company Lifecycle (Registrar)
 
-### US-RE-006 — View a registered company
+### US-RE-006 - View a registered company
 
 *As a Registrar, I want to view the full details of a registered company,
 including its current status and history, so that I can make informed
@@ -636,9 +606,8 @@ decisions about compliance and strike-off.*
 | AC-RE-006-004 | Given a Registration Number does not exist, when I request it, then I receive a not-found response |
 | AC-RE-006-005 | Given I am authenticated as an Applicant, Examiner, or unauthenticated user, then the Registrar's detailed view is not accessible to me |
 
----
 
-### US-RE-004 — Strike off a registered company
+### US-RE-004 - Strike off a registered company
 
 *As a Registrar, I want to strike off a registered company that has failed
 to comply with its obligations so that it ceases to exist as a legal entity.*
@@ -654,9 +623,8 @@ to comply with its obligations so that it ceases to exist as a legal entity.*
 | AC-RE-004-005 | Given a company is in the `StruckOff` or `Dissolved` state, when I attempt to strike it off, then the request is rejected |
 | AC-RE-004-006 | Given I am authenticated as an Applicant or Examiner, when I attempt to strike off a company, then the request is rejected |
 
----
 
-### US-RE-005 — Process a dissolution application
+### US-RE-005 - Process a dissolution application
 
 *As a Registrar, I want to process a voluntary dissolution application from
 an Authorised Officer so that the company can be lawfully wound up.*
@@ -666,18 +634,17 @@ an Authorised Officer so that the company can be lawfully wound up.*
 | ID | Acceptance Criterion |
 |----|----------------------|
 | AC-RE-005-001 | Given a registered company is in the `Registered` state and has no outstanding obligations, when I direct dissolution, then the company transitions to the `Dissolved` state |
-| AC-RE-005-002 | Given a company has outstanding obligations in this micro-registry contract — unfiled annual returns or unpaid fees owed to the Registry — when I attempt to direct dissolution, then the request is rejected stating which obligations remain outstanding |
+| AC-RE-005-002 | Given a company has outstanding obligations in this micro-registry contract - unfiled annual returns or unpaid fees owed to the Registry - when I attempt to direct dissolution, then the request is rejected stating which obligations remain outstanding |
 | AC-RE-005-003 | Given a company has been dissolved, then it ceases to be a legal entity from the date of dissolution |
 | AC-RE-005-004 | Given a company has been dissolved, then it remains in the historical record of the Register |
 | AC-RE-005-005 | Given a company has been dissolved, then its Registration Number is not reused |
 | AC-RE-005-006 | Given a company is in the `StruckOff` or `Dissolved` state, when dissolution is attempted, then the request is rejected |
 | AC-RE-005-007 | Given I am authenticated as an Applicant or Examiner, when I attempt to direct dissolution, then the request is rejected |
 
----
 
-## Part 11 — Public Register
+## Part 11 - Public Register
 
-### US-PB-001 — Search the Register by company name
+### US-PB-001 - Search the Register by company name
 
 *As a member of the Public, I want to search the Register by company name
 so that I can find information about registered companies.*
@@ -691,9 +658,8 @@ so that I can find information about registered companies.*
 | AC-PB-001-003 | Given no companies match my search term, then I receive an empty result set |
 | AC-PB-001-004 | Given I am unauthenticated, then I may still search the Register |
 
----
 
-### US-PB-002 — View a registered company by Registration Number
+### US-PB-002 - View a registered company by Registration Number
 
 *As a member of the Public, I want to view a registered company's details
 by its Registration Number so that I can verify its legal existence and
@@ -708,9 +674,8 @@ current particulars.*
 | AC-PB-002-003 | Given a Registration Number does not exist in the Register, when I request it, then I receive a not-found response |
 | AC-PB-002-004 | Given I am unauthenticated, then I may still view company details from the Register |
 
----
 
-### US-PB-003 — Search the Register by director name
+### US-PB-003 - Search the Register by director name
 
 *As a member of the Public, I want to search the Register by director name
 so that I can find companies associated with a particular person.*
@@ -725,11 +690,10 @@ so that I can find companies associated with a particular person.*
 | AC-PB-003-004 | Given I am unauthenticated, then I may still search the Register by director name |
 | AC-PB-003-005 | Given a person was formerly but is no longer a director of a company, then that historical association is not returned by the basic director-name search |
 
----
 
-## Part 12 — System Processes
+## Part 12 - System Processes
 
-### US-SY-001 — Automatically expire drafts
+### US-SY-001 - Automatically expire drafts
 
 *As the Registry system, I want to automatically expire active drafts that
 have exceeded the configured expiry period so that the Act's requirement is
@@ -747,11 +711,10 @@ BR-AU-004 to BR-AU-007
 | AC-SY-001-005 | Given the expiry threshold is changed by the Registrar's order, then the scheduler uses the new configured value without a code deployment |
 | AC-SY-001-006 | Given the scheduler runs and finds no drafts exceeding the expiry threshold, then no commands are issued |
 | AC-SY-001-007 | Given the scheduler crashes and restarts, when it runs again, then drafts that were not successfully expired on the previous run are expired on the next run |
-| AC-SY-001-008 | Given the same draft would be expired twice — for example due to a scheduler retry — when the `ExpireDraft` command is issued a second time with the same command ID, then the previous command outcome is returned and no second event is recorded |
+| AC-SY-001-008 | Given the same draft would be expired twice - for example due to a scheduler retry - when the `ExpireDraft` command is issued a second time with the same command ID, then the previous command outcome is returned and no second event is recorded |
 
----
 
-### US-SY-002 — Notify Applicant before draft expiry
+### US-SY-002 - Notify Applicant before draft expiry
 
 *As the Registry system, I want to notify an Applicant when their draft is
 approaching its expiry date so that they have the opportunity to submit or
@@ -767,9 +730,8 @@ cancel before it expires.*
 | AC-SY-002-004 | Given a draft is in the `Submitted`, `Cancelled`, or `Expired` state, then no draft-expiry warning is sent |
 | AC-SY-002-005 | Given the scheduler crashes and restarts, then any due expiry warnings not sent on the previous run are sent on the next run |
 
----
 
-### US-SY-003 — Notify Examiner when a requisition deadline passes
+### US-SY-003 - Notify Examiner when a requisition deadline passes
 
 *As the Registry system, I want to notify an Examiner when a requisition
 deadline has passed without an Applicant response so that the Examiner can
@@ -784,9 +746,8 @@ take appropriate action.*
 | AC-SY-003-003 | Given the application has been withdrawn before the deadline passes, then no notification is sent |
 | AC-SY-003-004 | Given the scheduler crashes and restarts, then any overdue notifications not sent on the previous run are sent on the next run |
 
----
 
-## Out of Scope — Explicitly Excluded from this Contract
+## Out of Scope - Explicitly Excluded from this Contract
 
 The following items were considered during requirements analysis and are
 explicitly excluded from the scope of this contract.
@@ -802,7 +763,6 @@ explicitly excluded from the scope of this contract.
 | Name reservation and name locking | Parked pending a fuller legal and product design. Future scope may check name availability during draft preparation, lock the name on successful submission, and release the lock when the application reaches a terminal state. |
 | Fuller outstanding-obligations model | The current micro-registry blocks dissolution for unfiled annual returns and unpaid fees only. Future scope should consider overdue director or office notifications, unresolved compliance action, pending strike-off proceedings, penalties, and other statutory debts. |
 
----
 
 ## Non-Functional Requirements
 
@@ -816,7 +776,7 @@ BR-ID-001 to BR-ID-005, BR-AU-001 to BR-AU-008
 
 | ID | Requirement |
 |----|-------------|
-| NFR-001 | The Register is the event store — the set of `RegisteredCompany` event streams containing a `RegisteredCompanyCreated` event. The `register` table is a read model projection, not the Register itself. *(BR-RI-001, BR-RI-002)* |
+| NFR-001 | The Register is the event store - the set of `RegisteredCompany` event streams containing a `RegisteredCompanyCreated` event. The `register` table is a read model projection, not the Register itself. *(BR-RI-001, BR-RI-002)* |
 | NFR-002 | The Register read model must be derived exclusively from domain events. No direct writes to the Register read model table are permitted outside the Register projector. *(BR-RI-005)* |
 | NFR-003 | If the Register read model is destroyed, it must be fully rebuildable by replaying domain events from the event store. No company ceases to exist as a result. *(BR-RI-001, BR-RI-002, BR-RI-005)* |
 | NFR-004 | Company name uniqueness must be enforced in the authoritative write-side Register path before `RegisteredCompanyCreated` is recorded. A read-model unique constraint may exist only as defensive projection protection. *(BR-RI-006)* |

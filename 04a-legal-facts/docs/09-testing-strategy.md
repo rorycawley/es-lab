@@ -3,7 +3,6 @@
 *Status: Accepted.*
 *Date: 2026-05-26.*
 
----
 
 ## Goals
 
@@ -17,14 +16,13 @@
 - External systems the team does not control (payment gateway, identity broker,
   address validation) are never a test dependency for the domain.
 
----
 
 ## Test Layers
 
 Tests are organised into five layers. Each layer has a defined scope, speed
 target, and placement in the commit/push/CI workflow.
 
-### Layer 1 — Pure Function Tests
+### Layer 1 - Pure Function Tests
 
 **Scope:** Deciders, business rule predicates, FSM transition validation,
 event evolution functions, domain utilities.
@@ -44,9 +42,8 @@ functions in, assertions out.
 **What this catches:** Logic errors in business rules, invalid FSM transitions,
 broken invariants in the domain model.
 
----
 
-### Layer 2 — Adapter / Integration Tests
+### Layer 2 - Adapter / Integration Tests
 
 **Scope:** Database adapters (event store, command ledger, projections, audit
 log), message bus adapters, outbox publisher. Each test exercises one adapter
@@ -66,11 +63,10 @@ Rancher Desktop configuration.
 **What this catches:** Schema mismatches, ORM/SQL bugs, connection handling,
 transaction boundaries, adapter interface compliance.
 
----
 
-### Layer 3 — Behavioural / Acceptance Tests
+### Layer 3 - Behavioural / Acceptance Tests
 
-**Scope:** Full vertical slices through the system — HTTP request in, events
+**Scope:** Full vertical slices through the system - HTTP request in, events
 persisted, projection updated, HTTP query response out. These are the tests
 that verify acceptance criteria for user stories.
 
@@ -91,9 +87,8 @@ acceptance criterion ID (`AC-AP-007-001`).
 workflow correctness; role-based access enforcement; idempotency of the full
 stack.
 
----
 
-### Layer 4 — Fitness Function Tests
+### Layer 4 - Fitness Function Tests
 
 **Scope:** Architectural characteristics that cannot be verified by a single
 acceptance criterion. These are defined in `06-architectural-characteristics.md`
@@ -110,16 +105,15 @@ a duplicate command).
 tests so failures are clearly attributed.
 
 **Examples:**
-- `FF-001` — query company existence from events; prove approval row alone is
+- `FF-001` - query company existence from events; prove approval row alone is
   insufficient.
-- `FF-002` — drop projection, replay events, compare results.
-- `FF-004` — submit same command twice; assert no duplicate side effects.
-- `FF-006` — attempt approval from every non-`ReadyForDecision` state; assert
+- `FF-002` - drop projection, replay events, compare results.
+- `FF-004` - submit same command twice; assert no duplicate side effects.
+- `FF-006` - attempt approval from every non-`ReadyForDecision` state; assert
   rejection.
 
----
 
-### Layer 5 — Contract Tests
+### Layer 5 - Contract Tests
 
 **Scope:** API consumer contracts. The API is versioned (ADR-0021); each
 version must satisfy the contracts of its consumers. Consumer-driven contract
@@ -134,15 +128,13 @@ publishing runs from consumer codebases.
 **What this catches:** Breaking changes to API responses that would silently
 break a frontend or integration client.
 
----
 
-### Out of CI — Performance and Load Tests
+### Out of CI - Performance and Load Tests
 
 Performance and load tests are maintained in the `perf/` directory and run
 separately from the CI gate. They are not blocking. They exist to establish
 baselines and detect regressions in throughput or latency before a release.
 
----
 
 ## Development Workflow and Git Gates
 
@@ -151,7 +143,7 @@ baselines and detect regressions in throughput or latency before a release.
 Trunk-based development requires that you always work on top of the latest
 state of trunk. Before committing:
 
-1. `git pull --rebase origin main` — integrate any changes from trunk.
+1. `git pull --rebase origin main` - integrate any changes from trunk.
 2. Resolve conflicts if any arise.
 3. Run the pre-commit hook (Layer 1 tests).
 4. Commit.
@@ -186,23 +178,22 @@ bb test:fast
 
 Every push to trunk triggers:
 
-1. **Build** — compile, lint, check.
-2. **Layer 1** — pure function tests.
-3. **Layer 2** — adapter/integration tests (Testcontainers).
-4. **Layer 3** — behavioural/acceptance tests.
-5. **Layer 4** — fitness functions.
-6. **Layer 5** — contract tests.
+1. **Build** - compile, lint, check.
+2. **Layer 1** - pure function tests.
+3. **Layer 2** - adapter/integration tests (Testcontainers).
+4. **Layer 3** - behavioural/acceptance tests.
+5. **Layer 4** - fitness functions.
+6. **Layer 5** - contract tests.
 
 All layers must pass for a green build. Layers run sequentially to fail fast
 on the cheapest tests first.
 
----
 
 ## Mocking Strategy for External Systems
 
 The domain is separated from external systems by ports (ADR-0019). In tests,
 adaptors for external systems are replaced by test doubles. These are not
-mocks of internal functions — they are real implementations of the port
+mocks of internal functions - they are real implementations of the port
 interface that behave deterministically in a test context.
 
 | External System | Test Double Approach |
@@ -218,7 +209,6 @@ partial mocks. This ensures that a slow integration test with a real adapter
 can always be substituted for a fast test with a stub without changing the
 test setup.
 
----
 
 ## Behavioural Test Structure
 
@@ -242,7 +232,6 @@ Each test:
 - Sets up state via commands, never by writing directly to the database.
 - Asserts observable outcomes (state, events, responses), not internal state.
 
----
 
 ## Fitness Function Test Structure
 
@@ -256,7 +245,6 @@ property they protect.
       (is (nil? (find-company-by-application-id app-id))))))
 ```
 
----
 
 ## Test Data Strategy
 

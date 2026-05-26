@@ -24,7 +24,7 @@ When a breaking change is required:
 2. Write an evolver (upcaster) function that transforms the old version to the
    new schema at read time in the `evolve` multimethod.
 3. New events are written in the new schema. Old events remain unchanged.
-4. Evolvers are tested as first-class components — not optional coverage.
+4. Evolvers are tested as first-class components - not optional coverage.
 
 Non-breaking additions (new optional fields) may be made to the current version
 without introducing a new version suffix, provided the `evolve` multimethod
@@ -40,6 +40,6 @@ handles missing fields gracefully.
 - Schema evolution history is visible in the codebase: evolver chains document
   every breaking change made to a schema.
 - Old event type keywords are never deleted from the codebase while there are
-  events of that type in the event store — which is forever.
+  events of that type in the event store - which is forever.
 - A schema registry or event catalogue may be introduced in a later ADR to
   formalise event contracts for external consumers.

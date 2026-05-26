@@ -28,7 +28,7 @@ database but no code path is shared between them except the event store.
 - Read models can be optimised independently for query patterns.
 - Read models are disposable: if a projection is dropped or corrupted, it can
   be rebuilt from events (ADR-0002, ADR-0023).
-- Commands must never read from projections to enforce business rules — they
+- Commands must never read from projections to enforce business rules - they
   must read from the write-side event store or aggregate state.
 - Adds complexity: two models for every domain concept. This is acceptable
   given the legal integrity requirements that demand strong write-side

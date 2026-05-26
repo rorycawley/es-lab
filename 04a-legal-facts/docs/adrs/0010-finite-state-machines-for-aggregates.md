@@ -30,7 +30,7 @@ declared target state; and that every undeclared pair is rejected.
   business rule detail.
 - Aggregate complexity is visible: a large FSM signals that an aggregate should
   be split.
-- The documentation FSM and the implementation FSM cannot silently diverge —
+- The documentation FSM and the implementation FSM cannot silently diverge -
   the fitness function enforces agreement.
 - Terminal states are computable from the FSM: any state that appears only as
   a target, never as a source.
