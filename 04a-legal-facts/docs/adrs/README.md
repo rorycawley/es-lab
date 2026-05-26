@@ -37,3 +37,4 @@ Principles defined in `docs/05-architecture-principles.md`.
 | [0024](0024-process-manager-recovery.md) | Process manager recovery | Accepted |
 | [0025](0025-data-classification-model.md) | Data classification model (taxonomy, log masking, audit log access) | Accepted |
 | [0026](0026-third-party-integration-strategy.md) | Third-party integration strategy: adapter as ACL, selective EIP patterns | Accepted |
+| [0027](0027-flyway-database-migrations.md) | Flyway for database migrations | Accepted |

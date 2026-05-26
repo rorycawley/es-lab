@@ -1,7 +1,7 @@
 # User Stories
 
 *Derived from the Companies Registration Act and the Business Rules.*
-*Status: In review.*
+*Status: Accepted. Scope locked 2026-05-27.*
 
 Story IDs are stable references. All business rules (BR-xx-nnn) and Act
 sections (§n) referenced here are defined in their respective documents.
@@ -18,8 +18,6 @@ Each story carries traceability metadata in its References block:
 Acceptance criterion IDs (`AC-XX-nnn-nnn`) are used as test names directly.
 See `APPROACH.md` for the full traceability model.
 
-*Note: Traceability metadata is to be completed for all stories. US-RE-002 below
-is the canonical example of the completed format.*
 
 **Actors:**
 
@@ -47,6 +45,9 @@ Registrar), I want to log in using my identity account so that I can access
 the Registry's protected features. Public users do not authenticate.*
 
 **References:** §2
+**Characteristics:** security, auditability, fault-tolerance
+**Fitness functions:** FF-003, FF-014
+**ADRs:** ADR-0007, ADR-0020
 
 *Note: Authentication uses an OIDC identity broker. The Registry only accepts
 protected-user sessions where the trusted broker supplies a verified
@@ -80,6 +81,9 @@ may contact unverified proposed directors and wait for third-party
 verification before approval can proceed.*
 
 **References:** §2, BR-IV-001 to BR-IV-006
+**Characteristics:** security, legal-integrity, auditability
+**Fitness functions:** FF-003, FF-014
+**ADRs:** ADR-0007, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -100,6 +104,9 @@ workspace in which to prepare my registration application.*
 
 **References:** §2, §3, §4, BR-IV-003, BR-DR-001, BR-DR-002, BR-DR-003,
 BR-DR-010, BR-DR-014
+**Characteristics:** legal-integrity, auditability, security, controlled-decision-making
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -117,6 +124,9 @@ BR-DR-010, BR-DR-014
 build up the required information across multiple sessions before submitting.*
 
 **References:** §3, BR-DR-005, BR-DR-006, BR-DR-007, BR-DR-008
+**Characteristics:** auditability, security, controlled-decision-making
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -135,6 +145,9 @@ that it is removed from my active drafts.*
 
 **References:** §4, §6, BR-DR-001, BR-DR-005, BR-DR-007, BR-DR-009,
 BR-DR-011, BR-DR-013
+**Characteristics:** legal-integrity, auditability, security, controlled-decision-making
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -154,6 +167,9 @@ BR-DR-011, BR-DR-013
 manage my work in progress.*
 
 **References:** §3, §4, BR-DR-001
+**Characteristics:** security, rebuildability, data-consistency, privacy-and-disclosure-control
+**Fitness functions:** FF-002, FF-012
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -169,6 +185,9 @@ manage my work in progress.*
 that I can review its contents before submitting.*
 
 **References:** §3, BR-DR-010
+**Characteristics:** security, rebuildability, privacy-and-disclosure-control
+**Fitness functions:** FF-002, FF-012
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -186,6 +205,9 @@ formal registration application lodged with the Registry.*
 
 **References:** §7, §8, §9, §12A, BR-SB-001 to BR-SB-006, BR-FE-001,
 BR-FE-008, BR-DR-006, BR-RA-001, BR-RA-002, BR-ID-001 to BR-ID-003
+**Characteristics:** legal-integrity, auditability, idempotency, data-consistency, fault-tolerance, controlled-decision-making
+**Fitness functions:** FF-003, FF-004, FF-006
+**ADRs:** ADR-0001, ADR-0004, ADR-0008, ADR-0010, ADR-0016, ADR-0017, ADR-0019
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -236,6 +258,9 @@ payment-related criteria in that story.
 their current status so that I can track the progress of my submissions.*
 
 **References:** §11, §12, BR-RA-003
+**Characteristics:** security, rebuildability, data-consistency, privacy-and-disclosure-control
+**Fitness functions:** FF-002, FF-012
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -253,6 +278,9 @@ their current status so that I can track the progress of my submissions.*
 application so that I know where it is in the process.*
 
 **References:** §11, §12, BR-RA-003, BR-RQ-003
+**Characteristics:** security, privacy-and-disclosure-control, rebuildability
+**Fitness functions:** FF-002, FF-012
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -269,6 +297,9 @@ application so that I know where it is in the process.*
 decision is made so that I can stop the process if my circumstances change.*
 
 **References:** §11, §12, BR-RA-003, BR-RA-004, BR-RA-005, BR-RQ-011
+**Characteristics:** legal-integrity, auditability, controlled-decision-making, idempotency
+**Fitness functions:** FF-003, FF-004, FF-006
+**ADRs:** ADR-0001, ADR-0004, ADR-0010, ADR-0016, ADR-0019
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -287,6 +318,9 @@ has been registered and I have its
 Registration Number.*
 
 **References:** §14, §15, BR-RG-001, BR-RG-004
+**Characteristics:** legal-integrity, fault-tolerance, idempotency
+**Fitness functions:** FF-004, FF-007
+**ADRs:** ADR-0005, ADR-0006, ADR-0013, ADR-0024
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -302,6 +336,9 @@ Registration Number.*
 rejected so that I understand why and can take corrective action.*
 
 **References:** §16, BR-RA-011
+**Characteristics:** fault-tolerance, idempotency, auditability
+**Fitness functions:** FF-003, FF-004
+**ADRs:** ADR-0005, ADR-0006, ADR-0013
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -320,6 +357,9 @@ the Applicant.*
 
 **References:** §13, BR-RQ-001, BR-RQ-002, BR-RQ-003, BR-RQ-004, BR-RQ-005,
 BR-RQ-008, BR-RQ-012, BR-RQ-013
+**Characteristics:** legal-integrity, auditability, controlled-decision-making, security
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -340,6 +380,9 @@ so that I can provide the requested information and my application can
 proceed.*
 
 **References:** §13, BR-RQ-006, BR-RQ-007, BR-RQ-008, BR-RQ-009
+**Characteristics:** auditability, controlled-decision-making, fault-tolerance
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0013, ADR-0016, ADR-0019
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -357,6 +400,9 @@ has passed without a response so that the application does not remain
 unmanaged indefinitely.*
 
 **References:** §13, BR-RQ-009
+**Characteristics:** auditability, controlled-decision-making, fault-tolerance
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -375,6 +421,9 @@ unmanaged indefinitely.*
 examination so that I can select one to begin examining.*
 
 **References:** §13, BR-RA-006, BR-RA-007
+**Characteristics:** security, rebuildability, data-consistency, controlled-decision-making
+**Fitness functions:** FF-002, FF-006
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -390,6 +439,9 @@ examination so that I can select one to begin examining.*
 that it is assigned to me and removed from the general work queue.*
 
 **References:** §13, BR-RA-006, BR-RA-007
+**Characteristics:** security, auditability, controlled-decision-making, idempotency
+**Fitness functions:** FF-003, FF-004, FF-006
+**ADRs:** ADR-0001, ADR-0004, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -406,6 +458,9 @@ that it is assigned to me and removed from the general work queue.*
 that I can manage and resume my in-progress work.*
 
 **References:** §13, BR-RA-006, BR-RA-007
+**Characteristics:** security, rebuildability, data-consistency
+**Fitness functions:** FF-002
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -421,6 +476,9 @@ that I can manage and resume my in-progress work.*
 assigned to me so that I can assess it against the Act.*
 
 **References:** §13, BR-RA-007
+**Characteristics:** security, privacy-and-disclosure-control, data-protection
+**Fitness functions:** FF-012
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020, ADR-0025
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -436,6 +494,9 @@ it to the Registrar for decision so that the Registrar can approve or
 reject it.*
 
 **References:** §13, BR-RA-008, BR-RA-009, BR-RQ-010
+**Characteristics:** auditability, controlled-decision-making, security, fault-tolerance
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0005, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -454,6 +515,9 @@ reject it.*
 examined and referred to me so that I can review and decide on them.*
 
 **References:** §13, §14, BR-RA-010
+**Characteristics:** security, controlled-decision-making, rebuildability
+**Fitness functions:** FF-002, FF-006
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -505,6 +569,9 @@ comply with the Act, stating the reason, so that the Applicant understands
 what corrective action is needed.*
 
 **References:** §16, BR-RA-010, BR-RA-011
+**Characteristics:** legal-integrity, auditability, controlled-decision-making, security, idempotency
+**Fitness functions:** FF-003, FF-004, FF-006, FF-014
+**ADRs:** ADR-0001, ADR-0004, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -525,6 +592,9 @@ company's directors so that the Register reflects the current position.*
 
 **References:** §21, BR-RC-001, BR-RC-010, BR-RC-011, BR-AO-002,
 BR-AO-003, BR-AO-004, BR-AO-006, BR-AO-007
+**Characteristics:** legal-integrity, auditability, security, controlled-decision-making
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -544,6 +614,9 @@ the correct address.*
 
 **References:** §21, BR-RC-002, BR-RC-012, BR-AO-002, BR-AO-003,
 BR-AO-004
+**Characteristics:** legal-integrity, auditability, security, controlled-decision-making
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -561,6 +634,9 @@ the Registry so that the company complies with its legal obligations.*
 
 **References:** §22, BR-RC-003, BR-RC-013, BR-RC-014, BR-RC-015,
 BR-AO-002, BR-AO-003, BR-AO-004
+**Characteristics:** legal-integrity, auditability, security, idempotency, controlled-decision-making
+**Fitness functions:** FF-003, FF-004, FF-006
+**ADRs:** ADR-0001, ADR-0004, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -579,6 +655,9 @@ BR-AO-002, BR-AO-003, BR-AO-004
 company voluntarily so that it can be lawfully wound up.*
 
 **References:** §24, BR-RC-005, BR-RC-006, BR-AO-002, BR-AO-003
+**Characteristics:** legal-integrity, auditability, security, controlled-decision-making
+**Fitness functions:** FF-003, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -597,6 +676,9 @@ including its current status and history, so that I can make informed
 decisions about compliance and strike-off.*
 
 **References:** §17, §18, §20, §23, BR-RI-001
+**Characteristics:** security, privacy-and-disclosure-control, rebuildability, data-protection
+**Fitness functions:** FF-002, FF-012
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0019, ADR-0020, ADR-0025
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -613,6 +695,9 @@ decisions about compliance and strike-off.*
 to comply with its obligations so that it ceases to exist as a legal entity.*
 
 **References:** §23, BR-RC-004, BR-RC-007, BR-RC-009, BR-RG-003, BR-AO-005
+**Characteristics:** legal-integrity, auditability, controlled-decision-making, security, data-consistency
+**Fitness functions:** FF-001, FF-003, FF-006, FF-008
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -630,6 +715,9 @@ to comply with its obligations so that it ceases to exist as a legal entity.*
 an Authorised Officer so that the company can be lawfully wound up.*
 
 **References:** §24, BR-RC-005, BR-RC-006, BR-RC-008, BR-RC-009, BR-RG-003
+**Characteristics:** legal-integrity, auditability, controlled-decision-making, security
+**Fitness functions:** FF-003, FF-006, FF-008
+**ADRs:** ADR-0001, ADR-0010, ADR-0016, ADR-0019, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -650,6 +738,9 @@ an Authorised Officer so that the company can be lawfully wound up.*
 so that I can find information about registered companies.*
 
 **References:** §19, BR-RI-001, BR-RI-002, BR-RI-003, BR-RI-008
+**Characteristics:** rebuildability, privacy-and-disclosure-control, data-consistency, performance
+**Fitness functions:** FF-002, FF-008, FF-012, FF-015
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0021, ADR-0025
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -666,6 +757,9 @@ by its Registration Number so that I can verify its legal existence and
 current particulars.*
 
 **References:** §17, §18, §19, BR-RI-001, BR-RI-002, BR-RI-003, BR-RI-007
+**Characteristics:** rebuildability, privacy-and-disclosure-control, data-consistency, performance
+**Fitness functions:** FF-002, FF-008, FF-012, FF-015
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0021, ADR-0025
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -681,6 +775,9 @@ current particulars.*
 so that I can find companies associated with a particular person.*
 
 **References:** §19, BR-RI-001, BR-RI-002, BR-RI-003
+**Characteristics:** rebuildability, privacy-and-disclosure-control, data-protection, performance
+**Fitness functions:** FF-002, FF-008, FF-012, FF-015
+**ADRs:** ADR-0002, ADR-0011, ADR-0016, ADR-0021, ADR-0025
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -701,6 +798,9 @@ enforced without manual intervention.*
 
 **References:** §5, BR-DR-003, BR-DR-004, BR-DR-008, BR-DR-009, BR-DR-010,
 BR-AU-004 to BR-AU-007
+**Characteristics:** legal-integrity, fault-tolerance, idempotency, auditability, controlled-decision-making
+**Fitness functions:** FF-003, FF-004, FF-006
+**ADRs:** ADR-0001, ADR-0004, ADR-0006, ADR-0010, ADR-0013, ADR-0024
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -721,6 +821,9 @@ approaching its expiry date so that they have the opportunity to submit or
 cancel before it expires.*
 
 **References:** §5, BR-DR-003, BR-DR-012
+**Characteristics:** fault-tolerance, idempotency
+**Fitness functions:** FF-004
+**ADRs:** ADR-0004, ADR-0005, ADR-0013
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -738,6 +841,9 @@ deadline has passed without an Applicant response so that the Examiner can
 take appropriate action.*
 
 **References:** §13, BR-RQ-009
+**Characteristics:** fault-tolerance, idempotency
+**Fitness functions:** FF-004
+**ADRs:** ADR-0004, ADR-0005, ADR-0013
 
 | ID | Acceptance Criterion |
 |----|----------------------|

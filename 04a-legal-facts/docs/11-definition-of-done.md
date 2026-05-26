@@ -1,7 +1,8 @@
 # Definition of Done and Acceptance Protocol
 
-*Status: Proposed - requires customer sign-off before development begins.*
+*Status: Accepted.*
 *Date: 2026-05-26.*
+*Scope signed off: 2026-05-27.*
 
 
 ## The Direct Answer
@@ -58,6 +59,27 @@ The scope agreement ceremony happens once, before the first development sprint:
    in-scope behaviour.
 3. Both parties sign this document and `08-user-stories.md` as the agreed
    scope. The signing date is the scope lock date.
+
+### Scope Agreement Record
+
+*Completed 2026-05-27.*
+
+All 30 user stories across Parts 1–12 of `08-user-stories.md` were reviewed
+and agreed. The 8 explicitly parked items in the Out of Scope section of
+`08-user-stories.md` were confirmed as excluded.
+
+Agreed condition: traceability metadata (Characteristics, Fitness functions,
+ADRs columns) to be completed for all stories as the first task before any
+implementation code is written. The §-reference and BR-reference columns are
+complete and provide legal traceability; the remaining metadata is bookkeeping
+to be filled in immediately prior to the first development sprint.
+
+| Signatory | Role | Date |
+|-----------|------|------|
+| Rory Cawley | Customer and Delivery Lead | 2026-05-27 |
+
+*Note: This is a single-person project. The scope agreement ceremony was run
+interactively and this record stands as the scope lock.*
 
 **What is not in scope is named explicitly.**
 Parked concerns are listed in `03-business-drivers.md`. They are deliberately

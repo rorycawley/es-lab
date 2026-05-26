@@ -1,0 +1,13 @@
+{:database
+ {:url             #or [#env REGISTRY_DB_URL "jdbc:postgresql://localhost:5432/registry?user=registry&password=registry"]
+  :username        #or [#env REGISTRY_DB_USER "registry"]
+  :password        #or [#env REGISTRY_DB_PASSWORD "registry"]
+  :max-pool-size   #long #or [#env DB_POOL_SIZE "10"]
+  :min-idle        2
+  :connection-timeout-ms 3000}
+
+ :web-server
+ {:port #long #or [#env PORT "8080"]}
+
+ :outbox
+ {:poll-interval-ms 200 :batch-size 50}}
