@@ -870,24 +870,77 @@ explicitly excluded from the scope of this contract.
 | Fuller outstanding-obligations model | The current micro-registry blocks dissolution for unfiled annual returns and unpaid fees only. Future scope should consider overdue director or office notifications, unresolved compliance action, pending strike-off proceedings, penalties, and other statutory debts. |
 
 
-## Non-Functional Requirements
+## Architectural Invariants
 
-*Traceability summary for architectural constraints derived from §20 and the
-audit business rules. The full architectural characteristics, dependency
-failure expectations, and mandatory fitness functions are maintained in
+*These are functional constraints derived from §20 and the audit business
+rules — they describe what the system must do, not how well it does it. The
+full architectural characteristics, dependency failure expectations, and
+mandatory fitness functions are maintained in
 [06-architectural-characteristics.md](06-architectural-characteristics.md).*
 
 **References:** §20, BR-RI-001, BR-RI-002, BR-RI-004, BR-RI-005, BR-RI-006,
 BR-ID-001 to BR-ID-005, BR-AU-001 to BR-AU-008
 
+| ID | Invariant |
+|----|-----------|
+| INV-001 | The Register is the event store - the set of `RegisteredCompany` event streams containing a `RegisteredCompanyCreated` event. The `register` table is a read model projection, not the Register itself. *(BR-RI-001, BR-RI-002)* |
+| INV-002 | The Register read model must be derived exclusively from domain events. No direct writes to the Register read model table are permitted outside the Register projector. *(BR-RI-005)* |
+| INV-003 | If the Register read model is destroyed, it must be fully rebuildable by replaying domain events from the event store. No company ceases to exist as a result. *(BR-RI-001, BR-RI-002, BR-RI-005)* |
+| INV-004 | Company name uniqueness must be enforced in the authoritative write-side Register path before `RegisteredCompanyCreated` is recorded. A read-model unique constraint may exist only as defensive projection protection. *(BR-RI-006)* |
+| INV-005 | Every event written to the event store must permanently record: the identity of the person who caused it, the date and time, the causation ID, and the correlation ID. *(BR-AU-005, BR-AU-006, BR-AU-007)* |
+| INV-006 | No event may ever be altered or deleted from the event store once written. *(BR-AU-008)* |
+| INV-007 | All drafts, registration applications, and registered company records must be retained permanently in the event store regardless of status. *(BR-AU-001, BR-AU-002, BR-AU-003)* |
+| INV-008 | The Registry must maintain a complete and tamper-evident audit record of all events across all aggregates. *(BR-AU-004, §20)* |
+| INV-009 | Command idempotency must be enforced by a command ledger keyed by command ID. Event causation ID is traceability metadata and must not be globally unique across the event store. *(BR-ID-001 to BR-ID-005)* |
+
+
+## Non-Functional Requirements
+
+*How well the system must perform. These are quality attributes — measurable
+properties of system behaviour under specified conditions.*
+
+### Performance
+
 | ID | Requirement |
 |----|-------------|
-| NFR-001 | The Register is the event store - the set of `RegisteredCompany` event streams containing a `RegisteredCompanyCreated` event. The `register` table is a read model projection, not the Register itself. *(BR-RI-001, BR-RI-002)* |
-| NFR-002 | The Register read model must be derived exclusively from domain events. No direct writes to the Register read model table are permitted outside the Register projector. *(BR-RI-005)* |
-| NFR-003 | If the Register read model is destroyed, it must be fully rebuildable by replaying domain events from the event store. No company ceases to exist as a result. *(BR-RI-001, BR-RI-002, BR-RI-005)* |
-| NFR-004 | Company name uniqueness must be enforced in the authoritative write-side Register path before `RegisteredCompanyCreated` is recorded. A read-model unique constraint may exist only as defensive projection protection. *(BR-RI-006)* |
-| NFR-005 | Every event written to the event store must permanently record: the identity of the person who caused it, the date and time, the causation ID, and the correlation ID. *(BR-AU-005, BR-AU-006, BR-AU-007)* |
-| NFR-006 | No event may ever be altered or deleted from the event store once written. *(BR-AU-008)* |
-| NFR-007 | All drafts, registration applications, and registered company records must be retained permanently in the event store regardless of status. *(BR-AU-001, BR-AU-002, BR-AU-003)* |
-| NFR-008 | The Registry must maintain a complete and tamper-evident audit record of all events across all aggregates. *(BR-AU-004, §20)* |
-| NFR-009 | Command idempotency must be enforced by a command ledger keyed by command ID. Event causation ID is traceability metadata and must not be globally unique across the event store. *(BR-ID-001 to BR-ID-005)* |
+| NFR-001 | Command endpoints (write operations) must respond within 500ms at P99 under normal operating load. |
+| NFR-002 | Query endpoints (read operations) must respond within 200ms at P99 under normal operating load. |
+| NFR-003 | The public Register search endpoint must respond within 300ms at P99 for a name-fragment query returning up to 20 results. |
+
+### Scalability
+
+| ID | Requirement |
+|----|-------------|
+| NFR-004 | The system must support at least 100 concurrent authenticated sessions without degradation below the response time targets above. |
+| NFR-005 | The event store must support an unbounded number of events without schema changes or data migration — growth is handled by storage scaling, not structural redesign. |
+
+### Availability
+
+| ID | Requirement |
+|----|-------------|
+| NFR-006 | The Registry must achieve 99.9% uptime measured monthly, excluding announced maintenance windows. |
+| NFR-007 | Planned maintenance windows must not exceed 4 hours per month and must be announced at least 48 hours in advance. |
+
+### Reliability
+
+| ID | Requirement |
+|----|-------------|
+| NFR-008 | Recovery Point Objective (RPO): no more than 1 hour of accepted and acknowledged events may be lost in a complete infrastructure failure. |
+| NFR-009 | Recovery Time Objective (RTO): the Registry must be fully operational within 4 hours of a declared complete failure. |
+| NFR-010 | A failure in the notification delivery subsystem must not affect the correctness or availability of the command and query paths. |
+
+### Security
+
+| ID | Requirement |
+|----|-------------|
+| NFR-011 | All API traffic must be encrypted in transit using TLS 1.2 or higher. Unencrypted HTTP must not be accepted on any production endpoint. |
+| NFR-012 | Authentication tokens must expire within the configured session timeout (§2). Expired tokens must be rejected on every protected request. |
+| NFR-013 | No secret (database credential, signing key, API key) may be hardcoded in source code or committed to version control. Secrets must be supplied via environment variables or a secrets manager. |
+| NFR-014 | All dependencies must be pinned to exact versions in `deps.edn`. Dependencies with known critical CVEs must be updated within 30 days of disclosure. |
+
+### Data Retention
+
+| ID | Requirement |
+|----|-------------|
+| NFR-015 | Event store backups must be taken at least daily and retained for a minimum of 7 years in accordance with the Act's permanent record-keeping requirements (§20). |
+| NFR-016 | Backup restoration must be tested at least quarterly. A restoration that cannot be completed within the RTO is a failed backup. |
