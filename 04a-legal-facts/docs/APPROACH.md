@@ -338,6 +338,7 @@ apply the full framework. If no, apply only the parts that add value.
 | [`08-user-stories.md`](08-user-stories.md) | Observable behaviour with acceptance criteria and traceability metadata |
 | [`09-testing-strategy.md`](09-testing-strategy.md) | Test layers, git gates, mocking strategy |
 | [`10-architecture.md`](10-architecture.md) | C4 system context, C4 containers, data architecture, security architecture |
+| [`11-definition-of-done.md`](11-definition-of-done.md) | Bilateral agreement on what "done" means, the acceptance protocol, and sign-off matrix |
 | [`adrs/README.md`](adrs/README.md) | Index of all architectural decision records |
 | `docs/event-model/` | Event model artifacts *(to be created)* |
 
