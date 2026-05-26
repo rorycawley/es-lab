@@ -4,6 +4,31 @@
 *Date: 2026-05-26.*
 
 
+## The Direct Answer
+
+You know all the work is done when all four of the following are simultaneously
+true. Each addresses a distinct concern; none overlaps with another; together
+they leave nothing unanswered.
+
+| # | Concern | Condition | Where the evidence is |
+|---|---------|-----------|----------------------|
+| 1 | **Scope** | The user stories in `08-user-stories.md` have been agreed and signed by both parties before development begins. Every story traces to the Act. Parked scope is listed separately and is excluded. | Signed scope agreement (this document + `08-user-stories.md`) |
+| 2 | **Functional correctness** | Every acceptance criterion for every agreed story has a corresponding named test. All those tests pass in CI on the trunk branch. | CI build report — every test category green |
+| 3 | **Architectural integrity** | All fitness functions FF-001 through FF-014 pass in CI. These verify the properties the system must have: audit trail completeness, event store immutability, read model rebuildability, four-eyes enforcement, data classification, idempotency. | CI build report — fitness function suite green |
+| 4 | **Formal acceptance** | The acceptance protocol has been run in full. The delivery team has demonstrated the evidence. All four signatories have signed. | Signed acceptance record |
+
+If any one of these is false, work is not done — regardless of how confident the
+delivery team feels. If all four are true, there is nothing left to argue about.
+
+**Why these four and not others?**
+Condition 1 defines what the work is. Conditions 2 and 3 prove the work was
+done correctly — they are distinct because functional tests verify behaviour and
+fitness functions verify systemic properties; a system can pass all story tests
+and still fail a fitness function. Condition 4 is the customer's independent
+confirmation that the evidence was reviewed and found sufficient. Conditions 2
+and 3 exist to make Condition 4 undeniable, not to replace it.
+
+
 ## Purpose
 
 This document defines, in advance and bilaterally, what "done" means at every
@@ -15,6 +40,39 @@ evidence is sufficient and the work is complete.
 Agreeing this document before work begins is the point. Once it is signed, the
 question "is it done?" has a shared, unambiguous answer. It cannot be argued
 after the fact.
+
+
+## Before Work Begins: Scope Agreement
+
+"All the work" is only meaningful if both parties agree in writing — before
+development starts — on what the work is.
+
+**The agreed scope is the set of user stories in `08-user-stories.md`.**
+
+The scope agreement ceremony happens once, before the first development sprint:
+
+1. The delivery team presents the user stories in `08-user-stories.md`. Each
+   story traces to at least one section of the Act and at least one business
+   rule. The traceability is inspectable.
+2. The customer reviews the stories and confirms they represent the complete
+   in-scope behaviour.
+3. Both parties sign this document and `08-user-stories.md` as the agreed
+   scope. The signing date is the scope lock date.
+
+**What is not in scope is named explicitly.**
+Parked concerns are listed in `03-business-drivers.md`. They are deliberately
+deferred — named so they cannot be silently included later. A parked item is
+not missing; it is intentionally excluded.
+
+**Anything not in a user story is not in scope.**
+If a requirement surfaces at the acceptance review that was not captured in a
+user story before development began, it is not a defect — it is a new
+requirement. It is recorded as a new story and scheduled into a future release.
+This is not a loophole; it is the protection that makes the scope agreement
+meaningful. See Change Control below.
+
+This mechanism is what makes Condition 1 (Scope) in The Direct Answer
+concrete and enforceable.
 
 
 ## Why This Project Can Be Proven Complete
@@ -163,6 +221,60 @@ Any signatory may withhold sign-off. Withholding requires a written statement
 citing the specific criterion (by ID) that is not met. Disagreement about
 scope or expectations that were not recorded in a user story or acceptance
 criterion is not grounds for withholding.
+
+
+## Live Visibility
+
+The customer does not have to wait for a formal acceptance review to check
+progress. The following are available at any time during development:
+
+| What | Where | What it shows |
+|------|-------|---------------|
+| CI build report | CI dashboard (link provided at project kick-off) | Which tests are passing, which are failing, which are skipped; broken down by category (Layer 1–5) |
+| Traceability report | Generated from `08-user-stories.md` + CI results | Every acceptance criterion, its corresponding test name, and its current CI status: passing / failing / not yet written |
+| Parked scope list | `03-business-drivers.md` | Every deferred item, named and explained |
+
+The CI build report and traceability report are the same artefacts used in the
+formal acceptance review — they are not produced specially for that event.
+The customer sees the same evidence the delivery team sees, continuously.
+
+Any story whose test is failing is visible immediately. There are no surprises
+at the acceptance review that were not already visible in the CI dashboard.
+
+
+## Change Control
+
+The scope agreement (see Before Work Begins) is a bilateral commitment. After
+it is signed, neither party changes scope unilaterally. This section defines
+what happens when change is needed.
+
+**Adding a new requirement:**
+1. The new requirement is written as a user story with full traceability
+   metadata: Act section(s), business rules, acceptance criteria, fitness
+   functions, ADRs.
+2. It is added to `08-user-stories.md`.
+3. Both parties sign an amendment to the scope agreement to include it.
+4. The story is prioritised and scheduled into a future sprint or release. It
+   does not change stories already in progress.
+
+**Changing an existing requirement:**
+1. If the story has not yet started: update the story in `08-user-stories.md`
+   and re-sign.
+2. If the story is in progress or complete: write a new story that supersedes
+   or extends it. The original story is not modified retroactively — its test
+   record stands.
+
+**Why stories in progress are not modified retroactively:**
+A test that passes against the original acceptance criteria is evidence of
+what was agreed at that time. Changing the criteria after the fact invalidates
+that evidence. If the requirement has genuinely changed, a new story captures
+the change and produces new evidence.
+
+**Change control does not block the current release.**
+A new or changed requirement agreed after scope lock is not a defect in the
+current release. It is scoped into a subsequent release. This protects both
+parties: the delivery team is not held to requirements that were not agreed; the
+customer is not denied a mechanism for genuine evolution.
 
 
 ## Defect Classification
