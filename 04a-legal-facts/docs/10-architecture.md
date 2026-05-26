@@ -55,9 +55,12 @@ C4Context
 
 *What are the deployable units, and how do they communicate?*
 
-The Registry is a single deployable modular monolith (ADR-0012). There is no
-separate message broker - the event bus is in-process (ADR-0015). External
-publication uses the transactional outbox pattern (ADR-0005), relayed by a
+The Registry is a single deployable modular monolith (ADR-0012). Multiple
+instances may run simultaneously for availability and scalability. There is no
+separate message broker. Internal event delivery uses three distinct paths
+(ADR-0015): an in-process bus for the audit writer (same transaction), event
+store polling for projectors and process managers (async, cross-instance safe),
+and the transactional outbox for external systems (ADR-0005), relayed by a
 background thread (ADR-0013).
 
 ```mermaid
@@ -109,8 +112,11 @@ C4Container
 
 Commands and queries cross module boundaries only through defined ports
 (ADR-0019). Modules do not call each other's internal functions. Domain events
-published on the in-process bus are the only coupling between modules at
-runtime (ADR-0015).
+are the only coupling between modules at runtime. The audit log writer receives
+events synchronously via the in-process bus within the same transaction
+(ADR-0015 Path 1). Projectors and process managers receive events by polling
+the event store (ADR-0015 Path 2), which is correct across all running
+instances.
 
 
 ## Data Architecture
@@ -123,10 +129,11 @@ flowchart TD
     CL --> DEC["Decider\n(pure function)"]
     DEC --> ES["Event Store\nevents table\nOptimistic concurrency (ADR-0017)"]
     ES --> OB["Transactional Outbox\noutbox_events table\n(ADR-0005)"]
-    ES --> BUS["In-process Event Bus\n(ADR-0015)"]
-    BUS --> PROJ["Projectors\nUpdate read models"]
-    BUS --> PM["Process Managers\nprocess_instances table\n(ADR-0006, ADR-0024)"]
+    ES --> BUS["In-process Event Bus\n(ADR-0015 Path 1)\nSynchronous - same transaction"]
+    ES --> POLL["Event Store Polling\nglobal_position checkpoint\n(ADR-0015 Path 2)\nAsync - cross-instance safe"]
     BUS --> AL["Audit Writer\naudit_log table\n(ADR-0018)"]
+    POLL --> PROJ["Projectors\nUpdate read models\n(DB advisory lock per projector)"]
+    POLL --> PM["Process Managers\nprocess_instances table\n(ADR-0006, ADR-0024)\n(DB advisory lock per PM)"]
     OB --> EXT["External Systems\n(Email Service, etc.)"]
     PROJ --> RM["Read Models\nread-model tables\n(ADR-0002)"]
 ```
@@ -193,10 +200,11 @@ CREATE TABLE outbox_events (
 
 #### Audit Log
 
-A separate, human-readable record of every Registry decision. Written by an
-audit writer subscribing to the in-process bus, relayed via the outbox to
-ensure it survives crashes (ADR-0018). Designed for external auditors who
-should not need to understand event sourcing.
+A separate, human-readable record of every Registry decision. Written by the
+audit writer subscribing to the in-process bus (ADR-0015 Path 1) in the same
+database transaction as the domain events (ADR-0018). If the audit write fails,
+the transaction rolls back and the command is rejected. Designed for external
+auditors who should not need to understand event sourcing.
 
 ```sql
 CREATE TABLE audit_log (
@@ -253,11 +261,24 @@ Command received
   → Decider loads event stream (events table)
   → Decider produces new events
   → Append events + write outbox + record command outcome (single transaction)
-  → In-process bus delivers events to:
-      • Projectors → update read model tables
-      • Process managers → update process_instances, dispatch next commands
-      • Audit writer → insert into audit_log
-  → Outbox worker (background thread) relays to external systems
+      │
+      ├─ Path 1: In-process bus (synchronous, same transaction)
+      │       • Audit writer → insert into audit_log
+      │         (failure rolls back the entire transaction)
+      │
+      ├─ Path 2: Event store polling (async, background threads)
+      │       • Projectors poll events WHERE global_position > checkpoint
+      │           → update read model tables
+      │           → update checkpoint (same DB transaction)
+      │       • Process managers poll events WHERE global_position > checkpoint
+      │           → update process_instances, dispatch next commands
+      │           → update checkpoint (same DB transaction)
+      │         Each consumer holds a DB advisory lock; only one instance
+      │         per consumer runs at a time across all monolith instances.
+      │
+      └─ Path 3: Transactional outbox (async, background thread)
+              • Outbox worker reads unpublished outbox_events rows
+              → relay to external systems (Email Service, etc.)
 ```
 
 

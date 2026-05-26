@@ -35,3 +35,22 @@ state (process manager records, outbox records, scheduler watermarks).
   in a new ADR.
 - Supervision strategy: a component manager (e.g., Integrant) must restart
   failed job threads and alert on repeated failures.
+
+### Multi-instance coordination
+
+Multiple instances of the monolith may run simultaneously for availability and
+scalability. A background job thread running on Instance A must not duplicate
+work already being done on Instance B.
+
+Each background job acquires a named database advisory lock before doing work.
+Only the instance holding the lock runs the job at any given time. If the
+lock-holding instance fails, another instance acquires the lock on its next
+wake cycle and resumes from the last persisted checkpoint. No external
+coordinator or distributed lock service is required.
+
+Projectors and process managers do not subscribe to the in-process event bus.
+They use the event store polling path (ADR-0015 Path 2): each thread reads new
+events from the `events` table using the `global_position` column as a
+monotonic checkpoint, processes them, and updates its checkpoint atomically.
+This is correct across all instances because every instance reads from the same
+Postgres database.

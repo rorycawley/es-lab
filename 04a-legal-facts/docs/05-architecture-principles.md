@@ -58,6 +58,29 @@ Examiners prepare cases; Registrars decide. Process managers coordinate
 workflows; Deciders enforce rules. Never allow a coordination mechanism to
 also carry business rules.
 
+**Cross-aggregate coordination happens through events, never through direct calls.**
+No module or aggregate calls another module's functions directly. When a
+workflow needs to advance after a domain fact is recorded, the Decider publishes
+the event and three distinct paths carry it to consumers (ADR-0015):
+
+- **Path 1 - In-process bus (synchronous, same transaction):** delivers the
+  event to the audit log writer only. The audit entry is written atomically
+  with the domain event. A failure rolls back the entire transaction.
+- **Path 2 - Event store polling (async, cross-instance safe):** projectors and
+  process managers poll the `events` table using the `global_position` column as
+  a monotonic checkpoint. This path is correct across multiple running instances
+  of the monolith; each consumer holds a database advisory lock to prevent
+  duplicate processing.
+- **Path 3 - Transactional outbox (async, external systems):** events that must
+  reach systems outside the process boundary are written to the outbox in the
+  same transaction as the domain events, then relayed by a background worker
+  (ADR-0005).
+
+This keeps every aggregate free of knowledge about other aggregates, makes every
+workflow step observable and auditable, and allows new consumers to be added
+without modifying existing Deciders. Mixing these paths - for example, having a
+process manager subscribe to the in-process bus - is an error.
+
 **Read models are disposable.**
 Any projection that cannot be rebuilt from events from scratch is a liability,
 not an asset. Treat every read model as temporary. If destroying it would
