@@ -7,7 +7,7 @@ stories. User stories describe observable behaviour; this document explains why
 the system is being shaped this way and what architectural qualities must not be
 lost during implementation. The detailed architectural characteristics and
 fitness functions are maintained in
-[ARCHITECTURALCHARACTERISTICS.md](ARCHITECTURALCHARACTERISTICS.md).
+[06-architectural-characteristics.md](06-architectural-characteristics.md).
 
 ## Context
 
@@ -33,16 +33,7 @@ tested rigorously.
 | Identity confidence | Natural persons acting in the system or appearing in company data must be tied to verified identity records. | The system consumes verified identity claims and records, while proofing/outreach is parked. |
 | Operational recoverability | Process managers, projections, notifications, and publication can fail independently. Failures must be recoverable without corrupting legal facts. | Use idempotent commands, process-manager state, outbox publication, and rebuildable read models. |
 
-## Design Principles
-
-- Legal facts are recorded as immutable events.
-- Commands express intent; events record facts.
-- State transitions are explicit and testable.
-- Read models support queries but do not define legal truth.
-- Business rules are traceable to the Act.
-- Parked concerns are named rather than silently ignored.
-- External systems are treated as sources of facts, not hidden implementation
-  details.
+*Design principles have been moved to [05-architecture-principles.md](05-architecture-principles.md).*
 
 ## Delivery Constraints
 
@@ -74,23 +65,7 @@ These decisions are captured as ADRs under `docs/adrs/`.
 | Payments | Treat payment as part of submission, but keep payment gateway integration outside this contract. | [ADR-0008](adrs/0008-payment-boundary.md) |
 | Deployment | Deployment is deferred until implementation shape is clearer. | [ADR-0009](adrs/0009-deployment-model-deferred.md) |
 
-## Mandatory Fitness Functions
-
-These system-wide checks are mandatory from the first implementation slice.
-The architectural-characteristics document defines the detailed expected checks.
-
-| Fitness Function | What It Protects |
-|------------------|------------------|
-| No company exists without `RegisteredCompanyCreated`. | Legal existence is not inferred from approval, submission, or read-model rows. |
-| Read models can be rebuilt from events. | The Register read model remains disposable and non-authoritative. |
-| Events are append-only and must never be updated or deleted. | Legal audit integrity. |
-| Duplicate command IDs return the recorded outcome. | Idempotency and payment/process-manager safety. |
-| Multiple events may share a causation ID. | Processes can emit chains of facts without abusing causation uniqueness. |
-| Approval and rejection are accepted only in `ReadyForDecision`. | Separation of examination and Registrar decision. |
-| Registration notification is sent only after `RegisteredCompanyCreated`. | Applicants are not told a company exists before it legally exists. |
-| Public search returns struck-off and dissolved companies with status. | Public Register history remains inspectable. |
-| Register read model is written only by projectors. | No direct mutation of derived state. |
-| Parked concerns do not leak into active acceptance criteria. | Scope remains honest and deliverable. |
+*Mandatory fitness functions have been moved to [06-architectural-characteristics.md](06-architectural-characteristics.md).*
 
 ## Parked Business Drivers
 

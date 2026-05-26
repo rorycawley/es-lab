@@ -137,6 +137,16 @@ During examination, an Examiner may raise a requisition requesting clarification
 
 When examination is complete and no requisitions are outstanding, the Examiner shall refer the application to the Registrar for decision. The application is then in the ready for decision phase, pending the Registrar's determination.
 
+**Section 13A — Separation of Examination and Decision**
+
+No officer of the Registry shall both examine a registration application and decide on that same application.
+
+The natural person who acts as Examiner in respect of a registration application shall not be the same natural person who approves or rejects that application as Registrar.
+
+This requirement applies regardless of whether one person holds both the Examiner and Registrar offices. Where only one officer is available to perform both functions, the Registrar shall arrange for a different natural person to perform one of the two functions before a decision is made, so that examination and decision are always performed by distinct natural persons.
+
+A decision to approve or reject a registration application made by the same natural person who examined that application is invalid and of no legal effect.
+
 **Section 14 — Approval**
 
 The Registrar shall approve a registration application if it complies with this Act.

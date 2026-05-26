@@ -232,6 +232,25 @@ records do not expire in this contract; revocation is out of scope.
 
 ---
 
+## Group 7A — Four-Eyes Rule (Separation of Examination and Decision)
+
+The four-eyes rule is the requirement under §13A that no single natural person
+may both examine and decide on the same registration application. It is an
+institutional integrity control: the person who prepares the case must not be
+the person who closes it. Role separation alone (Examiner role vs Registrar
+role) is insufficient — the system must also prevent the same natural person
+from acting in both capacities on the same application, even if they hold
+both roles.
+
+| Rule | Description | Act |
+|------|-------------|-----|
+| BR-4E-001 | The natural person who examines a registration application must not be the same natural person who approves or rejects it | §13A |
+| BR-4E-002 | The system must record the `verified_person_id` of the Examiner when examination begins (BR-RA-006). At the point of approval or rejection, the system must reject the command if the `verified_person_id` of the acting Registrar matches the recorded Examiner `verified_person_id` of that application | §13A |
+| BR-4E-003 | A decision to approve or reject an application where the acting Registrar is the same natural person as the Examiner is invalid and must be rejected with a permanent record of the attempted breach | §13A |
+| BR-4E-004 | The four-eyes check is an ABAC rule applied after RBAC and before the state machine guard. A Registrar who passes RBAC but fails the four-eyes check receives a distinct rejection reason (`four-eyes-violation`) that is recorded in the audit log | §13A |
+
+---
+
 ## Group 8 — Authorised Officers
 
 An Authorised Officer is a person authorised to act on behalf of a
@@ -330,6 +349,79 @@ rebuildable from the event store. It is not the Register.
 | BR-RI-008 | For basic public director-name search, "current directors" means the latest recorded directors in the company's event stream, even where the company's current status is `StruckOff` or `Dissolved`. Former directors removed before that latest recorded state are not returned by basic search | §18, §19 |
 
 ---
+
+## Group 14 — Data Classification
+
+These rules define the classification taxonomy, assign classifications to data
+fields and document types, and govern logging behaviour. They are derived from
+the Act's public inspection provisions (§20–§22) and from data protection
+obligations. Enforcement is via FLS/RLS (ADR-0020, ADR-0025) and log masking
+at the point of emission.
+
+### Classification Taxonomy
+
+| Class | Meaning | Default Access | Application Log | Audit Log |
+|-------|---------|----------------|-----------------|-----------|
+| **Public** | Required to be publicly inspectable under the Act | Open (all authenticated and unauthenticated callers) | Plaintext permitted | Full fidelity |
+| **Restricted** | Internal Registry operational data | Registry staff (`examiner`, `registrar`, `admin`) | Replaced with `[RESTRICTED]` | Full fidelity |
+| **Confidential** | Sensitive personal data or identity documents | Named roles only (see table below) | Replaced with `[CONFIDENTIAL]` | Full fidelity |
+| **Sealed** | Court order or regulatory hold | Authorised officers and `admin` only | Replaced with `[SEALED]` | Full fidelity |
+
+### Data Field Classification
+
+| Field | Classification | Permitted Roles | Notes |
+|-------|---------------|----------------|-------|
+| Company name | Public | All | Publicly inspectable under §20 |
+| Registration number | Public | All | Publicly inspectable under §20 |
+| Registered office address | Public | All | Publicly inspectable under §20; see BR-DC-005 for home address exception |
+| Company status | Public | All | Publicly inspectable under §20 |
+| Date of registration | Public | All | Publicly inspectable under §20 |
+| Director full name | Public | All | Publicly inspectable under §20 |
+| Director date of birth (month/year only) | Public | All | Only month and year; full DOB is Confidential |
+| Director full date of birth | Confidential | `examiner`, `registrar`, `admin` | Full DOB not part of public record |
+| Director home address | Confidential | `examiner`, `registrar`, `admin` | Home address not publicly disclosed; see BR-DC-005 |
+| Applicant email address | Restricted | `examiner`, `registrar`, `admin` | Operational contact; not part of public Register |
+| Payment reference number | Confidential | `registrar`, `admin` | Financial reference; not part of public Record |
+| Identity verification result | Confidential | `examiner`, `registrar`, `admin` | Verification outcome from Identity Broker |
+| Command ID / causation ID / correlation ID | Restricted | `admin` | Internal operational metadata |
+| Examiner notes and annotations | Restricted | `examiner`, `registrar`, `admin` | Internal examination working notes |
+| Rejection reason (internal full text) | Restricted | `examiner`, `registrar`, `admin` | Summary decision is Public; full internal reasoning is Restricted |
+| Process manager state | Restricted | `admin` | Internal workflow state |
+| Outbox relay status | Restricted | `admin` | Internal operational state |
+
+### Document Type Classification
+
+Document classification may change at lifecycle transitions (see BR-DC-007).
+
+| Document Type | Classification at Upload | Classification After Registration | Notes |
+|---------------|--------------------------|-----------------------------------|-------|
+| Draft content (form fields) | Restricted | N/A (draft never Public) | Draft has no legal existence; not part of public Register |
+| Articles of association / constitution | Restricted | Public | Becomes a public filing upon registration |
+| Certificate of incorporation | N/A (generated) | Public | Generated by Registry; publicly inspectable |
+| Director consent form | Confidential | Confidential | Contains personal signature; home address may be present |
+| Passport / national ID (identity proof) | Confidential | Confidential | Never published; Registry internal only |
+| Proof of address (identity verification) | Confidential | Confidential | Never published; Registry internal only |
+| Examiner report | Restricted | Restricted | Internal examination record; not part of public Register |
+| Requisition letter | Restricted | Restricted | Internal examination correspondence |
+| Annual return filing | Restricted | Public | Becomes a public filing upon acceptance |
+
+### Business Rules
+
+| Rule | Description | Act |
+|------|-------------|-----|
+| BR-DC-001 | Every data field stored or processed by the Registry must carry an explicit classification label as defined in the taxonomy above | §20 |
+| BR-DC-002 | Every document type uploaded to or generated by the Registry must carry an explicit classification label | §20 |
+| BR-DC-003 | A field classified Public may be returned in public API responses without authentication | §21 |
+| BR-DC-004 | A field classified Restricted must not be returned in any response to a caller whose claims do not include an authorised Registry role | §20 |
+| BR-DC-005 | Where a director's home address is used as the registered office address, it retains Confidential classification and must not appear on the public Register; a substitute service address must be recorded for public disclosure | §9 |
+| BR-DC-006 | A document classified Confidential must not be accessible via any endpoint available to applicants or the public | §20 |
+| BR-DC-007 | Document classification may be promoted from Restricted to Public only at a defined lifecycle transition (e.g. registration approval). Classification may never be demoted from a higher to a lower level | — |
+| BR-DC-008 | Any field classified Restricted, Confidential, or Sealed must be replaced with the classification marker `[RESTRICTED]`, `[CONFIDENTIAL]`, or `[SEALED]` respectively at the point of emission into application logs | — |
+| BR-DC-009 | Application logs must not contain plaintext values for: director home addresses, dates of birth, payment references, identity verification results, or any uploaded document content | — |
+| BR-DC-010 | The audit log records full-fidelity values for all fields, regardless of classification. No masking is applied to the audit log | §20 |
+| BR-DC-011 | Access to the audit log is restricted to the `admin` role and to external auditors via a dedicated read-only database connection using the `audit_reader` database role. No application API endpoint may return audit log rows | §20 |
+| BR-DC-012 | Access to application logs is restricted to operations and infrastructure personnel. Application logs must not be accessible to domain staff (examiners, registrars, applicants) through any Registry user interface or API | — |
+| BR-DC-013 | A Sealed record may only be unsealed by explicit order from the Registry authority or by court order, recorded as a new event in the event store | — |
 
 ## Parked Rules — Name Reservation
 

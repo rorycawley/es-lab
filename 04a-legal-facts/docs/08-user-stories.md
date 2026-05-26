@@ -6,6 +6,21 @@
 Story IDs are stable references. All business rules (BR-xx-nnn) and Act
 sections (§n) referenced here are defined in their respective documents.
 
+Each story carries traceability metadata in its References block:
+
+```
+**References:** §X, BR-XX-nnn
+**Characteristics:** <characteristic names from 06-architectural-characteristics.md>
+**Fitness functions:** <FF-nnn IDs>
+**ADRs:** <ADR-nnnn IDs>
+```
+
+Acceptance criterion IDs (`AC-XX-nnn-nnn`) are used as test names directly.
+See `APPROACH.md` for the full traceability model.
+
+*Note: Traceability metadata is to be completed for all stories. US-RE-002 below
+is the canonical example of the completed format.*
+
 **Actors:**
 
 | ID | Actor | Description |
@@ -479,6 +494,9 @@ with the Act so that the company is registered and enters the Register.*
 **References:** §7, §10, §14, §15, BR-RA-010, BR-AP-001 to BR-AP-010,
 BR-RG-001, BR-RG-002, BR-RG-003, BR-RG-004, BR-RG-005, BR-AO-001,
 BR-RG-006, BR-ID-001 to BR-ID-003
+**Characteristics:** legal-integrity, data-consistency, idempotency, auditability
+**Fitness functions:** FF-001, FF-003, FF-004, FF-006
+**ADRs:** ADR-0001, ADR-0010, ADR-0011, ADR-0017, ADR-0020
 
 | ID | Acceptance Criterion |
 |----|----------------------|
@@ -791,7 +809,7 @@ explicitly excluded from the scope of this contract.
 *Traceability summary for architectural constraints derived from §20 and the
 audit business rules. The full architectural characteristics, dependency
 failure expectations, and mandatory fitness functions are maintained in
-[ARCHITECTURALCHARACTERISTICS.md](ARCHITECTURALCHARACTERISTICS.md).*
+[06-architectural-characteristics.md](06-architectural-characteristics.md).*
 
 **References:** §20, BR-RI-001, BR-RI-002, BR-RI-004, BR-RI-005, BR-RI-006,
 BR-ID-001 to BR-ID-005, BR-AU-001 to BR-AU-008
