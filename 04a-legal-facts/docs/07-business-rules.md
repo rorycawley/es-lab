@@ -154,6 +154,28 @@ additional information.
 | BR-RQ-014 | After a requisition deadline passes without a response, only the assigned Examiner may record the next action; the action and reason must be permanently recorded | §13, §20 |
 | BR-RQ-015 | A missed-deadline next action may extend the deadline and notify the Applicant, or proceed toward referral to the Registrar with the missed deadline recorded in the case history | §13 |
 
+**Requisition state machine:**
+
+A Requisition is an entity within the `RegistrationApplication` aggregate. Its
+own lifecycle drives transitions in the application FSM: raising a requisition
+moves the application to `:awaiting-requisition-response`; the last open
+requisition reaching `:responded` or `:closed` moves it back to
+`:under-examination`.
+
+```edn
+{:transitions
+ {[:open    :applicant-responded]       :responded  ;; BR-RQ-006, BR-RQ-007 - triggers application back to :under-examination if last open
+  [:open    :deadline-passed]           :overdue    ;; BR-RQ-009 - Examiner notified; system takes no further automatic action
+  [:open    :close-in-error]            :closed     ;; BR-RQ-013 - Examiner closes; reason recorded; Applicant notified
+  [:overdue :extend-deadline]           :open       ;; BR-RQ-015 - Examiner extends; new deadline notified to Applicant
+  [:overdue :proceed-without-response]  :closed}    ;; BR-RQ-015 - Examiner proceeds; missed deadline recorded in case history
+ :terminal-states #{:responded :closed}}
+```
+
+States `:responded` and `:closed` are terminal. The `:overdue` to `:open`
+transition is a legal cycle - a deadline may be extended more than once.
+Only the assigned Examiner may drive transitions from `:overdue` (BR-RQ-014).
+
 
 ## Group 6 - Registration Application Aggregate
 
@@ -477,3 +499,85 @@ and every action in the system.
 | BR-AU-006 | Every event must record the date and time at which it occurred | §20 |
 | BR-AU-007 | Every event must record the command that caused it (causation ID) and the original request that triggered the chain (correlation ID) | - |
 | BR-AU-008 | No event may ever be altered or deleted from the event store | §20 |
+
+
+## Group 15 - Workflow FSMs (Process Manager State Machines)
+
+Process managers coordinate workflows that span multiple aggregate boundaries
+(ADR-0006). Each process manager persists its own state as an explicit FSM so
+it can recover from crashes and resume from the correct step (ADR-0024).
+
+**Important distinction from aggregate FSMs:**
+Aggregate FSM transitions are triggered by *commands* (`[from-state command]`).
+Process manager FSM transitions are triggered by incoming *events*
+(`[from-state event-received]`). The command issued on each transition is
+documented in the inline comment.
+
+### Submission Process Manager
+
+**Trigger:** `DraftSubmitted` event.
+**Responsibility:** Orchestrate fee payment and address validation; issue
+`CreateRegistrationApplication` on success; record failure on any rejection.
+
+```edn
+{:transitions
+ {[:initiated                    :draft-submitted]                    :awaiting-payment-outcome
+  ;; ^ issues InitiatePayment command
+
+  [:awaiting-payment-outcome      :payment-confirmed]                  :awaiting-address-validation
+  ;; ^ issues ValidateRegisteredOffice command
+
+  [:awaiting-payment-outcome      :payment-failed]                     :failed
+  [:awaiting-payment-outcome      :payment-timed-out]                  :failed
+
+  [:awaiting-address-validation   :address-validated]                  :creating-application
+  ;; ^ issues CreateRegistrationApplication command
+
+  [:awaiting-address-validation   :address-invalid]                    :failed
+
+  [:awaiting-address-validation   :validation-service-unavailable]     :creating-application
+  ;; ^ issues CreateRegistrationApplication with :address-validation-unavailable flag
+  ;; BR-AP-009: Registrar must make an explicit confirmatory decision at approval time
+
+  [:creating-application          :application-created]                :complete}
+
+ :terminal-states #{:complete :failed}}
+```
+
+Terminal states: `:complete`, `:failed`.
+
+If the PM reaches `:failed`, the draft remains in `:submitted` state. No
+registration application is created. A human support process is required to
+notify the Applicant and advise on next steps (parked scope).
+
+### Approval Process Manager
+
+**Trigger:** `RegistrationApplicationApproved` event.
+**Responsibility:** Issue `CreateRegisteredCompany` (assigning the Registration
+Number); wait for confirmation; trigger registration notification.
+
+```edn
+{:transitions
+ {[:initiated                 :application-approved]           :awaiting-company-created
+  ;; ^ issues CreateRegisteredCompany command with generated Registration Number (BR-RG-002)
+
+  [:awaiting-company-created  :company-created]                :notifying-applicant
+  ;; ^ issues SendRegistrationNotification command
+
+  [:awaiting-company-created  :creation-failed]                :failed
+  ;; ^ must never occur under normal conditions; recorded for human resolution
+
+  [:notifying-applicant       :notification-sent]              :complete
+  [:notifying-applicant       :notification-failed]            :complete}
+  ;; ^ notification failure does NOT invalidate legal registration (BR-RG-001)
+  ;; the company is legally registered on RegisteredCompanyCreated; notification is best-effort
+
+ :terminal-states #{:complete :failed}}
+```
+
+Terminal states: `:complete`, `:failed`.
+
+`:failed` on this PM represents a serious infrastructure fault (company
+creation command failed despite approved application). The legal registration
+fact has not yet been recorded. This must trigger an immediate operational
+alert and human review — it is not a recoverable business scenario.

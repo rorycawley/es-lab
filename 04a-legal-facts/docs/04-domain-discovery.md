@@ -463,7 +463,82 @@ and `actor-id`.
 Process managers are not aggregates. They coordinate workflows by reacting to
 events and issuing subsequent commands.
 
-| Process Manager | Trigger Event | Commands Issued |
-|-----------------|---------------|-----------------|
-| **Submission Process Manager** | `DraftSubmitted` | Instructs payment; on success issues `CreateRegistrationApplication` |
-| **Approval Process Manager** | `RegistrationApplicationApproved` | Issues `CreateRegisteredCompany`; on success triggers registration notification |
+| Process Manager | Trigger Event | Commands Issued | FSM Spec |
+|-----------------|---------------|-----------------|----------|
+| **Submission Process Manager** | `DraftSubmitted` | `InitiatePayment`, `ValidateRegisteredOffice`, `CreateRegistrationApplication` | [`07-business-rules.md` Group 15](07-business-rules.md) |
+| **Approval Process Manager** | `RegistrationApplicationApproved` | `CreateRegisteredCompany`, `SendRegistrationNotification` | [`07-business-rules.md` Group 15](07-business-rules.md) |
+
+### Requisition FSM
+
+A Requisition is an entity within the `RegistrationApplication` aggregate.
+Its lifecycle is driven by Examiner actions and Applicant responses. Resolving
+the last open requisition drives the application back to `UnderExamination`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open : RaiseRequisition
+
+    Open --> Responded : RequisitionAnswered
+    Open --> Overdue   : DeadlinePassed
+    Open --> Closed    : CloseInError
+
+    Overdue --> Open   : ExtendDeadline
+    Overdue --> Closed : ProceedWithoutResponse
+
+    Responded --> [*]
+    Closed    --> [*]
+```
+
+*`Overdue` can cycle back to `Open` when the Examiner extends the deadline
+(BR-RQ-015). Only the assigned Examiner may drive transitions from `Overdue`
+(BR-RQ-014).*
+
+### Submission Process Manager FSM
+
+Transitions are triggered by incoming **events**, not commands. The command
+issued on each transition is shown in the EDN spec in
+[`07-business-rules.md` Group 15](07-business-rules.md).
+
+```mermaid
+stateDiagram-v2
+    [*] --> AwaitingPaymentOutcome : DraftSubmitted
+
+    AwaitingPaymentOutcome --> AwaitingAddressValidation : PaymentConfirmed
+    AwaitingPaymentOutcome --> Failed                    : PaymentFailed
+    AwaitingPaymentOutcome --> Failed                    : PaymentTimedOut
+
+    AwaitingAddressValidation --> CreatingApplication : AddressValidated
+    AwaitingAddressValidation --> CreatingApplication : ValidationServiceUnavailable
+    AwaitingAddressValidation --> Failed              : AddressInvalid
+
+    CreatingApplication --> Complete : ApplicationCreated
+
+    Complete --> [*]
+    Failed   --> [*]
+```
+
+*`ValidationServiceUnavailable` follows the same path as `AddressValidated`
+but the application is flagged. The Registrar must make an explicit
+confirmatory decision at approval time (BR-AP-009).*
+
+### Approval Process Manager FSM
+
+```mermaid
+stateDiagram-v2
+    [*] --> AwaitingCompanyCreated : ApplicationApproved
+
+    AwaitingCompanyCreated --> NotifyingApplicant : CompanyCreated
+    AwaitingCompanyCreated --> Failed             : CreationFailed
+
+    NotifyingApplicant --> Complete : NotificationSent
+    NotifyingApplicant --> Complete : NotificationFailed
+
+    Complete --> [*]
+    Failed   --> [*]
+```
+
+*`NotificationFailed` transitions to `Complete` because the legal registration
+fact (`RegisteredCompanyCreated`) has already been recorded. Notification is
+best-effort and its failure does not invalidate the company's existence.
+`CreationFailed` is a serious infrastructure fault requiring immediate human
+review — it should never occur under normal conditions.*
