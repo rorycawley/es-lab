@@ -541,4 +541,58 @@ stateDiagram-v2
 fact (`RegisteredCompanyCreated`) has already been recorded. Notification is
 best-effort and its failure does not invalidate the company's existence.
 `CreationFailed` is a serious infrastructure fault requiring immediate human
-review — it should never occur under normal conditions.*
+review - it should never occur under normal conditions.*
+
+### Examination Workflow
+
+The two process manager FSMs above show what the system does automatically.
+Between them, the examination workflow is driven entirely by human actors:
+the Examiner, the Applicant, and the Registrar. This workflow is not a process
+manager - it is actor-driven - but it is an FSM: the application moves through
+defined states in response to actor commands.
+
+The 4-eyes rule (§13A) is enforced at the `ReadyForDecision` state. The
+Registrar who decides must be a different natural person from the Examiner who
+referred the case.
+
+```mermaid
+flowchart TD
+    START([ApplicationCreated\nby Submission PM])
+
+    START --> SUBMITTED[Submitted]
+
+    SUBMITTED -->|"BeginExamination - Examiner"| EXAM
+    SUBMITTED -->|"WithdrawApplication - Applicant"| WITHDRAWN
+
+    EXAM[UnderExamination\nAssigned Examiner]
+
+    EXAM -->|"RaiseRequisition - Examiner"| REQT
+    EXAM -->|"ReferToRegistrar - Examiner\nno open requisitions"| RFD
+    EXAM -->|"WithdrawApplication - Applicant"| WITHDRAWN
+
+    REQT[AwaitingRequisitionResponse]
+
+    REQT -->|"RequisitionResolved - Applicant or Examiner\nlast open requisition answered or closed"| EXAM
+    REQT -->|"WithdrawApplication - Applicant"| WITHDRAWN
+
+    RFD["ReadyForDecision\n4-eyes enforced here\nRegistrar must be a different person\nfrom the assigned Examiner"]
+
+    RFD -->|"ApproveApplication - Registrar"| APPROVED
+    RFD -->|"RejectApplication - Registrar"| REJECTED
+    RFD -->|"WithdrawApplication - Applicant"| WITHDRAWN
+
+    APPROVED([ApplicationApproved\ntriggers Approval PM])
+    REJECTED([ApplicationRejected])
+    WITHDRAWN([ApplicationWithdrawn])
+```
+
+*The `RequisitionResolved` transition covers two paths from the Requisition FSM:
+the Applicant responds (`RequisitionAnswered`) or the Examiner closes the
+requisition without a response (`ProceedWithoutResponse`, `CloseInError`). Either
+path resolves the requisition. The application returns to `UnderExamination` only
+when no open requisitions remain.*
+
+*If the acting Registrar's `verified_person_id` matches the assigned Examiner's,
+`ApproveApplication` and `RejectApplication` are rejected with reason
+`four-eyes-violation` and the attempt is recorded in the audit log (BR-4E-002,
+BR-4E-003, FF-014).*
