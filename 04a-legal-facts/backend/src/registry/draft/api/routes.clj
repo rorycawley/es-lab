@@ -33,6 +33,12 @@
            :openapi {:responses {200 {:description "Service is healthy"}}}
            :handler (constantly {:status 200 :body "ok"})}}]])
 
+(def ^:private draft-schema
+  {:type       "object"
+   :required   ["draft-id" "state"]
+   :properties {:draft-id {:type "string" :format "uuid"}
+                :state    {:type "string"}}})
+
 (defn draft-routes []
   ["/api/v1"
    ["/company-registration-drafts"
@@ -42,4 +48,13 @@
                       :requestBody empty-body
                       :responses   {201 created-response
                                     401 unauthorised-response}}
-            :handler handlers/create-draft}}]])
+            :handler handlers/create-draft}}]
+   ["/company-registration-drafts/:id"
+    {:get {:summary "Get a company registration draft"
+           :tags    ["drafts"]
+           :openapi {:security  [{:bearerAuth []}]
+                     :responses {200 {:description "Draft found"
+                                      :content     {"application/json" {:schema draft-schema}}}
+                                 401 unauthorised-response
+                                 404 {:description "Draft not found"}}}
+           :handler handlers/get-draft}}]])
