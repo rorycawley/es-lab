@@ -357,14 +357,23 @@ bb test:pure
 Target: completes in under 3 seconds. If it grows past 5 seconds, move slow
 tests to a higher layer.
 
-### Pre-Push Hook (Layers 1 + 2)
+### Pre-Push Hook (all layers)
 
-Runs automatically on `git push`. Executes pure function tests and adapter
-integration tests. If this fails, the push is rejected.
+**Status: active.** The hook lives at `.git/hooks/pre-push` in the monorepo
+root and is already enforced on every push.
+
+Behaviour:
+- Inspects each ref being pushed. If the changeset touches any file under
+  `04a-legal-facts/`, it runs `bb test:backend` from that directory.
+- Pushes that touch only other projects pass through without running these tests.
+- If the remote branch has commits the local branch does not have, the push is
+  aborted with instructions to integrate first (`git pull --rebase origin main`).
+  This enforces the trunk-based rule at the gate.
+- If tests fail, the push is rejected.
 
 ```bash
-# .git/hooks/pre-push
-bb test:fast
+# .git/hooks/pre-push (monorepo root — already in place)
+# Runs bb test:backend for 04a-legal-facts when that project is touched.
 ```
 
 ### CI Pipeline (All Layers)
