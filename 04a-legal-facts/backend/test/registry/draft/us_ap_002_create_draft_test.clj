@@ -22,6 +22,14 @@
               :body    (json/write-value-as-string body)
               :throw   false}))
 
-(deftest AC-AP-002-001-create-draft-route-exists
-  (let [response (post "/api/v1/company-registration-drafts" {})]
-    (is (not= 404 (:status response)))))
+(defn parse-body [response]
+  (json/read-value (:body response) (json/object-mapper {:decode-key-fn keyword})))
+
+(deftest AC-AP-002-001-create-draft-active-state
+  (let [response (post "/api/v1/company-registration-drafts" {})
+        body     (parse-body response)]
+    (is (= 201      (:status response)))
+    (is (some?      (:draft-id body)))
+    (is (= "active" (:state body)))
+    (is (= (str "/api/v1/company-registration-drafts/" (:draft-id body))
+           (get-in response [:headers "location"])))))
