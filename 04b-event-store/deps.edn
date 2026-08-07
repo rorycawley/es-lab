@@ -16,7 +16,13 @@
   org.flywaydb/flyway-database-postgresql {:mvn/version "12.6.2"}
 
   ;; Serialisation
-  com.cognitect/transit-clj               {:mvn/version "1.0.333"}
+  cheshire/cheshire                       {:mvn/version "5.13.0"}
+
+  ;; HTTP service
+  metosin/reitit-ring                     {:mvn/version "0.10.1"}
+  ring/ring-core                          {:mvn/version "1.15.5"}
+  ring/ring-jetty-adapter                 {:mvn/version "1.15.5"}
+  com.stuartsierra/component              {:mvn/version "1.2.0"}
 
   ;; Logging
   org.slf4j/slf4j-simple                  {:mvn/version "2.0.16"}}
@@ -32,4 +38,10 @@
 
   :dev
   {:extra-paths ["dev" "test"]
-   :extra-deps  {org.clojure/tools.namespace {:mvn/version "1.4.4"}}}}}
+   :extra-deps  {org.clojure/tools.namespace {:mvn/version "1.4.4"}}}
+
+  :run
+  {:main-opts ["-m" "cart.main"]}
+
+  :migrate
+  {:main-opts ["-m" "cart.migrate"]}}}

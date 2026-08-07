@@ -6,7 +6,8 @@
             [cart.port.event-store :as store]
             [cart.test-db :as db]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [next.jdbc :as jdbc])
+            [next.jdbc :as jdbc]
+            [next.jdbc.result-set :as rs])
   (:import [java.util.concurrent Callable CyclicBarrier Executors Future TimeUnit]))
 
 (use-fixtures :once db/with-postgres)
@@ -276,15 +277,67 @@
         (is (= 2 version))
         (is (true? exists?))
         (is (= :cart.event/product-item-added (:type (first events)))
-            "keyword survived the round trip through jsonb")))))
+            "event type is reconstructed from message_type")))))
 
 (deftest events-round-trip-through-postgres
-  (testing "SPEC R5.1 — transit preserves keywords and integers"
+  (testing "SPEC R5.1 — JSONB preserves the event payload shape"
     (let [es        (pg/make-store db/*datasource*)
           stream-id (db/stream-id)
           original  (event "shoes")]
       (store/append-to-stream es stream-id [original] :stream-does-not-exist)
       (is (= original (first (:events (store/read-stream es stream-id))))))))
+
+(deftest event-data-is-stored-as-queryable-jsonb
+  (testing "SPEC R5.1 — payload fields are visible to Postgres JSONB operators"
+    (let [ds        db/*datasource*
+          es        (pg/make-store ds)
+          stream-id (db/stream-id)]
+      (store/append-to-stream es stream-id [(event "shoes")] :stream-does-not-exist)
+
+      (let [row (jdbc/execute-one!
+                 ds
+                 ["SELECT message_data ->> 'cart-id' AS cart_id,
+                          message_data #>> '{product-item,product-id}' AS product_id,
+                          (message_data #>> '{product-item,unit-price}')::int AS unit_price
+                     FROM messages
+                    WHERE stream_id = ? AND stream_position = 1"
+                  stream-id]
+                 {:builder-fn rs/as-unqualified-lower-maps})]
+        (is (= {:cart_id "c1" :product_id "shoes" :unit_price 1999}
+               row))))))
+
+(deftest app-role-can-use-store-without-ddl-or-table-writes
+  (testing "migrations run separately; the runtime role can use the port but
+            cannot mutate schema or tables directly"
+    (let [ds        (db/app-datasource)
+          es        (pg/make-store ds)
+          stream-id (db/stream-id)]
+      (try
+        (let [[outcome data] (store/append-to-stream es stream-id [(event "shoes")]
+                                                     :stream-does-not-exist)]
+          (is (= :ok outcome))
+          (is (= 1 (:version data))))
+
+        (is (= 1 (:version (store/read-stream es stream-id))))
+
+        (is (thrown-with-msg?
+             Exception #"permission denied"
+             (jdbc/execute! ds ["INSERT INTO streams
+                                    (stream_id, stream_type, stream_position)
+                                  VALUES ('direct', 'shopping_cart', 1)"])))
+
+        (is (thrown-with-msg?
+             Exception #"permission denied"
+             (jdbc/execute! ds ["UPDATE streams
+                                    SET stream_position = stream_position + 1
+                                  WHERE stream_id = ?"
+                                stream-id])))
+
+        (is (thrown-with-msg?
+             Exception #"permission denied"
+             (jdbc/execute! ds ["CREATE TABLE app_role_should_not_create (id int)"])))
+        (finally
+          (.close ds))))))
 
 (deftest corrupt-stored-events-are-rejected
   (testing "SPEC R5.2 — storage corruption is loud, never handed to fold"
@@ -300,7 +353,7 @@
                                    message_type, message_data, message_metadata)
                                VALUES (?, 1, ?, 'cart.event/product-item-added',
                                        '{}'::jsonb, '{}'::jsonb)"
-                             stream-id (str (random-uuid))])
+                             stream-id (random-uuid)])
 
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Corrupt event in stream"
                             (store/read-stream es stream-id))))))
@@ -310,20 +363,30 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest event-metadata-round-trips
-  (testing "metadata reaches the column and comes back, keywords intact"
+  (testing "metadata reaches the column and comes back as JSON-compatible data"
     (let [ds        db/*datasource*
           es        (pg/make-store ds)
           stream-id (db/stream-id)
           original  (assoc (event "shoes")
                            :metadata {:now 1735689600000
-                                      :source :cart.source/web})]
+                                      :source "web"})]
       (store/append-to-stream es stream-id [original] :stream-does-not-exist)
 
       (is (= original (first (:events (store/read-stream es stream-id))))
-          "transit, not JSON — :cart.source/web must not come back a string")
+          "plain JSONB keeps JSON-compatible metadata stable")
 
       (testing "the column is genuinely populated, not the default"
-        (is (not= "{}" (db/metadata-json ds stream-id 1)))))))
+        (is (not= "{}" (db/metadata-json ds stream-id 1))))
+
+      (testing "metadata is queryable through JSONB operators"
+        (is (= "web"
+               (:source (jdbc/execute-one!
+                         ds
+                         ["SELECT message_metadata ->> 'source' AS source
+                             FROM messages
+                            WHERE stream_id = ? AND stream_position = 1"
+                          stream-id]
+                         {:builder-fn rs/as-unqualified-lower-maps}))))))))
 
 (deftest an-event-without-metadata-reads-back-without-it
   (testing "the key is absent, not {} — otherwise every round trip would drift"

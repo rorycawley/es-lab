@@ -33,6 +33,11 @@
        (println "  bb tasks       list all tasks")
        (println "  bb test:core   pure core + serialisation. fast, no Docker.")
        (println "  bb test        everything, including Postgres 18.4 via Testcontainers")
+       (println "  bb db:up       start the local Postgres container")
+       (println "  bb migrate     run Flyway in its own one-shot container")
+       (println "  bb run:memory  start the HTTP API with the in-memory store")
+       (println "  bb run         start the HTTP API with Postgres; needs JDBC_URL")
+       (println "  bb db:down     stop local containers and remove the dev volume")
        (println "")
        (println "Start here:")
        (println "  SPEC.md        what this project must do, and why")
@@ -72,6 +77,31 @@
   {:doc              "Start a REPL with dev and test paths"
    :override-builtin true
    :task (sh "clojure" "-M:dev:test" "-r")}
+
+  run
+  {:doc  "Run the HTTP API with Postgres (requires JDBC_URL, optional DB_USERNAME/DB_PASSWORD)"
+   :override-builtin true
+   :task (sh "clojure" "-M:run")}
+
+  run:memory
+  {:doc  "Run the HTTP API with the in-memory store"
+   :task (sh {:extra-env {"CART_STORE" "memory"}} "clojure" "-M:run")}
+
+  db:up
+  {:doc  "Start local Postgres for the HTTP API"
+   :task (sh "docker" "compose" "up" "-d" "postgres")}
+
+  migrate
+  {:doc  "Run Flyway in a one-shot container against local Compose Postgres"
+   :task (sh "docker" "compose" "run" "--rm" "flyway")}
+
+  migrate:jvm
+  {:doc  "Run Flyway from the JVM against JDBC_URL"
+   :task (sh "clojure" "-M:migrate")}
+
+  db:down
+  {:doc  "Stop local Compose containers and remove the dev database volume"
+   :task (sh "docker" "compose" "down" "-v")}
 
   check:lint
   {:doc  "Lint with clj-kondo"

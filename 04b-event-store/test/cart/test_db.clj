@@ -1,30 +1,93 @@
 (ns cart.test-db
   "Testcontainers fixture. Starts one Postgres 18.4 for the whole run,
-   applies migrations, and hands out a pooled datasource."
+   runs Flyway in a one-shot container, and hands out a pooled datasource."
   (:require [cart.adapter.driven.event-store-postgres :as pg]
+            [clojure.java.io :as io]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
-  (:import [org.testcontainers.containers PostgreSQLContainer]))
+  (:import [org.testcontainers.containers BindMode GenericContainer Network PostgreSQLContainer]
+           [org.testcontainers.containers.startupcheck OneShotStartupCheckStrategy]
+           [org.testcontainers.utility DockerImageName]))
 
 (def postgres-image "postgres:18.4-alpine")
+(def flyway-image "flyway/flyway:13.0.0")
 
 (def ^:dynamic *datasource* nil)
+(def ^:dynamic *jdbc-url* nil)
+
+(def app-username "cart_app")
+(def app-password "cart_app")
+
+(defn- host-path [path]
+  (.getAbsolutePath (io/file path)))
+
+(defn- event-store-jdbc-url [^PostgreSQLContainer container]
+  (format "jdbc:postgresql://%s:%d/event_store"
+          (.getHost container)
+          (.getMappedPort container (Integer/valueOf 5432))))
+
+(defn- postgres-container [network]
+  (doto (PostgreSQLContainer. (DockerImageName/parse postgres-image))
+    (.withDatabaseName "postgres")
+    (.withUsername "postgres")
+    (.withPassword "postgres")
+    (.withNetwork network)
+    (.withNetworkAliases (into-array String ["postgres"]))
+    (.withFileSystemBind (host-path "resources/docker/postgres/initdb")
+                         "/docker-entrypoint-initdb.d"
+                         BindMode/READ_ONLY)))
+
+(defn- flyway-container [network]
+  (doto (GenericContainer. (DockerImageName/parse flyway-image))
+    (.withNetwork network)
+    (.withFileSystemBind (host-path "resources/db/migration")
+                         "/flyway/migrations"
+                         BindMode/READ_ONLY)
+    (.withCommand (into-array String
+                              ["-url=jdbc:postgresql://postgres:5432/event_store"
+                               "-user=cart_migrator"
+                               "-password=cart_migrator"
+                               "-locations=filesystem:/flyway/migrations"
+                               "-connectRetries=60"
+                               "migrate"]))
+    (.withStartupCheckStrategy (OneShotStartupCheckStrategy.))))
+
+(defn- run-flyway! [network]
+  (let [container (flyway-container network)]
+    (try
+      (.start container)
+      (finally
+        (.stop container)))))
 
 (defn with-postgres
   "Use as a :once fixture."
   [f]
-  (let [container (doto (PostgreSQLContainer. postgres-image) (.start))]
+  (let [network   (Network/newNetwork)
+        container (postgres-container network)]
     (try
-      (let [ds (pg/make-datasource {:jdbc-url  (.getJdbcUrl container)
-                                    :username  (.getUsername container)
-                                    :password  (.getPassword container)
-                                    ;; the race tests need real parallelism
-                                    :pool-size 8})]
+      (.start container)
+      (run-flyway! network)
+      (let [jdbc-url (event-store-jdbc-url container)
+            ds       (pg/make-datasource
+                      {:jdbc-url  jdbc-url
+                       :username  "postgres"
+                       :password  "postgres"
+                       ;; the race tests need real parallelism
+                       :pool-size 8})]
         (try
-          (pg/migrate! ds)
-          (binding [*datasource* ds] (f))
+          (binding [*datasource* ds
+                    *jdbc-url*    jdbc-url]
+            (f))
           (finally (.close ds))))
-      (finally (.stop container)))))
+      (finally
+        (.stop container)
+        (.close network)))))
+
+(defn app-datasource []
+  (pg/make-datasource {:jdbc-url  *jdbc-url*
+                       :username  app-username
+                       :password  app-password
+                       :pool-size 2}))
 
 (defn truncate!
   "Between tests. Cheaper than restarting the container."

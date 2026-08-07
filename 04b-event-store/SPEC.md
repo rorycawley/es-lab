@@ -18,6 +18,11 @@ cart.schema                malli schemas. describes core's data from outside.
 cart.port.event-store      protocol the app depends on.
 cart.app.handle            orchestration: read -> fold -> decide -> append.
 cart.adapter.driven.*      postgres and in-memory event stores.
+cart.adapter.driving.http  Ring/Reitit JSON API.
+cart.system                component lifecycle wiring.
+cart.main                  process entrypoint.
+cart.migrate               explicit JVM migration entrypoint.
+compose.yaml               local Postgres + one-shot Flyway service.
 ```
 
 ### R1.1 — the core has no dependencies
@@ -101,9 +106,9 @@ Two tables.
 
 | column            | type   | notes                    |
 |-------------------|--------|--------------------------|
-| `stream_id`       | TEXT   | primary key              |
-| `stream_type`     | TEXT   | e.g. `shopping_cart`     |
-| `stream_position` | BIGINT | the version              |
+| `stream_id`       | TEXT   | primary key, non-empty   |
+| `stream_type`     | TEXT   | e.g. `shopping_cart`, non-empty |
+| `stream_position` | BIGINT | the version, positive    |
 
 This table exists so that concurrent writers have a single row to collide on.
 
@@ -113,15 +118,19 @@ This table exists so that concurrent writers have a single row to collide on.
 |--------------------|-------------|------------------------------------|
 | `stream_id`        | TEXT        |                                    |
 | `stream_position`  | BIGINT      | 1-based, per stream                |
-| `message_id`       | TEXT        | uuid                               |
+| `message_id`       | UUID        | unique event id                    |
 | `message_type`     | TEXT        | e.g. `cart.event/confirmed`        |
-| `message_data`     | JSONB       | transit-encoded                    |
-| `message_metadata` | JSONB       |                                    |
+| `message_data`     | JSONB       | plain JSON event payload           |
+| `message_metadata` | JSONB       | plain JSON request provenance      |
 | `global_position`  | BIGINT      | from a sequence; unused for now    |
 | `transaction_id`   | XID8        | `pg_current_xact_id()`; unused now |
 | `created`          | TIMESTAMPTZ |                                    |
 
 `PRIMARY KEY (stream_id, stream_position)`.
+
+`messages.stream_id` has a foreign key to `streams.stream_id`. `message_id` is
+globally unique. `message_data` and `message_metadata` must be JSON objects; the
+store does not accept arbitrary scalar/array JSON as an event payload.
 
 ### R3.1 — version 0 means the stream does not exist
 
@@ -131,6 +140,10 @@ Real events start at position 1.
 
 The PK on `messages` MUST exist so that a hole in the version logic surfaces as
 a database error rather than a silent double-write.
+
+The DDL MUST also reject impossible state if the SQL function is bypassed:
+non-positive positions, orphan messages, duplicate message ids, empty message
+types and non-object JSON payloads/metadata.
 
 ### R3.3 — global_position and transaction_id are provisioned now, used later
 
@@ -236,18 +249,26 @@ not read committed, so that the constraint fails loudly rather than silently.
 ### R4.10 — the function validates its own inputs
 
 `unnest` of several arrays pads the shorter ones with NULL and yields
-`max(length)` rows. Mismatched input arrays would write more events than the
-version reserved. The function MUST reject arrays of differing length rather
-than trusting its only caller.
+`max(length)` rows. It also flattens multidimensional arrays. Either behaviour
+can write a different number of events than the version reserved. The function
+MUST reject arrays that are not one-dimensional, differ in length, contain NULL
+elements, contain duplicate message ids, contain empty message types, or carry
+non-object JSON payloads/metadata. These checks happen before the stream version
+is claimed.
 
 ## 5. Serialisation
 
-### R5.1 — transit, not plain JSON
+### R5.1 — plain JSONB, not an opaque Clojure encoding
 
-Event payloads are transit-encoded into a `jsonb` column. Plain JSON silently
-turns `:cart.event/confirmed` into the string `"cart.event/confirmed"`, which
-matches no `evolve` method and is dropped by the `:default` case — wrong state,
-no error.
+Event payloads and metadata are stored as plain JSON in `jsonb` columns, using
+typed Postgres `jsonb` parameters from the adapter. This keeps stored events
+inspectable and queryable with native JSONB operators, for example
+`message_data ->> 'cart-id'`.
+
+The event type is not stored inside JSON. It lives in `message_type` as text and
+is reconstructed as a Clojure keyword on read. JSON fields themselves must be
+JSON-compatible data: maps, vectors, strings, numbers, booleans and null. Keyword
+values inside `message_data` or `message_metadata` are encoded as JSON strings.
 
 ### R5.2 — events are validated on the way out of storage
 
@@ -284,10 +305,13 @@ event type and keep an `evolve` method for the old one indefinitely.
 A test compares the dispatch values in `cart.schema/Command` against
 `(methods decide)`. This substitutes for TypeScript's exhaustiveness check.
 
-### R6.3 — events survive a round trip
+### R6.3 — events survive the storage round trip
 
-A generative test encodes and decodes malli-generated events and asserts
-equality, catching keyword, instant and numeric drift.
+A generative test encodes malli-generated events into their storage shape
+(`message_type`, `message_data`, `message_metadata`), decodes them, and asserts
+equality. This catches drift in event type reconstruction, JSON keys and numeric
+values. A separate test fixes the explicit contract that keyword values inside
+JSON become strings.
 
 ### R6.4 — concurrency is proven against real Postgres
 
@@ -314,7 +338,17 @@ proves nothing.
 The in-memory and Postgres stores are exercised by one shared set of contract
 tests, so the fast store cannot drift from the real one.
 
-### R6.6 — races are tested at two levels
+### R6.6 — Postgres tests run migrations through a Flyway Testcontainer
+
+The Postgres adapter fixture MUST start a Postgres Testcontainer and then run a
+separate one-shot Flyway Testcontainer against it before tests receive a
+datasource. Tests MUST NOT call Flyway in-process as a shortcut.
+
+The Testcontainers fixture should mirror local Compose: same Postgres major
+version, same initdb role script, same migration directory, same Flyway image,
+and the app role `cart_app` tested through the real EventStore port.
+
+### R6.7 — races are tested at two levels
 
 | level    | file                       | asserts on                          |
 |----------|----------------------------|-------------------------------------|
@@ -324,7 +358,7 @@ tests, so the fast store cannot drift from the real one.
 A failure at only one level localises the fault immediately: SQL function, or
 Clojure marshalling.
 
-### R6.7 — a crashed thread must not be counted as a clean loser
+### R6.8 — a crashed thread must not be counted as a clean loser
 
 Race results MUST be sorted into three buckets — won, lost, threw — never two.
 
@@ -337,9 +371,87 @@ Every race test MUST assert the `threw` bucket is empty.
 
 ---
 
-## 7. Environment
+## 7. HTTP API
+
+The HTTP API is a driving adapter. It MUST NOT contain cart business rules and
+MUST call `cart.app.handle/handle-command` for writes. Reads may expose the event
+stream directly or fold it through `cart.core/fold`; no projection is implied.
+
+### R7.1 — HTTP owns JSON, validation and metadata defaults
+
+The adapter parses JSON request bodies with keyword keys, converts the command
+`:type` string into a keyword, injects the route `cart-id` into command data,
+and validates the result against `cart.schema/Command` before calling the
+application service.
+
+If command metadata is omitted, the HTTP adapter stamps `{:now <epoch millis>}`.
+The core still never reads a clock.
+
+### R7.2 — route cart id and command cart id must agree
+
+`POST /carts/:cart-id/commands` writes only stream
+`shopping_cart-<cart-id>`. If the request body also supplies `data.cart-id`, it
+MUST match the route cart id.
+
+### R7.3 — expected version is explicit at the HTTP boundary
+
+`expected-version` is an optional query parameter. Accepted values:
+
+| value                   | application expected version |
+|-------------------------|------------------------------|
+| omitted                 | derive from the fresh read    |
+| `0`, `1`, ...           | pinned numeric version        |
+| `stream-does-not-exist` | create-only                   |
+| `any`                   | append without checking       |
+
+Invalid values return `400`.
+
+### R7.4 — status code mapping is stable
+
+| application result                         | HTTP status |
+|--------------------------------------------|-------------|
+| `[:ok ...]` creating a stream              | `201`       |
+| `[:ok ...]` appending existing stream      | `200`       |
+| `[:error {:reason ...}]`                   | `422`       |
+| `[:conflict {:expected ... :current ...}]` | `409`       |
+
+Malformed JSON, invalid command shape and route/body cart-id mismatch return
+`400`.
+
+### R7.5 — Component owns service lifecycle, not schema lifecycle
+
+The service system uses `com.stuartsierra/component` to own stateful resources:
+Postgres datasource, event store, and Jetty server.
+
+Starting the HTTP service MUST NOT run Flyway migrations. Schema migration is a
+separate deployment step, preferably a one-shot Flyway container or Kubernetes
+Job/init container before the app starts. The app database role MUST NOT require
+DDL privileges to serve traffic.
+
+Stopping the system MUST stop Jetty and close the datasource.
+
+### R7.6 — local Compose runs Flyway as a one-shot container
+
+`compose.yaml` provides a local Postgres service and a `flyway/flyway` service.
+The Flyway service mounts `resources/db/migration` read-only and exits after
+`migrate`.
+
+The local app role is `cart_app`. It may read streams and execute
+`append_to_stream`; it must not need table-write or DDL privileges.
+
+### R7.7 — HTTP behaviour is tested at the adapter boundary
+
+Handler tests MUST cover health, command success, stream reads, folded cart
+reads, business rejection, optimistic conflict, `:any`, malformed JSON, invalid
+expected version, invalid command shape and route/body cart-id mismatch.
+
+---
+
+## 8. Environment
 
 - Postgres **18.4**, started per test run by Testcontainers.
 - Schema applied by Flyway from `resources/db/migration`.
+- Local development may use Compose: `postgres` stays up, `flyway` is a
+  one-shot migration container, and `cart_app` is the app role.
 - Tooling pinned by `mise.toml`; tasks in `bb.edn`.
 - Docker must be running for adapter tests. Core tests do not need it.

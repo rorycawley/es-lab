@@ -1,20 +1,24 @@
 -- Event store schema. See SPEC.md sections 3 and 4.
 
-CREATE SEQUENCE IF NOT EXISTS global_message_position;
+CREATE SEQUENCE global_message_position;
 
 -- One row per stream. Exists so concurrent writers have a single row to
 -- collide on; stream_position is the version. (R3.1: 0 means "no stream")
-CREATE TABLE IF NOT EXISTS streams (
+CREATE TABLE streams (
     stream_id       TEXT   NOT NULL PRIMARY KEY,
     stream_type     TEXT   NOT NULL,
-    stream_position BIGINT NOT NULL
+    stream_position BIGINT NOT NULL,
+
+    CONSTRAINT streams_stream_id_non_empty CHECK (stream_id <> ''),
+    CONSTRAINT streams_stream_type_non_empty CHECK (stream_type <> ''),
+    CONSTRAINT streams_stream_position_positive CHECK (stream_position > 0)
 );
 
 -- One row per event. Append-only.
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE messages (
     stream_id        TEXT        NOT NULL,
     stream_position  BIGINT      NOT NULL,
-    message_id       TEXT        NOT NULL,
+    message_id       UUID        NOT NULL,
     message_type     TEXT        NOT NULL,
     message_data     JSONB       NOT NULL,
     message_metadata JSONB       NOT NULL DEFAULT '{}',
@@ -30,7 +34,13 @@ CREATE TABLE IF NOT EXISTS messages (
     -- R3.2: backstop. If the version logic ever has a hole this turns a silent
     -- double-write into a loud error. Column order also serves the read query
     -- (WHERE stream_id = ? ORDER BY stream_position).
-    PRIMARY KEY (stream_id, stream_position)
+    CONSTRAINT messages_pkey PRIMARY KEY (stream_id, stream_position),
+    CONSTRAINT messages_stream_fk FOREIGN KEY (stream_id) REFERENCES streams (stream_id),
+    CONSTRAINT messages_message_id_unique UNIQUE (message_id),
+    CONSTRAINT messages_stream_position_positive CHECK (stream_position > 0),
+    CONSTRAINT messages_message_type_non_empty CHECK (message_type <> ''),
+    CONSTRAINT messages_message_data_object CHECK (jsonb_typeof(message_data) = 'object'),
+    CONSTRAINT messages_message_metadata_object CHECK (jsonb_typeof(message_metadata) = 'object')
 );
 
 
@@ -53,13 +63,15 @@ CREATE OR REPLACE FUNCTION append_to_stream(
     p_stream_type   text,
     p_expected      bigint,
     p_require_new   boolean,
-    p_message_ids   text[],
+    p_message_ids   uuid[],
     p_message_types text[],
     p_message_data  jsonb[],
     p_message_meta  jsonb[]
 )
 RETURNS TABLE (success boolean, next_position bigint, current_position bigint)
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_count    int;
@@ -76,7 +88,28 @@ BEGIN
             USING HINT = 'At repeatable read or serializable a losing UPDATE raises 40001 instead of matching zero rows, so conflicts would abort the transaction.';
     END IF;
 
-    v_count := COALESCE(array_length(p_message_data, 1), 0);
+    IF p_stream_id IS NULL OR p_stream_id = '' THEN
+        RAISE EXCEPTION 'append_to_stream requires a non-empty stream id';
+    END IF;
+
+    IF p_stream_type IS NULL OR p_stream_type = '' THEN
+        RAISE EXCEPTION 'append_to_stream requires a non-empty stream type';
+    END IF;
+
+    IF p_require_new IS NULL THEN
+        RAISE EXCEPTION 'append_to_stream requires p_require_new to be TRUE or FALSE';
+    END IF;
+
+    IF p_require_new AND p_expected IS NOT NULL THEN
+        RAISE EXCEPTION 'append_to_stream: p_expected must be NULL when p_require_new is TRUE';
+    END IF;
+
+    IF p_expected IS NOT NULL AND p_expected < 0 THEN
+        RAISE EXCEPTION 'append_to_stream: expected version must be >= 0, got %',
+            p_expected;
+    END IF;
+
+    v_count := COALESCE(cardinality(p_message_data), 0);
 
     -- R4.7: the caller skips the write when a decision produces nothing, so
     -- reaching here with no messages is a bug worth surfacing.
@@ -84,16 +117,47 @@ BEGIN
         RAISE EXCEPTION 'append_to_stream called with no messages';
     END IF;
 
-    -- R4.10: unnest() of several arrays pads the short ones with NULL and
-    -- yields max(length) rows, which would write more events than the version
-    -- reserved. Never rely on the only caller being correct.
-    IF COALESCE(array_length(p_message_ids,   1), 0) <> v_count
-    OR COALESCE(array_length(p_message_types, 1), 0) <> v_count
-    OR COALESCE(array_length(p_message_meta,  1), 0) <> v_count THEN
+    -- R4.10: unnest() flattens multidimensional arrays and pads shorter arrays
+    -- with NULL, either of which can write a different number of rows than the
+    -- version range reserved. Never rely on the only caller being correct.
+    IF array_ndims(p_message_ids)   IS DISTINCT FROM 1
+    OR array_ndims(p_message_types) IS DISTINCT FROM 1
+    OR array_ndims(p_message_data)  IS DISTINCT FROM 1
+    OR array_ndims(p_message_meta)  IS DISTINCT FROM 1 THEN
+        RAISE EXCEPTION 'append_to_stream: message arrays must be one-dimensional';
+    END IF;
+
+    IF COALESCE(cardinality(p_message_ids),   0) <> v_count
+    OR COALESCE(cardinality(p_message_types), 0) <> v_count
+    OR COALESCE(cardinality(p_message_meta),  0) <> v_count THEN
         RAISE EXCEPTION
             'append_to_stream: message arrays differ in length (ids %, types %, data %, meta %)',
-            array_length(p_message_ids, 1), array_length(p_message_types, 1),
-            v_count, array_length(p_message_meta, 1);
+            cardinality(p_message_ids), cardinality(p_message_types),
+            v_count, cardinality(p_message_meta);
+    END IF;
+
+    IF array_position(p_message_ids,   NULL::uuid)  IS NOT NULL
+    OR array_position(p_message_types, NULL::text)  IS NOT NULL
+    OR array_position(p_message_data,  NULL::jsonb) IS NOT NULL
+    OR array_position(p_message_meta,  NULL::jsonb) IS NOT NULL THEN
+        RAISE EXCEPTION 'append_to_stream: message arrays must not contain NULL elements';
+    END IF;
+
+    IF array_position(p_message_types, '') IS NOT NULL THEN
+        RAISE EXCEPTION 'append_to_stream: message types must be non-empty';
+    END IF;
+
+    IF (SELECT count(*) <> count(DISTINCT id)
+          FROM unnest(p_message_ids) AS ids(id)) THEN
+        RAISE EXCEPTION 'append_to_stream: message ids must be unique within an append';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM unnest(p_message_data) AS data(value)
+                WHERE jsonb_typeof(data.value) <> 'object')
+    OR EXISTS (SELECT 1 FROM unnest(p_message_meta) AS meta(value)
+                WHERE jsonb_typeof(meta.value) <> 'object') THEN
+        RAISE EXCEPTION
+            'append_to_stream: message data and metadata must be JSON objects';
     END IF;
 
     SELECT COALESCE((SELECT s.stream_position FROM streams s
@@ -177,5 +241,24 @@ BEGIN
       FROM numbered n;
 
     RETURN QUERY SELECT TRUE, v_next, v_current;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION append_to_stream(
+    text, text, bigint, boolean, uuid[], text[], jsonb[], jsonb[]
+) FROM PUBLIC;
+
+-- Local compose creates cart_app before Flyway runs. Production deployments can
+-- grant equivalent privileges to their own app role after running migrations.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cart_app') THEN
+        GRANT USAGE ON SCHEMA public TO cart_app;
+        GRANT SELECT ON streams TO cart_app;
+        GRANT SELECT ON messages TO cart_app;
+        GRANT EXECUTE ON FUNCTION append_to_stream(
+            text, text, bigint, boolean, uuid[], text[], jsonb[], jsonb[]
+        ) TO cart_app;
+    END IF;
 END;
 $$;

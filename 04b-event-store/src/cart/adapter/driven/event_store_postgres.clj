@@ -3,32 +3,37 @@
    append_to_stream (see resources/db/migration/V1__event_store.sql)."
   (:require [cart.port.event-store :as port]
             [cart.schema :as schema]
-            [cognitect.transit :as transit]
+            [cheshire.core :as json]
             [malli.core :as m]
             [malli.error :as me]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
   (:import [com.zaxxer.hikari HikariConfig HikariDataSource]
-           [java.io ByteArrayInputStream ByteArrayOutputStream]
            [java.sql Connection]
            [java.util UUID]
-           [org.flywaydb.core Flyway]))
+           [org.flywaydb.core Flyway]
+           [org.postgresql.util PGobject]))
 
 ;; ---------------------------------------------------------------------------
 ;; Serialisation (SPEC R5.1)
 ;; ---------------------------------------------------------------------------
 ;;
-;; Transit, not plain JSON. Plain JSON turns :cart.event/confirmed into the
-;; string "cart.event/confirmed", which matches no evolve method and gets
-;; silently dropped by the :default case. Wrong state, no error.
+;; Plain JSONB, not an opaque Clojure-specific encoding. Event type lives in
+;; message_type; message_data and message_metadata stay queryable with native
+;; Postgres JSONB operators.
 
-(defn- transit-write ^String [x]
-  (let [out (ByteArrayOutputStream.)]
-    (transit/write (transit/writer out :json) x)
-    (.toString out "UTF-8")))
+(defn- ->jsonb ^PGobject [x]
+  (doto (PGobject.)
+    (.setType "jsonb")
+    (.setValue (json/generate-string x))))
 
-(defn- transit-read [^String s]
-  (transit/read (transit/reader (ByteArrayInputStream. (.getBytes s "UTF-8")) :json)))
+(defn- pg-value ^String [v]
+  (if (instance? PGobject v)
+    (.getValue ^PGobject v)
+    (str v)))
+
+(defn- json-read [v]
+  (json/parse-string (pg-value v) true))
 
 (defn- kw->str [k] (subs (str k) 1))
 
@@ -50,12 +55,12 @@
    throws — computing state from history we cannot interpret is worse than
    stopping.
 
-   :metadata is omitted when empty rather than returned as {}, so an event
+  :metadata is omitted when empty rather than returned as {}, so an event
    written without metadata reads back identical to what went in."
   [{:keys [message_type message_data message_metadata]}]
-  (let [metadata (transit-read (str message_metadata))
+  (let [metadata (json-read message_metadata)
         event    (cond-> {:type (keyword message_type)
-                          :data (transit-read (str message_data))}
+                          :data (json-read message_data)}
                    (seq metadata) (assoc :metadata metadata))]
     (if-let [errs (m/explain schema/Event event)]
       (throw (ex-info "Corrupt event in stream"
@@ -78,10 +83,16 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private append-sql
-  "SELECT * FROM append_to_stream(?, ?, ?, ?, ?::text[], ?::text[], ?::jsonb[], ?::jsonb[])")
+  "SELECT * FROM append_to_stream(?, ?, ?, ?, ?, ?, ?, ?)")
 
 (defn- ->text-array [^Connection conn coll]
   (.createArrayOf conn "text" (into-array String coll)))
+
+(defn- ->uuid-array [^Connection conn coll]
+  (.createArrayOf conn "uuid" (into-array UUID coll)))
+
+(defn- ->jsonb-array [^Connection conn coll]
+  (.createArrayOf conn "jsonb" (into-array PGobject (map ->jsonb coll))))
 
 (defn- stream-type
   "Convention: shopping_cart-<uuid>. The part before the first dash."
@@ -114,12 +125,10 @@
                 ;; SPEC R4.4 — three modes, two parameters
                 expected
                 require-new?
-                (->text-array conn (repeatedly n #(str (UUID/randomUUID))))
+                (->uuid-array conn (repeatedly n #(UUID/randomUUID)))
                 (->text-array conn (map (comp kw->str :type) events))
-                (->text-array conn (map (comp transit-write :data) events))
-                ;; Transit like :data, not the literal "{}" — metadata holds
-                ;; keywords and instants too, and JSON would flatten them.
-                (->text-array conn (map #(transit-write (:metadata % {})) events))]
+                (->jsonb-array conn (map :data events))
+                (->jsonb-array conn (map #(:metadata % {}) events))]
                {:builder-fn rs/as-unqualified-lower-maps})]
       (if (:success row)
         [:ok {:version             (:next_position row)

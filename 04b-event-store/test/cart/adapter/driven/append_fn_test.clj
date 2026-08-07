@@ -22,10 +22,13 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private append-sql
-  "SELECT * FROM append_to_stream(?, ?, ?, ?, ?::text[], ?::text[], ?::jsonb[], ?::jsonb[])")
+  "SELECT * FROM append_to_stream(?, ?, ?, ?, ?::uuid[], ?::text[], ?::jsonb[], ?::jsonb[])")
 
 (defn- ->text-array [^Connection conn coll]
   (.createArrayOf conn "text" (into-array String coll)))
+
+(defn- ->uuid-array [^Connection conn coll]
+  (.createArrayOf conn "uuid" (into-array UUID coll)))
 
 (defn append-on!
   "Calls the SQL function on a connection or transaction the caller already
@@ -36,7 +39,7 @@
      conn
      [append-sql
       stream-id "shopping_cart" expected require-new
-      (->text-array conn (repeatedly n #(str (UUID/randomUUID))))
+      (->uuid-array conn (repeatedly n #(UUID/randomUUID)))
       (->text-array conn (map :type events))
       (->text-array conn (map :data events))
       (->text-array conn (repeat n "{}"))]
@@ -303,7 +306,7 @@
              (jdbc/execute-one!
               tx
               [append-sql stream-id "shopping_cart" nil true
-               (->text-array tx [(str (UUID/randomUUID))])
+               (->uuid-array tx [(UUID/randomUUID)])
                (->text-array tx ["created"])
                (->text-array tx ["{}"])
                (->text-array tx ["{}"])]
@@ -324,12 +327,146 @@
              (jdbc/execute-one!
               conn
               [append-sql stream-id "shopping_cart" nil true
-               (->text-array conn [(str (UUID/randomUUID))])   ; 1 id
+               (->uuid-array conn [(UUID/randomUUID)])          ; 1 id
                (->text-array conn ["a" "b"])                   ; 2 types
                (->text-array conn ["{}" "{}"])                 ; 2 data
                (->text-array conn ["{}" "{}"])]                ; 2 meta
               {:builder-fn rs/as-unqualified-lower-maps}))))
       (is (= 0 (count-rows ds "messages" stream-id))))))
+
+(deftest rejects-invalid-mode-arguments
+  (testing "the two-parameter expected-version encoding has no ambiguous modes"
+    (let [ds db/*datasource*]
+      (doseq [[stream-id expected require-new pattern]
+              [[(db/stream-id) nil nil #"p_require_new"]
+               [(db/stream-id) -1 false #"expected version"]
+               [(db/stream-id) 0 true #"p_expected must be NULL"]]]
+        (is (thrown-with-msg?
+             Exception pattern
+             (append! ds stream-id expected require-new [{:type "a" :data "{}"}])))
+        (is (= 0 (count-rows ds "streams" stream-id)))
+        (is (= 0 (count-rows ds "messages" stream-id)))))))
+
+(deftest rejects-multidimensional-arrays
+  (testing "unnest flattens multidimensional arrays, so they must be rejected"
+    (let [ds        db/*datasource*
+          stream-id (db/stream-id)]
+      (is (thrown-with-msg?
+           Exception #"one-dimensional"
+           (jdbc/execute-one!
+            ds
+            ["SELECT * FROM append_to_stream(
+                  ?, 'shopping_cart', NULL, FALSE,
+                  ARRAY[[?::uuid, ?::uuid]],
+                  ARRAY[['a', 'b']],
+                  ARRAY[['{}'::jsonb, '{}'::jsonb]],
+                  ARRAY[['{}'::jsonb, '{}'::jsonb]])"
+             stream-id (str (UUID/randomUUID)) (str (UUID/randomUUID))]
+            {:builder-fn rs/as-unqualified-lower-maps})))
+      (is (= 0 (count-rows ds "streams" stream-id)))
+      (is (= 0 (count-rows ds "messages" stream-id))))))
+
+(deftest rejects-null-array-elements
+  (testing "same-length arrays with NULL elements must not claim a version first"
+    (let [ds        db/*datasource*
+          stream-id (db/stream-id)]
+      (with-open [conn (jdbc/get-connection ds)]
+        (is (thrown-with-msg?
+             Exception #"NULL elements"
+             (jdbc/execute-one!
+              conn
+              [append-sql stream-id "shopping_cart" nil false
+               (->uuid-array conn [(UUID/randomUUID)])
+               (->text-array conn ["a"])
+               (->text-array conn [nil])
+               (->text-array conn ["{}"])]
+              {:builder-fn rs/as-unqualified-lower-maps}))))
+      (is (= 0 (count-rows ds "streams" stream-id)))
+      (is (= 0 (count-rows ds "messages" stream-id))))))
+
+(deftest rejects-duplicate-message-ids-within-an-append
+  (testing "the unique table constraint is a backstop; the function rejects first"
+    (let [ds        db/*datasource*
+          stream-id (db/stream-id)
+          message-id (UUID/randomUUID)]
+      (with-open [conn (jdbc/get-connection ds)]
+        (is (thrown-with-msg?
+             Exception #"message ids must be unique"
+             (jdbc/execute-one!
+              conn
+              [append-sql stream-id "shopping_cart" nil false
+               (->uuid-array conn [message-id message-id])
+               (->text-array conn ["a" "b"])
+               (->text-array conn ["{}" "{}"])
+               (->text-array conn ["{}" "{}"])]
+              {:builder-fn rs/as-unqualified-lower-maps}))))
+      (is (= 0 (count-rows ds "streams" stream-id)))
+      (is (= 0 (count-rows ds "messages" stream-id))))))
+
+(deftest rejects-non-object-jsonb
+  (testing "event data and metadata are JSON objects, not arbitrary JSON values"
+    (let [ds        db/*datasource*
+          stream-id (db/stream-id)]
+      (is (thrown-with-msg?
+           Exception #"JSON objects"
+           (append! ds stream-id nil false [{:type "a" :data "[]"}])))
+      (is (= 0 (count-rows ds "streams" stream-id)))
+      (is (= 0 (count-rows ds "messages" stream-id))))))
+
+(deftest ddl-backstops-reject-impossible-state
+  (testing "constraints make bypassing append_to_stream fail loudly"
+    (let [ds         db/*datasource*
+          stream-id  (db/stream-id)
+          message-id (UUID/randomUUID)]
+      (is (thrown-with-msg?
+           Exception #"streams_stream_position_positive"
+           (jdbc/execute-one! ds ["INSERT INTO streams
+                                      (stream_id, stream_type, stream_position)
+                                   VALUES (?, 'shopping_cart', 0)"
+                                  stream-id])))
+
+      (is (thrown-with-msg?
+           Exception #"messages_stream_fk"
+           (jdbc/execute-one! ds ["INSERT INTO messages
+                                      (stream_id, stream_position, message_id,
+                                       message_type, message_data, message_metadata)
+                                   VALUES (?, 1, ?, 'a', '{}'::jsonb, '{}'::jsonb)"
+                                  stream-id (UUID/randomUUID)])))
+
+      (jdbc/execute-one! ds ["INSERT INTO streams
+                                 (stream_id, stream_type, stream_position)
+                              VALUES (?, 'shopping_cart', 1)"
+                             stream-id])
+
+      (is (thrown-with-msg?
+           Exception #"messages_message_data_object"
+           (jdbc/execute-one! ds ["INSERT INTO messages
+                                      (stream_id, stream_position, message_id,
+                                       message_type, message_data, message_metadata)
+                                   VALUES (?, 1, ?, 'a', '[]'::jsonb, '{}'::jsonb)"
+                                  stream-id (UUID/randomUUID)])))
+
+      (is (thrown-with-msg?
+           Exception #"messages_message_metadata_object"
+           (jdbc/execute-one! ds ["INSERT INTO messages
+                                      (stream_id, stream_position, message_id,
+                                       message_type, message_data, message_metadata)
+                                   VALUES (?, 1, ?, 'a', '{}'::jsonb, '[]'::jsonb)"
+                                  stream-id (UUID/randomUUID)])))
+
+      (jdbc/execute-one! ds ["INSERT INTO messages
+                                 (stream_id, stream_position, message_id,
+                                  message_type, message_data, message_metadata)
+                              VALUES (?, 1, ?, 'a', '{}'::jsonb, '{}'::jsonb)"
+                             stream-id message-id])
+
+      (is (thrown-with-msg?
+           Exception #"messages_message_id_unique"
+           (jdbc/execute-one! ds ["INSERT INTO messages
+                                      (stream_id, stream_position, message_id,
+                                       message_type, message_data, message_metadata)
+                                   VALUES (?, 2, ?, 'b', '{}'::jsonb, '{}'::jsonb)"
+                                  stream-id message-id]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; R4.4 — :any must never conflict, even under contention

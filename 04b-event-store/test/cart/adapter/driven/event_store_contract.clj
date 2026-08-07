@@ -78,7 +78,7 @@
   (testing "event metadata survives the round trip, and its absence does too"
     (let [es (new-store), id (new-id)
           with-md (assoc (event "a") :metadata {:now 1735689600000
-                                                :source :cart.source/web})
+                                                :source "web"})
           without (event "b")]
       (store/append-to-stream es id [with-md without] :stream-does-not-exist)
       (let [[e1 e2] (:events (store/read-stream es id))]
