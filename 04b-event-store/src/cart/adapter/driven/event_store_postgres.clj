@@ -11,7 +11,6 @@
   (:import [com.zaxxer.hikari HikariConfig HikariDataSource]
            [java.sql Connection]
            [java.util UUID]
-           [org.flywaydb.core Flyway]
            [org.postgresql.util PGobject]))
 
 ;; ---------------------------------------------------------------------------
@@ -160,15 +159,6 @@
               (.setPassword password)
               (.setMaximumPoolSize pool-size))]
     (HikariDataSource. cfg)))
-
-(defn migrate!
-  "Applies resources/db/migration via Flyway."
-  [datasource]
-  (-> (Flyway/configure)
-      (.dataSource datasource)
-      (.locations (into-array String ["classpath:db/migration"]))
-      (.load)
-      (.migrate)))
 
 (defn make-store [datasource]
   (->PostgresEventStore datasource))

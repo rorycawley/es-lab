@@ -4,6 +4,8 @@ A small Clojure project demonstrating **optimistic concurrency control** for an
 event store on Postgres.
 
 Read [SPEC.md](SPEC.md) first — it says what this has to do and why.
+Read [docs/TEST_STRATEGY.md](docs/TEST_STRATEGY.md) for the test layers and
+local/CI gates.
 
 ## The one idea
 
@@ -29,7 +31,10 @@ Three things make that work, and everything in `src` is one of them:
 ```bash
 bb install     # pinned tools via mise
 bb test:core   # pure tests, ~1s, no Docker
+bb test:perf   # HTTP performance smoke tests, no Docker
 bb test        # everything, starts Postgres 18.4 in a container
+bb up          # start Postgres, migrate, run the HTTP API
+bb down        # stop Compose, remove the DB volume, clean artefacts
 bb run:memory  # start the HTTP API locally without Postgres
 ```
 
@@ -37,10 +42,17 @@ bb run:memory  # start the HTTP API locally without Postgres
 
 ## HTTP API
 
-The service is a driving adapter over the same `cart.app.handle` application
-service used by tests. The HTTP layer parses JSON, validates command shape,
-stamps `:metadata {:now ...}` when the caller omits metadata, and maps optimistic
-write conflicts to HTTP responses.
+The HTTP contract is design-first. The checked-in OpenAPI document at
+`resources/openapi/cart-api.openapi.json` is the source of truth, and the
+service serves it unchanged from `/openapi.json`.
+
+The service is a driving adapter over command and query use-case ports. Commands
+are task-based endpoints; clients do not post a generic command envelope. Queries
+are POST endpoints, matching CQRS query handlers instead of resource-shaped GETs.
+The HTTP layer parses JSON, validates task shape, stamps `:metadata {:now ...}`
+when the caller omits metadata, and maps application results to HTTP responses.
+It does not call `cart.core`, derive event-stream names, read the event store, or
+fold events itself.
 
 Run it with the in-memory store:
 
@@ -48,66 +60,81 @@ Run it with the in-memory store:
 bb run:memory
 ```
 
-Run it with Postgres. Flyway is deliberately a separate step; the web service
-does not run DDL during startup.
+Run it with Postgres. This starts Compose Postgres, runs Flyway as a one-shot
+container, then runs the API in the foreground as `cart_app`.
 
 ```bash
-bb db:up
-bb migrate
-
-JDBC_URL=jdbc:postgresql://localhost:5432/event_store DB_USERNAME=cart_app DB_PASSWORD=cart_app bb run
+bb up
 ```
+
+The lower-level tasks are still available when you need them: `bb db:up`,
+`bb migrate`, and `bb run`.
 
 Useful endpoints:
 
 ```bash
 curl -sS http://localhost:8080/health
+curl -sS http://localhost:8080/openapi.json
 
-curl -sS -X POST http://localhost:8080/carts/c1/commands \
+curl -sS -X POST http://localhost:8080/commands/add-product-item \
   -H 'content-type: application/json' \
-  -d '{"type":"cart.command/add-product-item","data":{"product-item":{"product-id":"sku-1","quantity":2,"unit-price":1299}}}'
+  -d '{"cart-id":"c1","product-item":{"product-id":"sku-1","quantity":2,"unit-price":1299}}'
 
-curl -sS http://localhost:8080/carts/c1
-curl -sS http://localhost:8080/carts/c1/events
+curl -sS -X POST http://localhost:8080/queries/get-cart \
+  -H 'content-type: application/json' \
+  -d '{"cart-id":"c1"}'
+
+curl -sS -X POST http://localhost:8080/queries/get-cart-events \
+  -H 'content-type: application/json' \
+  -d '{"cart-id":"c1"}'
 ```
 
-Pin an optimistic version with `?expected-version=0`. The other accepted values
-are `any` and `stream-does-not-exist`. If omitted, the application service reads
-the stream and derives the expected version it just observed.
+Pin an optimistic version with the optional body field `"expected-version": 0`.
+The other accepted values are `"any"` and `"stream-does-not-exist"`. If omitted,
+the application service reads the stream and derives the expected version it just
+observed.
 
 When you are done with the local Postgres container:
 
 ```bash
-bb db:down
+bb down
 ```
 
 ## Layout
 
 ```
 SPEC.md                                requirements
+docs/TEST_STRATEGY.md                  test layers, gates, CI policy
 resources/db/migration/V1__*.sql       tables + the append_to_stream function
+resources/openapi/cart-api.openapi.json contract-first HTTP API
 
 src/cart/core.clj                      PURE. no requires at all.
 src/cart/schema.clj                    malli schemas. describes core from outside.
 src/cart/port/event_store.clj          the protocol
+src/cart/port/cart_command.clj         command-side protocol
+src/cart/port/cart_query.clj           query-side protocol
+src/cart/app/command.clj               cart command use cases
 src/cart/app/handle.clj                read -> fold -> decide -> append
+src/cart/app/query.clj                 CQRS query handlers
+src/cart/app/stream.clj                stream id naming
 src/cart/adapter/driven/
     event_store_postgres.clj           real store
     event_store_memory.clj             fast store for tests
 src/cart/adapter/driving/http.clj      Ring/Reitit JSON API
 src/cart/system.clj                    component system: store + Jetty
 src/cart/main.clj                      env config + process entrypoint
-src/cart/migrate.clj                   explicit JVM migration entrypoint
 compose.yaml                           local Postgres + one-shot Flyway service
 
 test/cart/core_test.clj                pure, no fixtures
 test/cart/serialisation_test.clj       generative JSONB storage round-trip
+test/cart/app/command_test.clj         command use-case boundary tests
+test/cart/app/query_test.clj           CQRS query handler tests
 test/cart/adapter/driven/
     event_store_contract.clj           shared behaviours both stores must satisfy
     append_fn_test.clj                 races at the SQL function level
     event_store_postgres_test.clj      races through the EventStore protocol
 test/cart/adapter/driving/
-    http_test.clj                      HTTP statuses, validation, read endpoints
+    http_test.clj                      HTTP contract, statuses, validation
     system_test.clj                    component lifecycle smoke test
 ```
 

@@ -3,6 +3,8 @@
   (:require [cart.adapter.driven.event-store-memory :as memory]
             [cart.adapter.driven.event-store-postgres :as postgres]
             [cart.adapter.driving.http :as http]
+            [cart.app.command :as app-command]
+            [cart.app.query :as app-query]
             [com.stuartsierra.component :as component]
             [ring.adapter.jetty :as jetty]))
 
@@ -41,14 +43,38 @@
   (stop [this]
     (assoc this :store nil)))
 
-(defrecord HttpServer [config event-store retry clock server handler]
+(defrecord CartCommand [event-store retry handler]
+  component/Lifecycle
+
+  (start [this]
+    (if handler
+      this
+      (assoc this :handler (app-command/make-event-store-command
+                            (:store event-store)
+                            retry))))
+
+  (stop [this]
+    (assoc this :handler nil)))
+
+(defrecord CartQuery [event-store query]
+  component/Lifecycle
+
+  (start [this]
+    (if query
+      this
+      (assoc this :query (app-query/make-event-store-query (:store event-store)))))
+
+  (stop [this]
+    (assoc this :query nil)))
+
+(defrecord HttpServer [config cart-command cart-query clock server handler]
   component/Lifecycle
 
   (start [this]
     (if server
       this
-      (let [handler (http/handler (cond-> {:event-store (:store event-store)}
-                                    retry (assoc :retry retry)
+      (let [handler (http/handler (cond-> {:cart-command (:handler cart-command)
+                                           :cart-query   (:query cart-query)}
                                     clock (assoc :clock clock)))
             server  (jetty/run-jetty handler {:port  (:port config 8080)
                                               :join? false})]
@@ -66,7 +92,7 @@
    {:store :postgres|:memory
     :db    {:jdbc-url ... :username ... :password ... :pool-size ...}
     :http  {:port 8080}
-    :retry optional cart.app.handle retry config
+    :retry optional command retry config
     :clock optional zero-arg fn returning epoch millis}
 
    Migrations are deliberately not part of service startup. Run Flyway as a
@@ -80,17 +106,23 @@
      :database (map->Database {:config db})
      :event-store (component/using (map->PostgresEventStore {})
                                    [:database])
+     :cart-command (component/using (map->CartCommand {:retry retry})
+                                    [:event-store])
+     :cart-query (component/using (map->CartQuery {})
+                                  [:event-store])
      :http-server (component/using (map->HttpServer {:config http
-                                                     :retry retry
                                                      :clock clock})
-                                   [:event-store]))
+                                   [:cart-command :cart-query]))
 
     :memory
     (component/system-map
      :event-store (map->MemoryEventStore {})
+     :cart-command (component/using (map->CartCommand {:retry retry})
+                                    [:event-store])
+     :cart-query (component/using (map->CartQuery {})
+                                  [:event-store])
      :http-server (component/using (map->HttpServer {:config http
-                                                     :retry retry
                                                      :clock clock})
-                                   [:event-store]))
+                                   [:cart-command :cart-query]))
 
     (throw (ex-info "Unknown store type" {:store store}))))

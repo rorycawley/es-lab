@@ -1,0 +1,587 @@
+{
+  "openapi": "3.1.0",
+  "x-contract-first": true,
+  "info": {
+    "title": "Event-sourced Shopping Cart API",
+    "version": "0.1.0",
+    "description": "Contract-first HTTP API for task-based cart commands and CQRS query handlers."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Operations"
+    },
+    {
+      "name": "Commands"
+    },
+    {
+      "name": "Queries"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Operations"],
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "The service is accepting traffic.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": ["Operations"],
+        "operationId": "openApiContract",
+        "responses": {
+          "200": {
+            "description": "The checked-in OpenAPI contract served verbatim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/commands/add-product-item": {
+      "post": {
+        "tags": ["Commands"],
+        "operationId": "addProductItem",
+        "summary": "Add a product item to a cart.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddProductItemTask"
+              },
+              "examples": {
+                "addItem": {
+                  "value": {
+                    "cart-id": "c1",
+                    "product-item": {
+                      "product-id": "sku-1",
+                      "quantity": 2,
+                      "unit-price": 1299
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/CommandAcceptedCreated"
+          },
+          "200": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/CommandRejected"
+          }
+        }
+      }
+    },
+    "/commands/remove-product-item": {
+      "post": {
+        "tags": ["Commands"],
+        "operationId": "removeProductItem",
+        "summary": "Remove a product item from a cart.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveProductItemTask"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/CommandRejected"
+          }
+        }
+      }
+    },
+    "/commands/confirm-cart": {
+      "post": {
+        "tags": ["Commands"],
+        "operationId": "confirmCart",
+        "summary": "Confirm a cart.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartOnlyTask"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/CommandRejected"
+          }
+        }
+      }
+    },
+    "/commands/cancel-cart": {
+      "post": {
+        "tags": ["Commands"],
+        "operationId": "cancelCart",
+        "summary": "Cancel a cart.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartOnlyTask"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/CommandRejected"
+          }
+        }
+      }
+    },
+    "/queries/get-cart": {
+      "post": {
+        "tags": ["Queries"],
+        "operationId": "getCart",
+        "summary": "Read the current cart summary.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartQuery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current cart summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/queries/get-cart-events": {
+      "post": {
+        "tags": ["Queries"],
+        "operationId": "getCartEvents",
+        "summary": "Read the cart event stream.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartQuery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cart event stream view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartEvents"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "CommandAcceptedCreated": {
+        "description": "Command accepted and a new event stream was created.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CommandAccepted"
+            }
+          }
+        }
+      },
+      "CommandAccepted": {
+        "description": "Command accepted.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CommandAccepted"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "The request could not be parsed or validated.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "VersionConflict": {
+        "description": "The expected stream version did not match.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/VersionConflict"
+            }
+          }
+        }
+      },
+      "CommandRejected": {
+        "description": "The command violated a business rule.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CommandRejected"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "required": ["status"],
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "const": "ok"
+          }
+        }
+      },
+      "CartId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "Money": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "Quantity": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "Timestamp": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "Metadata": {
+        "type": "object",
+        "required": ["now"],
+        "additionalProperties": false,
+        "properties": {
+          "now": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        }
+      },
+      "ExpectedVersion": {
+        "oneOf": [
+          {
+            "type": "integer",
+            "minimum": 0
+          },
+          {
+            "type": "string",
+            "enum": ["stream-does-not-exist", "any"]
+          }
+        ]
+      },
+      "PricedProductItem": {
+        "type": "object",
+        "required": ["product-id", "quantity", "unit-price"],
+        "additionalProperties": false,
+        "properties": {
+          "product-id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/Quantity"
+          },
+          "unit-price": {
+            "$ref": "#/components/schemas/Money"
+          }
+        }
+      },
+      "TaskBase": {
+        "type": "object",
+        "required": ["cart-id"],
+        "additionalProperties": false,
+        "properties": {
+          "cart-id": {
+            "$ref": "#/components/schemas/CartId"
+          },
+          "expected-version": {
+            "$ref": "#/components/schemas/ExpectedVersion"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          }
+        }
+      },
+      "AddProductItemTask": {
+        "type": "object",
+        "required": ["cart-id", "product-item"],
+        "additionalProperties": false,
+        "properties": {
+          "cart-id": {
+            "$ref": "#/components/schemas/CartId"
+          },
+          "product-item": {
+            "$ref": "#/components/schemas/PricedProductItem"
+          },
+          "expected-version": {
+            "$ref": "#/components/schemas/ExpectedVersion"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          }
+        }
+      },
+      "RemoveProductItemTask": {
+        "type": "object",
+        "required": ["cart-id", "product-item"],
+        "additionalProperties": false,
+        "properties": {
+          "cart-id": {
+            "$ref": "#/components/schemas/CartId"
+          },
+          "product-item": {
+            "$ref": "#/components/schemas/PricedProductItem"
+          },
+          "expected-version": {
+            "$ref": "#/components/schemas/ExpectedVersion"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          }
+        }
+      },
+      "CartOnlyTask": {
+        "$ref": "#/components/schemas/TaskBase"
+      },
+      "CartQuery": {
+        "type": "object",
+        "required": ["cart-id"],
+        "additionalProperties": false,
+        "properties": {
+          "cart-id": {
+            "$ref": "#/components/schemas/CartId"
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "required": ["type", "data"],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          },
+          "metadata": {
+            "type": "object"
+          }
+        }
+      },
+      "CommandAccepted": {
+        "type": "object",
+        "required": ["cart-id", "stream-id", "events", "version", "created-new-stream?"],
+        "properties": {
+          "cart-id": {
+            "$ref": "#/components/schemas/CartId"
+          },
+          "stream-id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created-new-stream?": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CartSummary": {
+        "type": "object",
+        "required": ["cart-id", "stream-id", "exists?", "version", "state"],
+        "properties": {
+          "cart-id": {
+            "$ref": "#/components/schemas/CartId"
+          },
+          "stream-id": {
+            "type": "string"
+          },
+          "exists?": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state": {
+            "type": "object"
+          }
+        }
+      },
+      "CartEvents": {
+        "type": "object",
+        "required": ["cart-id", "stream-id", "exists?", "version", "events"],
+        "properties": {
+          "cart-id": {
+            "$ref": "#/components/schemas/CartId"
+          },
+          "stream-id": {
+            "type": "string"
+          },
+          "exists?": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "VersionConflict": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Error"
+          },
+          {
+            "type": "object",
+            "required": ["expected", "current"],
+            "properties": {
+              "expected": {
+                "$ref": "#/components/schemas/ExpectedVersion"
+              },
+              "current": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      },
+      "CommandRejected": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Error"
+          },
+          {
+            "type": "object",
+            "required": ["reason"],
+            "properties": {
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

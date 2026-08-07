@@ -17,7 +17,12 @@
                                        (catch Exception _ nil)))]
               (cond-> {"TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" "/var/run/docker.sock"}
                 docker-host              (assoc "DOCKER_HOST" docker-host)
-                (not (str/blank? host-ip)) (assoc "TESTCONTAINERS_HOST_OVERRIDE" host-ip)))))
+                (not (str/blank? host-ip)) (assoc "TESTCONTAINERS_HOST_OVERRIDE" host-ip))))
+
+          (def local-postgres-env
+            {"JDBC_URL"    "jdbc:postgresql://localhost:5432/event_store"
+             "DB_USERNAME" "cart_app"
+             "DB_PASSWORD" "cart_app"}))
 
   help
   {:doc              "Show setup prerequisites and available tasks"
@@ -31,8 +36,13 @@
        (println "")
        (println "Then:")
        (println "  bb tasks       list all tasks")
+       (println "  bb precommit   local no-Docker gate before committing")
+       (println "  bb ci          full CI gate, including Postgres 18.4 via Testcontainers")
        (println "  bb test:core   pure core + serialisation. fast, no Docker.")
-       (println "  bb test        everything, including Postgres 18.4 via Testcontainers")
+       (println "  bb test:perf   HTTP performance smoke tests")
+       (println "  bb test        full suite, including Postgres 18.4 via Testcontainers")
+       (println "  bb up          start Postgres, run Flyway, then start the HTTP API")
+       (println "  bb down        stop local containers, remove the DB volume, clean artefacts")
        (println "  bb db:up       start the local Postgres container")
        (println "  bb migrate     run Flyway in its own one-shot container")
        (println "  bb run:memory  start the HTTP API with the in-memory store")
@@ -65,13 +75,45 @@
   {:doc  "Run the pure core and serialisation tests (no Docker needed)"
    :task (sh "clojure" "-M:test" "--focus" ":core")}
 
+  test:app
+  {:doc  "Run application/use-case tests (no Docker needed)"
+   :task (sh "clojure" "-M:test" "--focus" ":app")}
+
+  test:memory
+  {:doc  "Run in-memory adapter contract tests (no Docker needed)"
+   :task (sh "clojure" "-M:test" "--focus" ":adapter-memory")}
+
+  test:http
+  {:doc  "Run HTTP adapter and OpenAPI contract tests (no Docker needed)"
+   :task (sh "clojure" "-M:test" "--focus" ":http")}
+
+  test:perf
+  {:doc  "Run HTTP performance smoke tests (no Docker needed)"
+   :task (sh "clojure" "-M:test" "--focus" ":perf")}
+
+  test:fast
+  {:doc  "Run all no-Docker test suites"
+   :depends [test:core test:app test:memory test:http]}
+
+  precommit
+  {:doc  "Run the local no-Docker gate before committing"
+   :depends [check test:fast]}
+
+  test:postgres
+  {:doc  "Run Postgres/Flyway/Testcontainers tests"
+   :task (sh {:extra-env (docker-env)} "clojure" "-M:test" "--focus" ":postgres")}
+
   test:adapter
-  {:doc  "Run adapter and application tests (requires Docker)"
-   :task (sh {:extra-env (docker-env)} "clojure" "-M:test" "--focus" ":adapter")}
+  {:doc  "Run adapter tests, including Postgres/Flyway/Testcontainers"
+   :depends [test:memory test:http test:postgres]}
 
   test
   {:doc  "Run the whole suite (requires Docker)"
    :task (sh {:extra-env (docker-env)} "clojure" "-M:test")}
+
+  ci
+  {:doc  "Run the full CI gate"
+   :depends [check test]}
 
   repl
   {:doc              "Start a REPL with dev and test paths"
@@ -87,6 +129,14 @@
   {:doc  "Run the HTTP API with the in-memory store"
    :task (sh {:extra-env {"CART_STORE" "memory"}} "clojure" "-M:run")}
 
+  up
+  {:doc  "Start local Postgres, migrate it, then run the HTTP API with Postgres"
+   :task (do
+           (sh "docker" "compose" "up" "-d" "postgres")
+           (sh "docker" "compose" "run" "--rm" "flyway")
+           (println "Cart HTTP service will use local Postgres on http://localhost:8080")
+           (sh {:extra-env local-postgres-env} "clojure" "-M:run"))}
+
   db:up
   {:doc  "Start local Postgres for the HTTP API"
    :task (sh "docker" "compose" "up" "-d" "postgres")}
@@ -95,13 +145,15 @@
   {:doc  "Run Flyway in a one-shot container against local Compose Postgres"
    :task (sh "docker" "compose" "run" "--rm" "flyway")}
 
-  migrate:jvm
-  {:doc  "Run Flyway from the JVM against JDBC_URL"
-   :task (sh "clojure" "-M:migrate")}
-
   db:down
   {:doc  "Stop local Compose containers and remove the dev database volume"
    :task (sh "docker" "compose" "down" "-v")}
+
+  down
+  {:doc  "Stop local Compose containers, remove the dev database volume, clean artefacts"
+   :task (do
+           (sh "docker" "compose" "down" "-v" "--remove-orphans")
+           (sh "rm" "-rf" "target" ".cpcache"))}
 
   check:lint
   {:doc  "Lint with clj-kondo"
@@ -111,9 +163,13 @@
   {:doc  "Check formatting with cljfmt"
    :task (sh "mise" "exec" "--" "cljfmt" "check" "src" "test")}
 
+  check:whitespace
+  {:doc  "Check git diff whitespace errors"
+   :task (sh "git" "diff" "--check")}
+
   check
   {:doc     "Lint and check formatting"
-   :depends [check:lint check:fmt]}
+   :depends [check:lint check:fmt check:whitespace]}
 
   fix
   {:doc  "Fix formatting"

@@ -1,11 +1,11 @@
 (ns cart.adapter.driving.http
-  "Driving HTTP adapter. JSON/Ring concerns live here; command handling stays in
-   cart.app.handle."
-  (:require [cart.app.handle :as handle]
-            [cart.core :as core]
-            [cart.port.event-store :as store]
+  "Driving HTTP adapter. JSON/Ring concerns live here; command and query work
+   stays behind application ports."
+  (:require [cart.port.cart-command :as command]
+            [cart.port.cart-query :as query]
             [cart.schema :as schema]
             [cheshire.core :as json]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [malli.core :as m]
             [malli.error :as me]
@@ -13,17 +13,18 @@
             [ring.middleware.params :refer [wrap-params]]))
 
 (def ^:private json-content-type "application/json; charset=utf-8")
-
-(defn stream-id
-  "HTTP cart ids map onto the same stream-id convention used by the application
-   tests and Postgres stream_type derivation."
-  [cart-id]
-  (str "shopping_cart-" cart-id))
+(def ^:private openapi-contract
+  (delay (slurp (io/resource "openapi/cart-api.openapi.json"))))
 
 (defn- json-response [status body]
   {:status  status
    :headers {"content-type" json-content-type}
    :body    (json/generate-string body)})
+
+(defn- json-text-response [status body]
+  {:status  status
+   :headers {"content-type" json-content-type}
+   :body    body})
 
 (defn- parse-json-body [request]
   (try
@@ -37,51 +38,57 @@
     (catch Exception e
       (throw (ex-info "Invalid JSON body" {:type ::invalid-json} e)))))
 
-(defn- expected-version-token [request]
-  (get-in request [:params "expected-version"]))
-
 (defn- parse-expected-version [token]
   (cond
     (nil? token) nil
     (= "any" token) :any
     (= "stream-does-not-exist" token) :stream-does-not-exist
-    (re-matches #"\d+" token) (Long/parseLong token)
+    (and (integer? token) (not (neg? token))) token
     :else ::invalid-expected-version))
-
-(defn- keyword-command-type [type]
-  (if (string? type) (keyword type) type))
 
 (defn- request-error [status body]
   (throw (ex-info (:error body) {:type ::request-error
                                  :status status
                                  :body body})))
 
-(defn- normalize-command [cart-id clock body]
+(defn- ensure-object! [error body]
   (when-not (map? body)
-    (request-error 400 {:error "invalid-command"
-                        :details "Request body must be a JSON object."}))
-  (let [data (:data body)]
-    (when (and (some? data) (not (map? data)))
-      (request-error 400 {:error "invalid-command"
-                          :details "Command data must be a JSON object."}))
-    (let [body-cart-id (:cart-id data)]
-      (when (and body-cart-id (not= cart-id body-cart-id))
-        (request-error 400 {:error        "cart-id-mismatch"
-                            :path-cart-id cart-id
-                            :body-cart-id body-cart-id})))
-    (-> body
-        (update :type keyword-command-type)
-        (assoc :data (assoc (or data {}) :cart-id cart-id))
-        (update :metadata #(or % {:now (long (clock))})))))
+    (request-error 400 {:error error
+                        :details "Request body must be a JSON object."})))
+
+(defn- ensure-allowed-keys! [error body allowed]
+  (let [unknown (seq (remove allowed (keys body)))]
+    (when unknown
+      (request-error 400 {:error error
+                          :details {:unknown-keys (mapv name unknown)}}))))
+
+(defn- expected-version [body]
+  (let [token  (:expected-version body)
+        parsed (parse-expected-version token)]
+    (when (= ::invalid-expected-version parsed)
+      (request-error 400 {:error            "invalid-expected-version"
+                          :expected-version token}))
+    parsed))
+
+(defn- normalize-task-command [type data-keys clock body]
+  (ensure-object! "invalid-command" body)
+  (ensure-allowed-keys! "invalid-command"
+                        body
+                        (into #{:cart-id :expected-version :metadata} data-keys))
+  (let [metadata (or (:metadata body) {:now (long (clock))})
+        data     (merge {:cart-id (:cart-id body)} (select-keys body data-keys))]
+    [(expected-version body)
+     {:type     type
+      :data     data
+      :metadata metadata}]))
 
 (defn- command-errors [command]
   (some-> (m/explain schema/Command command) me/humanize))
 
-(defn- command-response [cart-id stream-id [outcome data]]
+(defn- command-response [[outcome data]]
   (case outcome
     :ok
-    (json-response (if (:created-new-stream? data) 201 200)
-                   (assoc data :cart-id cart-id :stream-id stream-id))
+    (json-response (if (:created-new-stream? data) 201 200) data)
 
     :error
     (json-response 422 (assoc data :error "command-rejected"))
@@ -89,64 +96,84 @@
     :conflict
     (json-response 409 (assoc data :error "version-conflict"))))
 
-(defn- handle-post-command [{:keys [event-store retry clock]} request]
-  (let [cart-id  (get-in request [:path-params :cart-id])
-        stream   (stream-id cart-id)
-        expected (parse-expected-version (expected-version-token request))]
-    (if (= ::invalid-expected-version expected)
-      (json-response 400 {:error            "invalid-expected-version"
-                          :expected-version (expected-version-token request)})
-      (try
-        (let [command (normalize-command cart-id clock (parse-json-body request))]
-          (if-let [errors (command-errors command)]
-            (json-response 400 {:error "invalid-command" :details errors})
-            (command-response
-             cart-id
-             stream
-             (if (nil? expected)
-               (handle/handle-command {:event-store event-store :retry retry}
-                                      stream
-                                      command)
-               (handle/handle-command {:event-store event-store :retry retry}
-                                      stream
-                                      command
-                                      expected)))))
-        (catch clojure.lang.ExceptionInfo e
-          (let [{:keys [type status body]} (ex-data e)]
-            (case type
-              ::invalid-json (json-response 400 {:error "invalid-json"})
-              ::request-error (json-response status body)
-              (throw e))))))))
+(defn- handle-request-error [e]
+  (let [{:keys [type status body]} (ex-data e)]
+    (case type
+      ::invalid-json (json-response 400 {:error "invalid-json"})
+      ::request-error (json-response status body)
+      (throw e))))
 
-(defn- handle-get-events [event-store request]
-  (let [cart-id (get-in request [:path-params :cart-id])
-        stream  (stream-id cart-id)]
-    (json-response 200 (assoc (store/read-stream event-store stream)
-                              :cart-id cart-id
-                              :stream-id stream))))
+(defn- handle-command-task [deps type data-keys request]
+  (try
+    (let [[expected command] (normalize-task-command type
+                                                     data-keys
+                                                     (:clock deps)
+                                                     (parse-json-body request))]
+      (if-let [errors (command-errors command)]
+        (json-response 400 {:error "invalid-command" :details errors})
+        (command-response
+         (if (nil? expected)
+           (command/handle-cart-command (:cart-command deps)
+                                        (get-in command [:data :cart-id])
+                                        command)
+           (command/handle-cart-command (:cart-command deps)
+                                        (get-in command [:data :cart-id])
+                                        command
+                                        expected)))))
+    (catch clojure.lang.ExceptionInfo e
+      (handle-request-error e))))
 
-(defn- handle-get-cart [event-store request]
-  (let [cart-id (get-in request [:path-params :cart-id])
-        stream  (stream-id cart-id)
-        read    (store/read-stream event-store stream)]
-    (json-response 200 {:cart-id   cart-id
-                        :stream-id stream
-                        :exists?   (:exists? read)
-                        :version   (:version read)
-                        :state     (core/fold (:events read))})))
+(defn- query-cart-id [body]
+  (ensure-object! "invalid-query" body)
+  (ensure-allowed-keys! "invalid-query" body #{:cart-id})
+  (let [cart-id (:cart-id body)]
+    (when-not (and (string? cart-id) (not (str/blank? cart-id)))
+      (request-error 400 {:error "invalid-query"
+                          :details "cart-id is required."}))
+    cart-id))
+
+(defn- handle-query [f request]
+  (try
+    (json-response 200 (f (query-cart-id (parse-json-body request))))
+    (catch clojure.lang.ExceptionInfo e
+      (handle-request-error e))))
 
 (defn- routes [deps]
   [["/health"
     {:get (fn [_] (json-response 200 {:status "ok"}))}]
 
-   ["/carts/:cart-id"
-    {:get (fn [request] (handle-get-cart (:event-store deps) request))}]
+   ["/openapi.json"
+    {:get (fn [_] (json-text-response 200 @openapi-contract))}]
 
-   ["/carts/:cart-id/events"
-    {:get (fn [request] (handle-get-events (:event-store deps) request))}]
+   ["/commands/add-product-item"
+    {:post (fn [request]
+             (handle-command-task deps
+                                  :cart.command/add-product-item
+                                  [:product-item]
+                                  request))}]
 
-   ["/carts/:cart-id/commands"
-    {:post (fn [request] (handle-post-command deps request))}]])
+   ["/commands/remove-product-item"
+    {:post (fn [request]
+             (handle-command-task deps
+                                  :cart.command/remove-product-item
+                                  [:product-item]
+                                  request))}]
+
+   ["/commands/confirm-cart"
+    {:post (fn [request]
+             (handle-command-task deps :cart.command/confirm [] request))}]
+
+   ["/commands/cancel-cart"
+    {:post (fn [request]
+             (handle-command-task deps :cart.command/cancel [] request))}]
+
+   ["/queries/get-cart"
+    {:post (fn [request]
+             (handle-query #(query/cart-summary (:cart-query deps) %) request))}]
+
+   ["/queries/get-cart-events"
+    {:post (fn [request]
+             (handle-query #(query/cart-events (:cart-query deps) %) request))}]])
 
 (defn- default-handler []
   (ring/create-default-handler
@@ -170,12 +197,14 @@
   "Builds a Ring handler.
 
    deps:
-   {:event-store <EventStore>
-    :retry       optional retry config for cart.app.handle
+   {:cart-command <CartCommand>
+    :cart-query   <CartQuery>
     :clock       optional zero-arg fn returning epoch millis}"
-  [{:keys [event-store clock] :as deps}]
-  (when-not event-store
-    (throw (ex-info "HTTP handler requires :event-store" {})))
+  [{:keys [cart-command cart-query clock] :as deps}]
+  (when-not cart-command
+    (throw (ex-info "HTTP handler requires :cart-command" {})))
+  (when-not cart-query
+    (throw (ex-info "HTTP handler requires :cart-query" {})))
   (let [deps (assoc deps :clock (or clock #(System/currentTimeMillis)))]
     (-> (ring/ring-handler
          (ring/router (routes deps))

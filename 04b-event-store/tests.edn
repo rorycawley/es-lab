@@ -3,6 +3,22 @@
           :test-paths  ["test"]
           :ns-patterns ["cart\\.core-test" "cart\\.serialisation-test"]}
 
-         {:id          :adapter
+         {:id          :app
           :test-paths  ["test"]
-          :ns-patterns ["cart\\.adapter\\..*" "cart\\.app\\..*"]}]}
+          :ns-patterns ["cart\\.app\\..*"]}
+
+         {:id          :adapter-memory
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.adapter\\.driven\\.event-store-memory-test"]}
+
+         {:id          :http
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.adapter\\.driving\\..*"]}
+
+         {:id          :perf
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.perf\\..*"]}
+
+         {:id          :postgres
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.adapter\\.driven\\.(append-fn-test|event-store-postgres-test)"]}]}

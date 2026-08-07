@@ -16,12 +16,17 @@ Functional core, imperative shell, arranged as ports and adapters.
 cart.core                  pure. clojure.core only. no requires at all.
 cart.schema                malli schemas. describes core's data from outside.
 cart.port.event-store      protocol the app depends on.
-cart.app.handle            orchestration: read -> fold -> decide -> append.
+cart.port.cart-command     command-side protocol driving adapters depend on.
+cart.port.cart-query       query-side protocol driving adapters depend on.
+cart.app.command           cart command use cases.
+cart.app.handle            stream-level command service: read -> fold -> decide -> append.
+cart.app.query             query use cases.
+cart.app.stream            stream id naming.
 cart.adapter.driven.*      postgres and in-memory event stores.
 cart.adapter.driving.http  Ring/Reitit JSON API.
 cart.system                component lifecycle wiring.
 cart.main                  process entrypoint.
-cart.migrate               explicit JVM migration entrypoint.
+resources/openapi/*        contract-first HTTP API documents.
 compose.yaml               local Postgres + one-shot Flyway service.
 ```
 
@@ -37,8 +42,11 @@ whether a `require` form is present.
 fully-qualified literals in both places (e.g. `:cart.event/confirmed`), because
 a keyword is a value and costs no dependency.
 
-`cart.app.handle` depends on `cart.port.event-store`, never on a concrete
-adapter.
+Application use cases depend on ports, never on concrete adapters.
+
+Driving adapters MUST NOT require `cart.core` directly. Commands enter through
+`cart.port.cart-command` and command use cases. Queries enter through
+`cart.port.cart-query` and query handlers.
 
 ### R1.3 — no side effects in the core
 
@@ -373,31 +381,48 @@ Every race test MUST assert the `threw` bucket is empty.
 
 ## 7. HTTP API
 
-The HTTP API is a driving adapter. It MUST NOT contain cart business rules and
-MUST call `cart.app.handle/handle-command` for writes. Reads may expose the event
-stream directly or fold it through `cart.core/fold`; no projection is implied.
+The HTTP API is contract-first. The checked-in OpenAPI document under
+`resources/openapi` is the source of truth. The service MUST serve that contract
+unchanged from `/openapi.json`; it MUST NOT generate the public contract from
+routes.
 
-### R7.1 — HTTP owns JSON, validation and metadata defaults
+The HTTP API is a driving adapter. It MUST NOT contain cart business rules,
+derive event-stream names, read from the event store, fold events, or call the
+domain core. Writes MUST go through `cart.port.cart-command`.
 
-The adapter parses JSON request bodies with keyword keys, converts the command
-`:type` string into a keyword, injects the route `cart-id` into command data,
-and validates the result against `cart.schema/Command` before calling the
-application service.
+This application is CQRS. HTTP reads MUST go through `cart.port.cart-query` and
+query handlers. HTTP MUST NOT require `cart.core`, `cart.app.*`, or
+`cart.port.event-store` directly.
+
+### R7.1 — commands are task-based endpoints
+
+Command endpoints are explicit tasks:
+
+| endpoint                       | command type                         |
+|--------------------------------|--------------------------------------|
+| `POST /commands/add-product-item`    | `:cart.command/add-product-item`    |
+| `POST /commands/remove-product-item` | `:cart.command/remove-product-item` |
+| `POST /commands/confirm-cart`        | `:cart.command/confirm`             |
+| `POST /commands/cancel-cart`         | `:cart.command/cancel`              |
+
+Clients MUST NOT post a generic command envelope to a catch-all command-bus
+route. The adapter maps each task endpoint to the internal command type, then
+validates the resulting command against `cart.schema/Command` before calling the
+command use-case port.
+
+### R7.2 — HTTP owns JSON, validation and metadata defaults
+
+The adapter parses JSON request bodies with keyword keys. Task bodies carry
+`cart-id` directly. Product item tasks also carry `product-item`.
 
 If command metadata is omitted, the HTTP adapter stamps `{:now <epoch millis>}`.
 The core still never reads a clock.
 
-### R7.2 — route cart id and command cart id must agree
-
-`POST /carts/:cart-id/commands` writes only stream
-`shopping_cart-<cart-id>`. If the request body also supplies `data.cart-id`, it
-MUST match the route cart id.
-
 ### R7.3 — expected version is explicit at the HTTP boundary
 
-`expected-version` is an optional query parameter. Accepted values:
+`expected-version` is an optional command body field. Accepted values:
 
-| value                   | application expected version |
+| value                   | command-port expected version |
 |-------------------------|------------------------------|
 | omitted                 | derive from the fresh read    |
 | `0`, `1`, ...           | pinned numeric version        |
@@ -415,13 +440,26 @@ Invalid values return `400`.
 | `[:error {:reason ...}]`                   | `422`       |
 | `[:conflict {:expected ... :current ...}]` | `409`       |
 
-Malformed JSON, invalid command shape and route/body cart-id mismatch return
-`400`.
+Malformed JSON, invalid command shape, invalid query shape and out-of-contract
+fields return `400`.
 
-### R7.5 — Component owns service lifecycle, not schema lifecycle
+### R7.5 — query responses come from the query stack
+
+Queries are POST endpoints with request bodies, not resource-shaped GETs:
+
+| endpoint                         | query handler  |
+|----------------------------------|----------------|
+| `POST /queries/get-cart`         | `cart-summary` |
+| `POST /queries/get-cart-events`  | `cart-events`  |
+
+The current query implementation may rebuild state from events internally, but
+that is a query handler concern, not an HTTP concern.
+
+### R7.6 — Component owns service lifecycle, not schema lifecycle
 
 The service system uses `com.stuartsierra/component` to own stateful resources:
-Postgres datasource, event store, and Jetty server.
+Postgres datasource, command event store, command handler, query handler, and
+Jetty server.
 
 Starting the HTTP service MUST NOT run Flyway migrations. Schema migration is a
 separate deployment step, preferably a one-shot Flyway container or Kubernetes
@@ -430,7 +468,7 @@ DDL privileges to serve traffic.
 
 Stopping the system MUST stop Jetty and close the datasource.
 
-### R7.6 — local Compose runs Flyway as a one-shot container
+### R7.7 — local Compose runs Flyway as a one-shot container
 
 `compose.yaml` provides a local Postgres service and a `flyway/flyway` service.
 The Flyway service mounts `resources/db/migration` read-only and exits after
@@ -439,11 +477,12 @@ The Flyway service mounts `resources/db/migration` read-only and exits after
 The local app role is `cart_app`. It may read streams and execute
 `append_to_stream`; it must not need table-write or DDL privileges.
 
-### R7.7 — HTTP behaviour is tested at the adapter boundary
+### R7.8 — HTTP behaviour is tested at the adapter boundary
 
-Handler tests MUST cover health, command success, stream reads, folded cart
-reads, business rejection, optimistic conflict, `:any`, malformed JSON, invalid
-expected version, invalid command shape and route/body cart-id mismatch.
+Handler tests MUST cover the served OpenAPI contract, task command success,
+POST query reads, business rejection, optimistic conflict, `:any`, malformed
+JSON, invalid expected version, invalid command shape, invalid query shape and
+removal of legacy resource-shaped routes.
 
 ---
 
