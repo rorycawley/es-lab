@@ -21,4 +21,5 @@
 
          {:id          :postgres
           :test-paths  ["test"]
-          :ns-patterns ["cart\\.adapter\\.driven\\.(append-fn-test|event-store-postgres-test)"]}]}
+          :ns-patterns ["cart\\.adapter\\.driven\\.(append-fn-test|event-store-postgres-test)"
+                        "cart\\.acceptance\\.http-postgres-test"]}]}

@@ -65,6 +65,7 @@ The strategy follows these external references:
 | OpenAPI contract | Medium | Checked-in contract is served and representative requests/responses conform to schemas | `http_test.clj` |
 | HTTP performance smoke | Medium | Task/query HTTP paths stay inside coarse latency budgets without Docker | `http_perf_test.clj` |
 | Component lifecycle | Medium | Jetty, datasource and handler lifecycle wiring starts and stops cleanly | `system_test.clj` |
+| Full-stack HTTP + Postgres | Large | Jetty, command/query use cases, runtime DB role and migrated Postgres work together | `http_postgres_test.clj` |
 | Manual local system | Large | Compose Postgres, one-shot Flyway and the API work together for exploration | `bb up`, `bb down` |
 
 ## Gates
@@ -80,7 +81,7 @@ Use the smallest task that covers the code being changed:
 | In-memory event store | `bb test:memory` |
 | HTTP adapter or OpenAPI contract | `bb test:http` |
 | HTTP response-time regression | `bb test:perf` |
-| Migration SQL, PL/pgSQL, Postgres adapter | `bb test:postgres` |
+| Migration SQL, PL/pgSQL, Postgres adapter, full-stack HTTP + Postgres | `bb test:postgres` |
 
 ### Before Commit
 
@@ -110,6 +111,7 @@ suite before committing:
 - `src/cart/adapter/driven/event_store_postgres.clj`
 - `test/cart/adapter/driven/append_fn_test.clj`
 - `test/cart/adapter/driven/event_store_postgres_test.clj`
+- `test/cart/acceptance/http_postgres_test.clj`
 - `test/cart/test_db.clj`
 
 Command:
@@ -231,6 +233,12 @@ Migrations are tested by starting Postgres, then running Flyway in a separate
 one-shot container before any Postgres tests run. That mirrors local Compose
 and production deployment more closely than in-process migration calls.
 
+The full-stack HTTP + Postgres smoke test is deliberately thin. It does not
+duplicate the adapter contract or OpenAPI contract tests; it proves that a real
+Jetty server can write through the command HTTP path as `cart_app`, persist into
+migrated Postgres, stop, restart, and read the same cart through the query HTTP
+path.
+
 ## Isolation and Cleanup Rules
 
 - Small and medium tests must not depend on test order.
@@ -247,10 +255,6 @@ These are useful next hardening steps, not blockers for the current state:
 - Add a GitHub Actions workflow that runs `bb ci` on pull requests.
 - Add OpenAPI linting and breaking-change checks once a baseline contract is
   published.
-- Add a real HTTP-over-Jetty plus Testcontainers Postgres smoke test in CI. The
-  current full suite proves the HTTP adapter with memory and the Postgres stack
-  below the HTTP layer, but it does not yet drive HTTP over a real socket against
-  a Testcontainers database.
 - Add load tests with real Jetty and Postgres once target latency/SLO numbers
   exist. The current performance smoke test catches local adapter regressions;
   it does not prove production capacity.

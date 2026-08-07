@@ -2,7 +2,8 @@
   "One set of behaviours both stores must satisfy (SPEC R6.5), so the fast
    in-memory store cannot drift from the real one."
   (:require [cart.port.event-store :as store]
-            [clojure.test :refer [is testing]]))
+            [clojure.test :refer [is testing]]
+            [matcher-combinators.test :refer [thrown-match?]]))
 
 (defn- event [who]
   {:type :cart.event/product-item-added
@@ -63,15 +64,17 @@
   (testing "invalid expected versions are rejected, not treated as :any"
     (doseq [expected [nil :bogus -1 1.5]]
       (let [es (new-store), id (new-id)]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid expected version"
-                              (store/append-to-stream es id [(event "a")] expected)))
+        (is (thrown-match? clojure.lang.ExceptionInfo
+                           {:expected-version expected}
+                           (store/append-to-stream es id [(event "a")] expected)))
         (is (= {:events [] :version 0 :exists? false}
                (store/read-stream es id))))))
 
   (testing "empty appends are rejected at the port boundary"
     (let [es (new-store), id (new-id)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no events"
-                            (store/append-to-stream es id [] :stream-does-not-exist)))
+      (is (thrown-match? clojure.lang.ExceptionInfo
+                         {:stream-id id}
+                         (store/append-to-stream es id [] :stream-does-not-exist)))
       (is (= {:events [] :version 0 :exists? false}
              (store/read-stream es id)))))
 

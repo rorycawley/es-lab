@@ -136,6 +136,8 @@ test/cart/adapter/driven/
 test/cart/adapter/driving/
     http_test.clj                      HTTP contract, statuses, validation
     system_test.clj                    component lifecycle smoke test
+test/cart/acceptance/
+    http_postgres_test.clj             real HTTP over Jetty plus Testcontainers Postgres
 ```
 
 `cart.core` requires nothing — not even `cart.schema`. Schemas are malli

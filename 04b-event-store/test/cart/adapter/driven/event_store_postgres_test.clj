@@ -5,7 +5,10 @@
             [cart.adapter.driven.event-store-postgres :as pg]
             [cart.port.event-store :as store]
             [cart.test-db :as db]
+            [cheshire.core :as json]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [matcher-combinators.matchers :as m]
+            [matcher-combinators.test :refer [match?]]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
   (:import [java.util.concurrent Callable CyclicBarrier Executors Future TimeUnit]))
@@ -376,7 +379,10 @@
           "plain JSONB keeps JSON-compatible metadata stable")
 
       (testing "the column is genuinely populated, not the default"
-        (is (not= "{}" (db/metadata-json ds stream-id 1))))
+        (is (match? (m/via #(json/parse-string % true)
+                           {:now 1735689600000
+                            :source "web"})
+                    (db/metadata-json ds stream-id 1))))
 
       (testing "metadata is queryable through JSONB operators"
         (is (= "web"
