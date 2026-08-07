@@ -1,0 +1,8 @@
+#kaocha/v1
+{:tests [{:id          :core
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.core-test" "cart\\.serialisation-test"]}
+
+         {:id          :adapter
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.adapter\\..*" "cart\\.app\\..*"]}]}

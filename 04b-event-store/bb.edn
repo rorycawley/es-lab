@@ -1,0 +1,98 @@
+{:paths ["."]
+ :tasks
+ {:requires ([babashka.process :refer [shell]]
+             [clojure.string :as str])
+
+  :init (do
+          (defn sh [& args]
+            (binding [*out* *err*]
+              (apply println "+" (remove map? args)))
+            (apply shell args))
+
+          (defn docker-env []
+            (let [docker-host (System/getenv "DOCKER_HOST")
+                  host-ip     (or (System/getenv "TESTCONTAINERS_HOST_OVERRIDE")
+                                  (try (str/trim (:out (shell {:out :string :continue true}
+                                                              "rdctl" "info" "--field" "ip-address")))
+                                       (catch Exception _ nil)))]
+              (cond-> {"TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" "/var/run/docker.sock"}
+                docker-host              (assoc "DOCKER_HOST" docker-host)
+                (not (str/blank? host-ip)) (assoc "TESTCONTAINERS_HOST_OVERRIDE" host-ip)))))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task
+   (do (println "")
+       (println "Prerequisites:")
+       (println "  1. Install mise: curl https://mise.run | sh")
+       (println "  2. Run: bb install")
+       (println "  3. Docker running (adapter tests only)")
+       (println "")
+       (println "Then:")
+       (println "  bb tasks       list all tasks")
+       (println "  bb test:core   pure core + serialisation. fast, no Docker.")
+       (println "  bb test        everything, including Postgres 18.4 via Testcontainers")
+       (println "")
+       (println "Start here:")
+       (println "  SPEC.md        what this project must do, and why")
+       (println "")
+       (println "Rancher Desktop users — one-time machine setup for adapter tests:")
+       (println "  Testcontainers needs the socket at ~/.rd/docker.sock and API >= 1.41,")
+       (println "  but docker-java defaults to 1.32. Create these two files:")
+       (println "")
+       (println "  ~/.docker-java.properties")
+       (println "    api.version=1.44")
+       (println "")
+       (println "  ~/.testcontainers.properties")
+       (println "    docker.host=unix:///Users/$USER/.rd/docker.sock")
+       (println "    ryuk.disabled=true")
+       (println "    checks.disable=true")
+       (println "")
+       (println "  Also ensure Rancher Desktop uses dockerd (moby), not containerd.")
+       (println ""))}
+
+  install
+  {:doc  "Install pinned tools via mise"
+   :task (sh "mise" "install")}
+
+  test:core
+  {:doc  "Run the pure core and serialisation tests (no Docker needed)"
+   :task (sh "clojure" "-M:test" "--focus" ":core")}
+
+  test:adapter
+  {:doc  "Run adapter and application tests (requires Docker)"
+   :task (sh {:extra-env (docker-env)} "clojure" "-M:test" "--focus" ":adapter")}
+
+  test
+  {:doc  "Run the whole suite (requires Docker)"
+   :task (sh {:extra-env (docker-env)} "clojure" "-M:test")}
+
+  repl
+  {:doc              "Start a REPL with dev and test paths"
+   :override-builtin true
+   :task (sh "clojure" "-M:dev:test" "-r")}
+
+  check:lint
+  {:doc  "Lint with clj-kondo"
+   :task (sh "mise" "exec" "--" "clj-kondo" "--parallel" "--lint" "src:test")}
+
+  check:fmt
+  {:doc  "Check formatting with cljfmt"
+   :task (sh "mise" "exec" "--" "cljfmt" "check" "src" "test")}
+
+  check
+  {:doc     "Lint and check formatting"
+   :depends [check:lint check:fmt]}
+
+  fix
+  {:doc  "Fix formatting"
+   :task (sh "mise" "exec" "--" "cljfmt" "fix" "src" "test")}
+
+  clean
+  {:doc  "Remove build artefacts"
+   :task (sh "rm" "-rf" "target" ".cpcache")}
+
+  all
+  {:doc     "Install tools and run everything"
+   :depends [install check test]}}}
