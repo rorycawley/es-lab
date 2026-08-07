@@ -54,6 +54,13 @@ when the caller omits metadata, and maps application results to HTTP responses.
 It does not call `cart.core`, derive event-stream names, read the event store, or
 fold events itself.
 
+JSON over HTTP is UTF-8. Responses declare
+`application/json; charset=utf-8`, request bodies are decoded as UTF-8, and the
+Postgres event-store database is created with UTF8 encoding. The test suite
+round-trips English, Chinese and Arabic text through HTTP, JSONB and Postgres
+text columns. API errors remain stable machine-readable codes; localized
+messages belong in the driving shell/UI, not the pure core.
+
 Run it with the in-memory store:
 
 ```bash
@@ -190,6 +197,8 @@ Event payloads and metadata are plain `jsonb`, passed with typed Postgres
 `PGobject` values. That keeps rows queryable with native operators such as
 `message_data ->> 'cart-id'`. Event type is separate in `message_type`, so it is
 reconstructed as a keyword on read without requiring a Clojure-specific encoding.
+The `event_store` database is created with UTF8 encoding by the Postgres init
+script used by Compose and Testcontainers.
 The DDL also rejects impossible state directly: orphan messages, duplicate event
 ids, non-positive positions and non-object JSON payloads/metadata.
 

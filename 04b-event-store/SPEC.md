@@ -278,6 +278,17 @@ is reconstructed as a Clojure keyword on read. JSON fields themselves must be
 JSON-compatible data: maps, vectors, strings, numbers, booleans and null. Keyword
 values inside `message_data` or `message_metadata` are encoded as JSON strings.
 
+HTTP request bodies MUST be decoded as UTF-8, and JSON responses MUST declare
+`application/json; charset=utf-8`. The Postgres database used by the event store
+MUST be created with UTF8 encoding. English, Chinese and Arabic user data must
+round-trip through HTTP JSON, `text` columns and `jsonb` without lossy
+conversion.
+
+Domain events, commands and errors carry stable machine-readable values, not
+localized display text. Localized English, Chinese or Arabic labels/messages
+belong in the driving shell or UI layer, selected by an explicit locale policy,
+not in `cart.core`.
+
 ### R5.2 — events are validated on the way out of storage
 
 Events read from Postgres MUST be validated against `cart.schema/Event`. A

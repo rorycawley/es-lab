@@ -290,6 +290,50 @@
       (store/append-to-stream es stream-id [original] :stream-does-not-exist)
       (is (= original (first (:events (store/read-stream es stream-id))))))))
 
+(deftest database-and-client-encodings-are-utf8
+  (let [settings (jdbc/execute-one!
+                  db/*datasource*
+                  ["SELECT current_setting('server_encoding') AS server_encoding,
+                           current_setting('client_encoding') AS client_encoding"]
+                  {:builder-fn rs/as-unqualified-lower-maps})]
+    (is (= {:server_encoding "UTF8"
+            :client_encoding "UTF8"}
+           settings))))
+
+(deftest english-chinese-and-arabic-events-round-trip-through-postgres
+  (testing "SPEC R5.1 — UTF-8 text survives text columns, jsonb, and JSONB operators"
+    (let [ds         db/*datasource*
+          es         (pg/make-store ds)
+          cart-id    "cart-English-购物车-عربة"
+          product-id "tea-茶-شاي"
+          stream-id  (str "shopping_cart-" cart-id)
+          original   {:type :cart.event/product-item-added
+                      :data {:cart-id cart-id
+                             :product-item {:product-id product-id
+                                            :quantity 1
+                                            :unit-price 1999}
+                             :added-at 1735689600000}
+                      :metadata {:now 1735689600000
+                                 :source "web-English-来源-مصدر"}}]
+      (store/append-to-stream es stream-id [original] :stream-does-not-exist)
+
+      (is (= original (first (:events (store/read-stream es stream-id)))))
+
+      (is (= {:stream_id stream-id
+              :cart_id cart-id
+              :product_id product-id
+              :source "web-English-来源-مصدر"}
+             (jdbc/execute-one!
+              ds
+              ["SELECT stream_id,
+                       message_data ->> 'cart-id' AS cart_id,
+                       message_data #>> '{product-item,product-id}' AS product_id,
+                       message_metadata ->> 'source' AS source
+                  FROM messages
+                 WHERE stream_id = ? AND stream_position = 1"
+               stream-id]
+              {:builder-fn rs/as-unqualified-lower-maps}))))))
+
 (deftest event-data-is-stored-as-queryable-jsonb
   (testing "SPEC R5.1 — payload fields are visible to Postgres JSONB operators"
     (let [ds        db/*datasource*

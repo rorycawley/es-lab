@@ -59,3 +59,15 @@
   (let [metadata {:now 1735689600000 :source :cart.source/web}]
     (is (= {:now 1735689600000 :source "cart.source/web"}
            (decode (encode metadata))))))
+
+(deftest english-chinese-and-arabic-text-survives-json-round-trip
+  (let [event {:type :cart.event/product-item-added
+               :data {:cart-id "cart-English-购物车-عربة"
+                      :product-item {:product-id "tea-茶-شاي"
+                                     :quantity 1
+                                     :unit-price 1999}
+                      :added-at 1735689600000}
+               :metadata {:now 1735689600000
+                          :source "web-English-来源-مصدر"}}
+        stored (event->stored event)]
+    (is (= event (stored->event stored)))))

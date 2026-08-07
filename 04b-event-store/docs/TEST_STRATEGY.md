@@ -68,6 +68,13 @@ The strategy follows these external references:
 | Full-stack HTTP + Postgres | Large | Jetty, command/query use cases, runtime DB role and migrated Postgres work together | `http_postgres_test.clj` |
 | Manual local system | Large | Compose Postgres, one-shot Flyway and the API work together for exploration | `bb up`, `bb down` |
 
+Unicode and internationalization boundary coverage is split across these
+layers: the serialization tests prove JSON round trips, the HTTP tests prove
+UTF-8 request/response handling, the Postgres tests prove UTF8 server/client
+encoding plus `text`/`jsonb` persistence, and the full-stack smoke proves the
+same path through Jetty and the runtime database role. These tests use English,
+Chinese and Arabic text as user data.
+
 ## Gates
 
 ### Inner Loop
@@ -166,6 +173,7 @@ The HTTP test suite must keep proving:
 - representative valid request bodies conform to the request schemas
 - representative live responses conform to the response schemas
 - rejected requests return bodies that conform to error schemas
+- English, Chinese and Arabic JSON text is decoded and encoded as UTF-8
 
 The current validator is intentionally test-scoped and supports the JSON Schema
 features this contract uses. If the contract becomes more complex, replace or

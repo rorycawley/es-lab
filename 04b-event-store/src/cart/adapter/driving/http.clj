@@ -10,7 +10,8 @@
             [malli.core :as m]
             [malli.error :as me]
             [reitit.ring :as ring]
-            [ring.middleware.params :refer [wrap-params]]))
+            [ring.middleware.params :refer [wrap-params]])
+  (:import [java.nio.charset StandardCharsets]))
 
 (def ^:private json-content-type "application/json; charset=utf-8")
 (def ^:private openapi-contract
@@ -30,7 +31,7 @@
   (try
     (let [body (:body request)]
       (if body
-        (let [text (slurp body)]
+        (let [text (slurp body :encoding (.name StandardCharsets/UTF_8))]
           (if (str/blank? text)
             {}
             (json/parse-string text true)))

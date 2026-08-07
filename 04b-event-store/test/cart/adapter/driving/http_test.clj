@@ -215,6 +215,18 @@
 (def cart-query-request
   {"cart-id" "c1"})
 
+(def unicode-cart-id "cart-English-购物车-عربة")
+(def unicode-product-id "tea-茶-شاي")
+
+(def unicode-add-item-task
+  {"cart-id" unicode-cart-id
+   "product-item" {"product-id" unicode-product-id
+                   "quantity" 2
+                   "unit-price" 1299}})
+
+(def unicode-cart-query-request
+  {"cart-id" unicode-cart-id})
+
 (defn- add-item-task-for [cart-id]
   (assoc add-item-task "cart-id" cart-id))
 
@@ -446,6 +458,31 @@
         (is (= 1 (get body "version")))
         (is (= ["cart.event/product-item-added"]
                (mapv #(get % "type") (get body "events"))))))))
+
+(deftest english-chinese-and-arabic-text-round-trips-through-http-json
+  (let [handler (new-handler)
+        created (handler (request :post
+                                  "/commands/add-product-item"
+                                  unicode-add-item-task))
+        queried (handler (request :post
+                                  "/queries/get-cart"
+                                  unicode-cart-query-request))
+        events  (handler (request :post
+                                  "/queries/get-cart-events"
+                                  unicode-cart-query-request))]
+    (is (= "application/json; charset=utf-8"
+           (get-in created [:headers "content-type"])))
+    (is (= 201 (:status created)))
+    (is (= 200 (:status queried)))
+    (is (= 200 (:status events)))
+
+    (is (= unicode-cart-id (get (response-body created) "cart-id")))
+    (is (= 2
+           (get-in (response-body queried)
+                   ["state" "product-items" unicode-product-id])))
+    (is (= unicode-product-id
+           (get-in (response-body events)
+                   ["events" 0 "data" "product-item" "product-id"])))))
 
 (deftest business-errors-return-422-and-do-not-write
   (let [handler  (new-handler)

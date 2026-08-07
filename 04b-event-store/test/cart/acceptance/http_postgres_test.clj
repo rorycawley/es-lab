@@ -75,15 +75,16 @@
       (finally
         (component/stop-system started)))))
 
-(defn- add-item-task [cart-id]
+(defn- add-item-task [cart-id product-id]
   {"cart-id" cart-id
-   "product-item" {"product-id" "sku-1"
+   "product-item" {"product-id" product-id
                    "quantity" 2
                    "unit-price" 1299}})
 
 (deftest http-service-persists-through-postgres
   (let [client    (HttpClient/newHttpClient)
-        cart-id   (str "pg-http-" (random-uuid))
+        cart-id   (str "pg-http-English-购物车-عربة-" (random-uuid))
+        product-id "tea-茶-شاي"
         stream-id (str "shopping_cart-" cart-id)]
     (testing "first service instance writes through the HTTP command path"
       (with-started-system
@@ -96,7 +97,7 @@
           (let [created (post-json! client
                                     started
                                     "/commands/add-product-item"
-                                    (add-item-task cart-id))]
+                                    (add-item-task cart-id product-id))]
             (is (= 201 (.statusCode created)))
             (is (json-response? created))
             (is (match? {"cart-id" cart-id
@@ -123,5 +124,5 @@
                          "exists?" true
                          "version" 1
                          "state" {"status" "opened"
-                                  "product-items" {"sku-1" 2}}}
+                                  "product-items" {product-id 2}}}
                         (response-body summary)))))))))
