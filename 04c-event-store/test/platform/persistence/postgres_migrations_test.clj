@@ -1,5 +1,5 @@
 (ns platform.persistence.postgres-migrations-test
-  "Large Iteration 0 test for the production migration topology."
+  "Large Iteration 1 test for the production PostgreSQL migration topology."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is use-fixtures]]
             [next.jdbc :as jdbc]
@@ -100,13 +100,28 @@
              WHERE schemaname = 'public'
                AND tablename = 'flyway_schema_history'"]
           {:builder-fn rs/as-unqualified-kebab-maps})))
-  (is (= {:migration-count 0}
+  (is (= {:migration-count 1}
          (jdbc/execute-one!
           *migration-datasource*
           ["SELECT count(*) AS migration_count
               FROM flyway_schema_history
              WHERE success"]
-          {:builder-fn rs/as-unqualified-kebab-maps}))))
+          {:builder-fn rs/as-unqualified-kebab-maps})))
+  (is (= #{"streams"
+           "events"
+           "command_requests"
+           "cart_view_projection"
+           "cart_history_projection"}
+         (set (map :table-name
+                   (jdbc/execute!
+                    *migration-datasource*
+                    ["SELECT tablename AS table_name
+                        FROM pg_tables
+                       WHERE schemaname = 'public'
+                         AND tablename IN ('streams', 'events', 'command_requests',
+                                           'cart_view_projection',
+                                           'cart_history_projection')"]
+                    {:builder-fn rs/as-unqualified-kebab-maps}))))))
 
 (deftest runtime-role-can-connect-to-the-migrated-database
   (is (= {:database "cart" :database-user "cart_app"}

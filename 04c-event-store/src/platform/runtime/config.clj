@@ -1,6 +1,7 @@
 (ns platform.runtime.config
   "Loads and validates service configuration at the composition boundary."
   (:require [aero.core :as aero]
+            [cart.observation :as obs]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
@@ -17,7 +18,7 @@
   (contains? #{"0.0.0.0" "::" "[::]"} host))
 
 (defn validate!
-  [{:keys [store http deployment db] :as config}]
+  [{:keys [store http deployment db observation] :as config}]
   (when-not (contains? stores store)
     (throw (ex-info "Unsupported persistence store"
                     {:store store :allowed stores})))
@@ -33,6 +34,7 @@
     (throw (ex-info
             "JDBC_URL or DATABASE_URL is required for PostgreSQL"
             {:store store})))
+  (obs/validate-key-ring! observation)
   config)
 
 (defn read-config

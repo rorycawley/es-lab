@@ -1,5 +1,9 @@
 (ns platform.http.openapi-test
   (:require [cheshire.core :as json]
+            [cart.slice.add-product-item.adapter.in.http :as add-http]
+            [cart.slice.add-product-item.port :as add-port]
+            [cart.slice.view-cart.adapter.in.http :as view-http]
+            [cart.slice.view-cart.port :as view-port]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -210,3 +214,68 @@
        (contains? (get-in contract
                           ["components" "schemas" "ProductItem" "properties"])
                   "price"))))
+
+(defn- outcome-stub [result]
+  (reify add-port/AddProductItem
+    (add-product-item [_ _] result)))
+
+(defn- view-outcome-stub [result]
+  (reify view-port/ViewCart
+    (view-cart [_ _] result)))
+
+(deftest delivered-add-http-mappings-conform-to-every-declared-status
+  (let [cart-result {:cart-id cart-id
+                     :status "open"
+                     :items [{:product-id product-id :quantity 2}]
+                     :cart-observation observation}
+        outcomes [{:outcome :success :result cart-result}
+                  {:outcome :invalid :code :invalid-request
+                   :field-errors [{:field "request-id" :code :invalid-uuid}]}
+                  {:outcome :conflict :code :cart-changed
+                   :next-action :view-cart-before-retrying}
+                  {:outcome :rejected :code :cart-closed}]]
+    (doseq [outcome outcomes
+            :let [response ((add-http/handler (outcome-stub outcome))
+                            {:body-params first-add})]]
+      (assert-valid-report
+       (str "add response " (:outcome outcome))
+       (response-report "/commands/add-product-item" :post response)))
+    (let [correlation-id "90000000-0000-0000-0000-000000000001"
+          failing (reify add-port/AddProductItem
+                    (add-product-item [_ _]
+                      (throw (ex-info "storage unavailable" {}))))
+          response ((add-http/handler
+                     failing
+                     {:correlation-id-fn #(java.util.UUID/fromString
+                                           correlation-id)})
+                    {:body-params first-add})]
+      (assert-valid-report
+       "add response unexpected failure"
+       (response-report "/commands/add-product-item" :post response)))))
+
+(deftest delivered-view-http-mappings-conform-to-every-declared-status
+  (let [cart-result {:cart-id cart-id
+                     :status "open"
+                     :items [{:product-id product-id :quantity 2}]
+                     :cart-observation observation}
+        outcomes [{:outcome :success :result cart-result}
+                  {:outcome :invalid :code :invalid-cart
+                   :field-errors [{:field "cart-id" :code :invalid-cart}]}]]
+    (doseq [outcome outcomes
+            :let [response ((view-http/handler (view-outcome-stub outcome))
+                            {:body-params query-request})]]
+      (assert-valid-report
+       (str "view response " (:outcome outcome))
+       (response-report "/queries/view-cart" :post response)))
+    (let [correlation-id "90000000-0000-0000-0000-000000000001"
+          failing (reify view-port/ViewCart
+                    (view-cart [_ _]
+                      (throw (ex-info "projection unavailable" {}))))
+          response ((view-http/handler
+                     failing
+                     {:correlation-id-fn #(java.util.UUID/fromString
+                                           correlation-id)})
+                    {:body-params query-request})]
+      (assert-valid-report
+       "view response unexpected failure"
+       (response-report "/queries/view-cart" :post response)))))

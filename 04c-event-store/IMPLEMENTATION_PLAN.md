@@ -597,50 +597,102 @@ inbound handler, domain decision/query, event store, and automated evidence.
 Exit: the empty service starts locally, migrations run separately, architectural
 dependency checks pass, and CI can run lint and tests.
 
-### Iteration 1: First Addition and First View
+### Iteration 1: Add Product Item and First View
 
-- Deliver `UC-02/S01` and `UC-01/S01`.
-- Build the pure fold/decide/evolve core, pure projectors, observation codec,
-  outbound persistence ports, all three adapters, view query, and add command.
-- Prove a valid first addition with a request UUID and no cart fields atomically
-  creates an event, projections and idempotency result, then returns its generated
-  cart UUID and first observation.
-- Prove invalid additions create nothing, independent request UUIDs create
-  distinct carts, and sequential or concurrent repeats create one cart and apply
-  quantity once. Prove a retry after later cart changes still returns the exact
-  original result without changing the current projection.
-- `UC-01/S01/TC07`: prove a request UUID rejected as invalid input is *not*
-  recorded, so reusing it for a valid first addition succeeds. Only `commit!`
-  writes `command_requests`; no validation or rejection path may touch it.
-- `UC-01/S01/TC08`: race different first-addition inputs using one unestablished
-  global request UUID. Prove exactly one cart and command are accepted and every
-  non-equal loser is invalid in memory, SQLite and PostgreSQL.
+Status: Delivered and verified.
 
-Exit: the actor can establish and then view a cart without a separate creation
-task or a nonexistent-cart observation.
+Deliver `UC-01/S01`, `UC-01/S02` and `UC-02/S01`, comprising 14 acceptance
+cases. `UC-01/S02` belongs here because first and existing-cart additions are two
+forms of the same public command operation, and because `UC-01/S01/TC03` cannot
+prove replay after a later cart change unless an existing-cart addition is
+available through the public boundary.
+
+Implement Iteration 1 in this order, keeping each completed stage green:
+
+1. Define the immutable `product-item-added.v1` event and metadata shapes,
+   canonical first-add and existing-add commands, successful result data and the
+   two projection models. Build pure `fold`, `evolve`, add `decide` and projector
+   functions with focused domain tests. Inject UUID, clock and observation-key
+   dependencies into the imperative shell; none may enter the domain core.
+2. Implement the versioned HMAC observation codec with supplied key-ring data.
+   Prove round trips, alteration detection, cart binding, unknown versions and
+   keys, retained verification keys during rotation, no time-based expiry and
+   semantic comparison by represented cart and revision rather than marker bytes.
+3. Define the event-store, projection-store, idempotency-store and unit-of-work
+   ports plus one reusable outbound contract suite. Implement memory first so
+   the add and view slices can be exercised before database concerns are added.
+4. Add PostgreSQL and SQLite schema version 1 for streams, events, command
+   requests, cart view and cart history. Replace the zero-migration assertions
+   with exact version, ownership, repeatability and required-table assertions.
+   Implement SQLite next and PostgreSQL last against the same outbound contract.
+5. Wire the add command and view query inbound ports, HTTP adapters, routes and
+   Component graph. `view-cart` must read only the cart-view projection. HTTP
+   adapter tests use stub inbound ports to prove every declared outcome mapping;
+   behavior acceptance uses the real application handlers.
+
+The shared outbound contract must prove absent and expected-revision commits,
+ordered stream reads, projection reads, atomic event/projection/idempotency
+writes, exact stored-result replay, semantic request-ID misuse, and no partial
+state after conflicts or injected storage failures. Unknown or corrupt events
+must stop aggregate rehydration rather than becoming domain state. A generated
+cart-UUID collision must create no partial state and must retry through an
+injected UUID supplier.
+
+Prove the following behavior through the public backend boundary:
+
+- A first addition with no cart fields atomically establishes one cart and
+  returns its UUID, projected contents and first observation. An existing-cart
+  addition using its current observation aggregates quantity and returns the new
+  projection and observation.
+- Different first-add request UUIDs establish independent carts. Accepted first
+  and existing additions replay their exact original business result after later
+  changes without changing the current projection or history.
+- Missing or malformed request IDs and request-ID reuse with non-equal input are
+  invalid and create no state. A request ID used only by an invalid attempt
+  remains available because only `commit!` writes `command_requests`.
+- Concurrent equal deliveries accept one logical command and return one result.
+  Concurrent non-equal first-add deliveries using one new global request UUID
+  accept exactly one command; every loser is invalid and no second cart exists.
+- Cart items are returned in canonical product-UUID order. Elapsed time alone
+  does not expire a current observation. Viewing the returned cart is read-only
+  and reports the committed projection immediately.
+
+Run the reusable outbound contract against memory, SQLite and PostgreSQL. Run
+all 14 acceptance cases through the Ring boundary against fresh migrated SQLite
+and Testcontainers PostgreSQL. The PostgreSQL fixture owns a
+`PostgreSQLContainer` and a one-shot Flyway `GenericContainer` on one private
+Testcontainers network; it never relies on the developer Compose stack. Use a
+suite-scoped migrated container and reset all application tables between cases,
+while the dedicated migration suite retains its separate empty-database,
+migrate-twice proof. Exercise the equal and non-equal request-ID races against
+all three adapters, using barriers, bounded waits and separate database
+connections for persistent stores. Keep one real-Jetty first-add-then-view smoke
+test; do not duplicate the acceptance matrix over the network.
+
+Exit: the actor can establish, add to and view an open cart through the complete
+`add-product-item` operation, with atomic persistence, projection-only queries,
+exact retries and adapter parity proven. All 14 traceability rows are Verified.
 
 ### Iteration 2: Manage and View Contents
 
-- Deliver `UC-01/S02`, `UC-01/S03`, `UC-01/S04`, `UC-02/S02`, `UC-02/S04`, and
-  `UC-02/S05`.
-- Add quantity aggregation, removal, zero-quantity product removal, all input
-  validation, the 1000-unit per-product bound, checked arithmetic, UUID handling,
-  strict unknown-field and price-field rejection, and projected open-cart views.
+- Deliver `UC-01/S03`, `UC-01/S04`, `UC-02/S02`, `UC-02/S04`, and `UC-02/S05`.
+- Add removal, zero-quantity product removal, all remaining content validation,
+  the 1000-unit per-product bound, checked arithmetic, UUID handling, strict
+  unknown-field and price-field rejection, and projected open-cart views.
 - Distinguish invalid requested quantities (`400`) from valid additions rejected
   because the resulting product total would exceed 1000 (`422`). Return
   `422 cart-closed` for content changes carrying a closed cart's current
   observation, and `422 insufficient-product-quantity` for a removal below zero.
-- Serialize cart items in deterministic ascending product-UUID order on command
-  results *and* on `view-cart`, per the widened `SWR-020`. `UC-01/S02/TC02` and
-  `UC-02/S04/TC01` both add a product whose UUID sorts before one already held,
-  so insertion order and UUID order disagree and a natural-order read model fails.
-- Apply request-UUID idempotency to additions and removals on existing carts,
-  including sequential and concurrent repeats and request-ID misuse.
+- Retain the deterministic product-UUID ordering established by
+  `UC-01/S02/TC02` on command results and prove it independently on `view-cart`.
+  `UC-02/S04/TC01` uses insertion order that disagrees with UUID order so a
+  natural-order read model fails.
+- Extend request-UUID idempotency from additions to removals, including
+  sequential and concurrent repeats and request-ID misuse.
 - `UC-02/S02/TC03`: prove two consecutive `view-cart` calls return identical
   cart state at the same revision and append no history. Do not assert marker
   byte equality; different authentic tokens may represent that revision.
-- Prove elapsed time does not invalidate an otherwise current observation
-  (`UC-01/S02/TC05`) and removal from a closed cart is a business rejection
+- Prove removal from a closed cart is a business rejection
   (`UC-01/S04/TC14`).
 - Verify every rejection leaves stream revision, projections and event rows
   unchanged in memory, SQLite and PostgreSQL, and asserts its `SWR-008` category.

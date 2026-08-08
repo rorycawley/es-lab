@@ -6,10 +6,15 @@
  :deployment
  {:trusted-upstream? #boolean #or [#env TRUSTED_UPSTREAM_ENFORCED "false"]}
 
+ :observation
+ {:active-key-id "primary"
+  :keys {"primary" #or [#env OBSERVATION_SIGNING_KEY
+                         "local-development-observation-signing-key"]}}
+
  :db #profile
  {:postgres {:jdbc-url #or [#env JDBC_URL #env DATABASE_URL]
-             :username #env DB_USERNAME
-             :password #env DB_PASSWORD
+             :username #or [#env DB_USERNAME "cart_app"]
+             :password #or [#env DB_PASSWORD "cart_app"]
              :pool-size #long #or [#env DB_POOL_SIZE "10"]}
 
   :sqlite {:jdbc-url #or [#env SQLITE_JDBC_URL

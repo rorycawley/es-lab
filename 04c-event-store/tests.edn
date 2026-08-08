@@ -3,6 +3,26 @@
           :test-paths  ["test"]
           :ns-patterns ["cart\\.application\\.command-pipeline-test"]}
 
+         {:id          :core
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.(domain\\.(aggregate|project)|observation)-test"]}
+
+         {:id          :slices
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.slice\\.(add-product-item\\.handler|view-cart\\.handler|http-adapter)-test"]}
+
+         {:id          :adapter
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.adapter\\.out\\.persistence\\.adapter-contract-test"]}
+
+         {:id          :acceptance
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.acceptance\\.sqlite-iteration-one-test"]}
+
+         {:id          :postgres-iteration-one
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.postgres-iteration-one-test"]}
+
          {:id          :config
           :test-paths  ["test"]
           :ns-patterns ["platform\\.runtime\\.config-test"]}

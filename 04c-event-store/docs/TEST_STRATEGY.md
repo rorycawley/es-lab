@@ -100,10 +100,12 @@ Iteration 0 the HTTP contract suite must prove:
 - live health, readiness and OpenAPI responses conform to their schemas
 - business paths remain unmounted until their slices are delivered
 
-Once a business route is mounted, the same suite must add live conforming
-examples for every declared response status and must walk handler to contract so
-no undeclared status can escape. Contract validation remains test-scoped rather
-than becoming runtime request middleware.
+Once a business route is mounted, its HTTP adapter contract injects inbound-port
+stubs that produce each declared application outcome. This proves every response
+mapping conforms and that no undeclared status can escape without requiring a
+not-yet-delivered domain scenario. Acceptance tests use the real handler and
+exercise only behavior delivered by the current iteration. Contract validation
+remains test-scoped rather than becoming runtime request middleware.
 
 ## Migration Testing
 
@@ -117,9 +119,48 @@ assert schema-history ownership. Docker-backed tests own and stop their network
 and containers even when an assertion fails. Testcontainers reuse is disabled.
 
 The empty Iteration 0 migration roots intentionally apply zero versioned
-migrations. A later iteration replacing this baseline must change the assertions
-to require the first schema version; silently remaining at zero is then a test
+migrations. Iteration 1 replaces this baseline with schema version 1 for streams,
+events, command requests and both projections. Migration tests must then require
+that exact version and the required tables; silently remaining at zero is a test
 failure.
+
+## Iteration 1 Evidence
+
+Iteration 1 delivers 14 acceptance cases: all of `UC-01/S01`, all of
+`UC-01/S02`, and `UC-02/S01/TC01`. The suites are divided by the claim they own:
+
+| Claim | Task | Adapter matrix | Gate |
+|---|---|---|---|
+| Pure fold, evolve, add decisions, projectors and observation codec | `bb test:core` | None | Precommit and CI |
+| Add/view behavior through inbound ports | `bb test:slices` | Memory test adapters | Precommit and CI |
+| Outbound event, projection, idempotency and unit-of-work contracts | `bb test:adapter` / `bb test:postgres` | Memory and SQLite / Testcontainers PostgreSQL | Precommit / CI |
+| Public acceptance through the Ring boundary | `bb test:acceptance` / `bb test:postgres` | SQLite / Testcontainers PostgreSQL | Precommit / CI |
+| Real server composition | `bb test:component` | Memory | Precommit and CI |
+| Version 1 migrations | `bb test:migrations` / `bb test:migrations-postgres` | SQLite / PostgreSQL | Precommit / CI |
+
+Each acceptance test retains its exact `SPEC2.md` identifier in executable test
+data or its test name. The same 14-case suite runs through the Ring handler.
+Each SQLite case receives a newly migrated database. PostgreSQL cases use a
+suite-scoped `PostgreSQLContainer`, migrated by a one-shot Flyway
+`GenericContainer` on the same private Testcontainers network, with all
+application tables reset between cases. Scenario setup uses public commands
+rather than direct row insertion. Adapter inspection is allowed after the public
+interaction only for otherwise invisible durability claims such as no extra
+event, projection or idempotency row. Memory proves fast slice behavior and
+participates in the shared outbound contract, but it is not treated as
+persistent acceptance evidence.
+
+The equal-delivery races in `UC-01/S01/TC06` and `UC-01/S02/TC04`, and the
+non-equal global request-ID race in `UC-01/S01/TC08`, also run through the inbound
+port against every adapter. Persistent races use separate connections, a barrier
+before the contested operation and bounded completion waits. Tests assert both
+responses and durable rows: one accepted command, the expected event count,
+aligned projections and no partial loser state.
+
+The Iteration 1 traceability rows are Verified because their SQLite and
+PostgreSQL public-boundary cases both pass. The real Jetty component suite
+contains one first-add-then-view smoke test; repeating the 14-case matrix over a
+socket would add runtime without proving another composition claim.
 
 ## Gates
 
@@ -128,6 +169,11 @@ Use the smallest relevant task while editing:
 | Change | Command |
 |---|---|
 | Outcome policy | `bb test:policy` |
+| Domain, projectors or observation codec | `bb test:core` |
+| Add/view application behavior | `bb test:slices` |
+| Memory or SQLite persistence behavior | `bb test:adapter` |
+| SQLite public acceptance | `bb test:acceptance` |
+| PostgreSQL adapter or acceptance behavior | `bb test:postgres` |
 | Runtime configuration | `bb test:config` |
 | HTTP router or OpenAPI | `bb test:http-contract` |
 | Component lifecycle | `bb test:component` |
@@ -168,9 +214,9 @@ than relying on a developer's Compose database.
 
 ## Evolution by Iteration
 
-Iteration 1 adds pure domain tests, inbound add/view port tests, observation
-codec tests, shared persistence port contracts and the first nine acceptance
-tests. Each later slice adds its acceptance IDs to executable test names while
-retaining focused lower-level evidence. A row in requirements traceability moves
-from Planned to Verified only when its public-boundary acceptance test passes
-against the required persistent adapters.
+Iteration 1 adds pure domain and observation-codec tests, inbound add/view port
+tests, shared persistence port contracts and the first 14 acceptance tests. Each
+later slice adds its acceptance IDs to executable test names while retaining
+focused lower-level evidence. A row in requirements traceability moves from
+Planned to Verified only when its public-boundary acceptance test passes against
+the required persistent adapters.

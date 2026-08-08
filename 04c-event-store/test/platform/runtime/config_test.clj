@@ -5,7 +5,9 @@
 (def base-config
   {:store :memory
    :http {:host "127.0.0.1" :port 8080}
-   :deployment {:trusted-upstream? false}})
+   :deployment {:trusted-upstream? false}
+   :observation {:active-key-id "test"
+                 :keys {"test" "configuration-test-signing-key"}}})
 
 (deftest store-values-are-closed
   (is (= :memory (config/parse-store "memory")))
@@ -47,4 +49,5 @@
     (is (= :memory (:store loaded)))
     (is (= "127.0.0.1" (get-in loaded [:http :host])))
     (is (= 8080 (get-in loaded [:http :port])))
+    (is (= "primary" (get-in loaded [:observation :active-key-id])))
     (is (nil? (:db loaded)))))

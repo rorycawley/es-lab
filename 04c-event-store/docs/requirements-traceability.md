@@ -8,19 +8,19 @@ test links without renumbering these keys.
 
 | Test case | Iteration | Expected outcome | Verification |
 |---|---:|---|---|
-| UC-01/S01/TC01 | 1 | success | Planned |
-| UC-01/S01/TC02 | 1 | success | Planned |
-| UC-01/S01/TC03 | 1 | success | Planned |
-| UC-01/S01/TC04 | 1 | invalid | Planned |
-| UC-01/S01/TC05 | 1 | invalid | Planned |
-| UC-01/S01/TC06 | 1 | success | Planned |
-| UC-01/S01/TC07 | 1 | success | Planned |
-| UC-01/S01/TC08 | 1 | success + invalid | Planned |
-| UC-01/S02/TC01 | 2 | success | Planned |
-| UC-01/S02/TC02 | 2 | success | Planned |
-| UC-01/S02/TC03 | 2 | success | Planned |
-| UC-01/S02/TC04 | 2 | success | Planned |
-| UC-01/S02/TC05 | 2 | success | Planned |
+| UC-01/S01/TC01 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S01/TC02 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S01/TC03 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S01/TC04 | 1 | invalid | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S01/TC05 | 1 | invalid | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S01/TC06 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S01/TC07 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S01/TC08 | 1 | success + invalid | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S02/TC01 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S02/TC02 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S02/TC03 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S02/TC04 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
+| UC-01/S02/TC05 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
 | UC-01/S03/TC01 | 2 | success | Planned |
 | UC-01/S03/TC02 | 2 | success | Planned |
 | UC-01/S03/TC03 | 2 | success | Planned |
@@ -45,7 +45,7 @@ test links without renumbering these keys.
 | UC-01/S05/TC05 | 3 | conflict | Planned |
 | UC-01/S05/TC06 | 3 | invalid | Planned |
 | UC-01/S05/TC07 | 3 | conflict | Planned |
-| UC-02/S01/TC01 | 1 | success | Planned |
+| UC-02/S01/TC01 | 1 | success | Verified: [Iteration 1 suite](../test/cart/acceptance/iteration_one.clj) |
 | UC-02/S02/TC01 | 2 | success | Planned |
 | UC-02/S02/TC02 | 2 | success | Planned |
 | UC-02/S02/TC03 | 2 | success | Planned |

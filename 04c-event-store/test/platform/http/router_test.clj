@@ -34,6 +34,18 @@
     (is (= {:outcome "invalid" :code "route-not-found"}
            (body response)))))
 
+(deftest delivered-business-routes-are-mounted-when-adapters-are-supplied
+  (let [called (atom [])
+        adapter (fn [request]
+                  (swap! called conj (:uri request))
+                  {:status 200 :headers {} :body "{}"})
+        handler (router/handler {:add-product-item adapter
+                                 :view-cart adapter})]
+    (is (= 200 (:status (request handler :post
+                                 "/commands/add-product-item"))))
+    (is (= 200 (:status (request handler :post "/queries/view-cart"))))
+    (is (= ["/commands/add-product-item" "/queries/view-cart"] @called))))
+
 (deftest default-routing-errors-are-json
   (let [handler (router/handler)]
     (testing "unknown route"

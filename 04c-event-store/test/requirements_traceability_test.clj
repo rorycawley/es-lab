@@ -66,15 +66,28 @@
           (str id " expected from SPEC2 Then: " then)))))
 
 (deftest iteration-allocation-is-complete-and-stable
-  (is (= {"1" 9
-          "2" 28
+  (is (= {"1" 14
+          "2" 23
           "3" 7
           "4" 19
           "5" 18
           "6" 10}
          (frequencies (map :iteration (traceability-rows)))))
-  (is (every? #(= "Planned" (:verification %))
-              (traceability-rows))))
+  (let [verified-ids
+        (set (concat
+              (for [case (range 1 9)]
+                (format "UC-01/S01/TC%02d" case))
+              (for [case (range 1 6)]
+                (format "UC-01/S02/TC%02d" case))
+              ["UC-02/S01/TC01"]))
+        rows (traceability-rows)]
+    (is (= verified-ids
+           (set (map :id
+                     (filter #(str/starts-with? (:verification %)
+                                                "Verified:")
+                             rows)))))
+    (is (every? #(= "Planned" (:verification %))
+                (remove (comp verified-ids :id) rows)))))
 
 (deftest every-traced-case-belongs-to-a-prepared-slice
   (let [prepared-slices

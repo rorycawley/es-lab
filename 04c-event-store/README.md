@@ -1,9 +1,9 @@
 # Shopping Cart Backend
 
 This directory realizes [SPEC2.md](SPEC2.md) as the Clojure backend described in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Iteration 0 provides the
-walking skeleton, fixed architecture decisions, API contract, traceability and
-the shared command outcome pipeline. Cart behavior begins in Iteration 1.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Iteration 1 delivers first and
+existing-cart additions, projection-only cart viewing, signed observations and
+memory, SQLite and PostgreSQL persistence adapters.
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ the shared command outcome pipeline. Cart behavior begins in Iteration 1.
 - Clojure CLI 1.12
 - Babashka
 - mise for pinned lint and formatting tools
-- Docker for local PostgreSQL migration work
+- Docker for Testcontainers-backed tests and local PostgreSQL migration work
 
 ```sh
 bb install
@@ -22,10 +22,15 @@ bb run:memory
 
 The test taxonomy, suite ownership, isolation rules and iteration-by-iteration
 evolution are defined in [docs/TEST_STRATEGY.md](docs/TEST_STRATEGY.md).
-Iteration 0 provides these focused entry points:
+The current implementation provides these focused entry points:
 
 ```sh
 bb test:policy
+bb test:core
+bb test:slices
+bb test:adapter
+bb test:acceptance
+bb test:postgres
 bb test:http-contract
 bb test:component
 bb test:migrations
@@ -34,19 +39,21 @@ bb test:traceability
 bb test:architecture
 ```
 
-The 91 `SPEC2.md` cases remain Planned until their business slices are
-implemented; the Iteration 0 traceability test proves complete scheduling, not
-business acceptance.
+Fourteen `SPEC2.md` cases are Verified by the shared SQLite and Testcontainers
+PostgreSQL acceptance suite. The remaining 77 cases stay Planned until their
+business slices are implemented.
 
 The local server binds to `127.0.0.1:8080` and exposes:
 
 - `GET /health`
 - `GET /ready`
 - `GET /openapi.json`
+- `POST /commands/add-product-item`
+- `POST /queries/view-cart`
 
-Business endpoints are defined in OpenAPI but are not routed until their slices
-are delivered. This avoids exposing placeholder behavior that could be mistaken
-for an implemented use case.
+The remaining business endpoints are defined in OpenAPI but are not routed until
+their slices are delivered. This avoids exposing placeholder behavior that could
+be mistaken for an implemented use case.
 
 ## Configuration
 
@@ -56,6 +63,7 @@ for an implemented use case.
 | `BIND_HOST` | `127.0.0.1` | HTTP bind address |
 | `PORT` | `8080` | HTTP port; use `0` in tests |
 | `TRUSTED_UPSTREAM_ENFORCED` | `false` | Required for wildcard binding |
+| `OBSERVATION_SIGNING_KEY` | local development key | HMAC secret used to authenticate cart observations |
 | `JDBC_URL` / `DATABASE_URL` | none | Required for PostgreSQL configuration |
 | `SQLITE_JDBC_URL` | `jdbc:sqlite:target/cart-event-store.sqlite3` | SQLite database |
 

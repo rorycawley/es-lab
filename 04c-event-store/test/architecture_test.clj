@@ -44,6 +44,13 @@
    "platform.persistence"
    "cart.adapter.out.persistence"])
 
+(def forbidden-slice-handler-dependencies
+  ["ring."
+   "reitit."
+   "next.jdbc"
+   "platform."
+   "cart.adapter.out.persistence"])
+
 (defn- violations [path-fragment forbidden]
   (for [file (clojure-source-files)
         :when (str/includes? (relative-path file) path-fragment)
@@ -64,3 +71,7 @@
 (deftest application-shell-does-not-import-concrete-adapters
   (is (empty? (violations (str "cart" java.io.File/separator "application")
                           forbidden-application-dependencies))))
+
+(deftest slice-handlers-depend-on-ports-not-transport-or-storage-adapters
+  (is (empty? (violations (str "handler.clj")
+                          forbidden-slice-handler-dependencies))))

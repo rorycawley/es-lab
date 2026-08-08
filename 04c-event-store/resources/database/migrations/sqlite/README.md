@@ -1,4 +1,4 @@
 # SQLite Migrations
 
-This is the SQLite Flyway migration root. Iteration 0 intentionally defines no
-cart tables; the first schema migration arrives with the persistence slice.
+This is the SQLite Flyway migration root. `V1__cart_event_store.sql` defines the
+Iteration 1 event, command-request and projection schema.

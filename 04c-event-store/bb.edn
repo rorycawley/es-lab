@@ -34,14 +34,14 @@
           (assoc "TESTCONTAINERS_HOST_OVERRIDE" host-ip)))))
 
   help
-  {:doc              "Show prerequisites and the Iteration 0 commands"
+  {:doc              "Show prerequisites and the current development commands"
    :override-builtin true
    :task
    (do
      (println "Prerequisites: Java 21, Clojure CLI, Babashka and mise")
      (println "Run `bb install`, then `bb ci`.")
      (println "Run `bb precommit` for the no-Docker local gate.")
-     (println "Use `bb run:memory` to start the walking skeleton."))}
+     (println "Use `bb run:memory` to start the Iteration 1 backend."))}
 
   install
   {:doc  "Install pinned tools through mise"
@@ -51,9 +51,26 @@
   {:doc  "Test shared cross-slice application policy"
    :task (sh "clojure" "-M:test" "--focus" ":policy")}
 
+  test:core
+  {:doc  "Test the pure cart core, projectors and observation codec"
+   :task (sh "clojure" "-M:test" "--focus" ":core")}
+
   test:slices
-  {:doc     "Iteration 0 compatibility alias; no use-case slice is delivered yet"
-   :depends [test:policy]}
+  {:doc  "Test add-product-item and view-cart through their inbound ports"
+   :task (sh "clojure" "-M:test" "--focus" ":slices")}
+
+  test:adapter
+  {:doc  "Run the shared memory and SQLite persistence contract"
+   :task (sh "clojure" "-M:test" "--focus" ":adapter")}
+
+  test:acceptance
+  {:doc  "Run the 14 Iteration 1 acceptance cases against SQLite"
+   :task (sh "clojure" "-M:test" "--focus" ":acceptance")}
+
+  test:postgres
+  {:doc  "Run PostgreSQL adapter and acceptance evidence with Testcontainers"
+   :task (sh {:extra-env (docker-env)}
+             "clojure" "-M:test" "--focus" ":postgres-iteration-one")}
 
   test:config
   {:doc  "Test configuration and deployment-boundary validation"
@@ -85,12 +102,13 @@
              "clojure" "-M:test" "--focus" ":migrations-postgres")}
 
   test:fast
-  {:doc     "Run every Iteration 0 test without Docker"
-   :depends [test:policy test:config test:http-contract test:component
-             test:architecture test:traceability test:migrations]}
+  {:doc     "Run every no-Docker test"
+   :depends [test:policy test:core test:slices test:adapter test:acceptance
+             test:config test:http-contract test:component test:architecture
+             test:traceability test:migrations]}
 
   precommit
-  {:doc     "Run static checks and every no-Docker Iteration 0 suite"
+  {:doc     "Run static checks and every no-Docker suite"
    :depends [check test:fast]}
 
   test:all
@@ -120,7 +138,7 @@
    :depends [check:lint check:fmt check:whitespace]}
 
   ci
-  {:doc     "Run the Iteration 0 quality gate"
+  {:doc     "Run the complete quality gate"
    :depends [check test:all]}
 
   fix
@@ -135,7 +153,7 @@
    :task (sh "clojure" "-M:dev:test" "-r")}
 
   run:memory
-  {:doc  "Start the memory-configured walking skeleton"
+  {:doc  "Start the memory-configured Iteration 1 backend"
    :task (sh {:extra-env {"CART_STORE" "memory"}} "clojure" "-M:run")}
 
   migrate:sqlite

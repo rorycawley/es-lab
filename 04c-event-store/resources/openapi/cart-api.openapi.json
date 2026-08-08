@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Shopping Cart Backend",
-    "version": "0.1.0-iteration-0",
+    "version": "0.2.0-iteration-1",
     "description": "Task-based JSON API for the finalized SPEC2 cart behavior. The service must run behind a trusted upstream authentication and authorization boundary. Cart identifiers and observation markers are not credentials."
   },
   "x-deployment-constraint": "No direct untrusted ingress. Authentication and authorization are supplied by a trusted upstream boundary.",
