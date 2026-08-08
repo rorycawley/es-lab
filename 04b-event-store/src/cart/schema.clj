@@ -21,11 +21,6 @@
    [:quantity   [:int {:min 1}]]
    [:unit-price Money]])
 
-(def ProductItem
-  [:map
-   [:product-id [:string {:min 1}]]
-   [:quantity   [:int {:min 1}]]])
-
 ;; Epoch millis rather than an instant type: unambiguous, and it round-trips
 ;; through anything. `inst?` would be too loose — it is satisfied by both
 ;; java.util.Date and java.time.Instant, so drift between them passes silently.
@@ -148,16 +143,11 @@
 ;; Results
 ;; ---------------------------------------------------------------------------
 
-(def DecideResult
-  [:multi {:dispatch first}
-   [:ok    [:tuple [:= :ok] [:sequential Event]]]
-   [:error [:tuple [:= :error] [:map [:reason :keyword]]]]])
-
-(def ExpectedVersion
-  "SPEC R4.4."
-  [:or [:int {:min 0}] [:enum :stream-does-not-exist :any]])
-
 (def StreamRead
+  "What every EventStore implementation must hand back from read-stream.
+   Asserted by the shared outbound contract suite against memory, SQLite and
+   Postgres, so the three adapters cannot drift from this shape or from each
+   other."
   [:map {:closed true}
    [:events  [:sequential Event]]
    [:version [:int {:min 0}]]

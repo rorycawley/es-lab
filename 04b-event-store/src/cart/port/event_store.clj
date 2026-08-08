@@ -17,4 +17,4 @@
       | [:conflict {:expected 7 :current 9}]
 
      SPEC R4.6: a conflict is data. The shell decides whether that becomes a
-     retry or an HTTP 412."))
+     retry or an HTTP 409."))

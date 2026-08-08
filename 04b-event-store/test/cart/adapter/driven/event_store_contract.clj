@@ -2,7 +2,10 @@
   "One set of behaviours all stores must satisfy (SPEC R6.6), so the fast
    in-memory store cannot drift from the real one."
   (:require [cart.port.event-store :as store]
+            [cart.schema :as schema]
             [clojure.test :refer [is testing]]
+            [malli.core :as m]
+            [malli.error :as me]
             [matcher-combinators.test :refer [thrown-match?]]))
 
 (defn- event [who]
@@ -11,6 +14,18 @@
           :product-item {:product-id who :quantity 1 :unit-price 1999}
           :added-at 1735689600000}})
 
+(defn- read-stream!
+  "Reads, and holds every implementation to cart.schema/StreamRead on the way
+   out. The schema is closed, so an adapter that grows an extra key or changes
+   a type fails here rather than drifting away from its siblings."
+  [es stream-id]
+  (let [read (store/read-stream es stream-id)]
+    (when-let [errs (m/explain schema/StreamRead read)]
+      (is (nil? errs)
+          (str "read-stream violated cart.schema/StreamRead: "
+               (pr-str (me/humanize errs)) " got " (pr-str read))))
+    read))
+
 (defn verify
   "Runs the contract against a freshly built store. `new-store` is a 0-arg fn
    returning an EventStore, and `new-id` a 0-arg fn returning a stream id."
@@ -18,7 +33,7 @@
   (testing "empty stream"
     (let [es (new-store)]
       (is (= {:events [] :version 0 :exists? false}
-             (store/read-stream es (new-id))))))
+             (read-stream! es (new-id))))))
 
   (testing "create then read"
     (let [es (new-store), id (new-id)
@@ -26,7 +41,7 @@
       (is (= :ok outcome))
       (is (= 1 (:version data)))
       (is (true? (:created-new-stream? data)))
-      (is (= 1 (:version (store/read-stream es id))))))
+      (is (= 1 (:version (read-stream! es id))))))
 
   (testing "append bumps the version by the number of events"
     (let [es (new-store), id (new-id)]
@@ -41,7 +56,7 @@
       (let [[outcome data] (store/append-to-stream es id [(event "b")] 0)]
         (is (= :conflict outcome))
         (is (= 1 (:current data))))
-      (is (= 1 (count (:events (store/read-stream es id)))))))
+      (is (= 1 (count (:events (read-stream! es id)))))))
 
   (testing ":stream-does-not-exist is enforced"
     (let [es (new-store), id (new-id)]
@@ -68,7 +83,7 @@
                            {:expected-version expected}
                            (store/append-to-stream es id [(event "a")] expected)))
         (is (= {:events [] :version 0 :exists? false}
-               (store/read-stream es id))))))
+               (read-stream! es id))))))
 
   (testing "empty appends are rejected at the port boundary"
     (let [es (new-store), id (new-id)]
@@ -76,7 +91,7 @@
                          {:stream-id id}
                          (store/append-to-stream es id [] :stream-does-not-exist)))
       (is (= {:events [] :version 0 :exists? false}
-             (store/read-stream es id)))))
+             (read-stream! es id)))))
 
   (testing "event metadata survives the round trip, and its absence does too"
     (let [es (new-store), id (new-id)
@@ -84,7 +99,7 @@
                                                 :source "web"})
           without (event "b")]
       (store/append-to-stream es id [with-md without] :stream-does-not-exist)
-      (let [[e1 e2] (:events (store/read-stream es id))]
+      (let [[e1 e2] (:events (read-stream! es id))]
         (is (= with-md e1))
         (is (= without e2))
         (is (not (contains? e2 :metadata))
@@ -96,4 +111,4 @@
                               :stream-does-not-exist)
       (is (= ["a" "b" "c"]
              (mapv #(get-in % [:data :product-item :product-id])
-                   (:events (store/read-stream es id))))))))
+                   (:events (read-stream! es id))))))))
