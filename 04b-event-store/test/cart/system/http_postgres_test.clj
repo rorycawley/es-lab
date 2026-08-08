@@ -1,4 +1,4 @@
-(ns cart.acceptance.http-postgres-test
+(ns cart.system.http-postgres-test
   "Full-stack HTTP smoke over real Postgres.
 
    This is intentionally thin. The domain, SQL function, Postgres adapter and

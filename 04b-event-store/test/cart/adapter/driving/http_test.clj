@@ -9,7 +9,14 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
-  (:import [java.io ByteArrayInputStream]
+  (:import [com.atlassian.oai.validator OpenApiInteractionValidator]
+           [com.atlassian.oai.validator.model Request$Method
+            SimpleRequest$Builder
+            SimpleResponse$Builder]
+           [com.atlassian.oai.validator.report SimpleValidationReportFormat]
+           [io.swagger.v3.parser OpenAPIV3Parser]
+           [io.swagger.v3.parser.core.models ParseOptions]
+           [java.io ByteArrayInputStream]
            [java.nio.charset StandardCharsets]))
 
 (def now 1735689600000)
@@ -40,8 +47,14 @@
 (defn- response-body [response]
   (json/parse-string (:body response)))
 
+(defn- contract-resource []
+  (io/resource "openapi/cart-api.openapi.json"))
+
+(defn- contract-text []
+  (slurp (contract-resource)))
+
 (defn- contract []
-  (json/parse-string (slurp (io/resource "openapi/cart-api.openapi.json"))))
+  (json/parse-string (contract-text)))
 
 (defn- pointer-token [token]
   (-> token
@@ -59,149 +72,109 @@
     (resolve-ref openapi ref)
     node))
 
-(declare schema-errors)
+(defn- parse-options []
+  (doto (ParseOptions.)
+    (.setResolve true)
+    (.setResolveCombinators true)
+    (.setValidateInternalRefs true)
+    (.setValidateExternalRefs false)))
 
-(defn- schema-path [path]
-  (if (seq path)
-    (str "$." (str/join "." path))
-    "$"))
+(defn- parse-openapi-contract []
+  (.readContents (OpenAPIV3Parser.) (contract-text) nil (parse-options)))
 
-(defn- type-matches? [type value]
-  (case type
-    "object"  (map? value)
-    "array"   (vector? value)
-    "string"  (string? value)
-    "integer" (integer? value)
-    "number"  (number? value)
-    "boolean" (or (true? value) (false? value))
-    true))
+(def ^:private openapi-validator
+  (delay (-> (OpenApiInteractionValidator/createForInlineApiSpecification
+              (contract-text))
+             (.withStrictOperationPathMatching)
+             (.build))))
 
-(defn- type-errors [path schema value]
-  (if-let [type (get schema "type")]
-    (when-not (type-matches? type value)
-      [(str (schema-path path) " must be " type)])
-    []))
+(defn- request-method [method]
+  (Request$Method/valueOf (str/upper-case method)))
 
-(defn- required-errors [path schema value]
-  (if (map? value)
-    (for [key (get schema "required" [])
-          :when (not (contains? value key))]
-      (str (schema-path (conj path key)) " is required"))
-    []))
+(defn- validator-request-builder [method path]
+  (case method
+    "get"     (SimpleRequest$Builder/get path)
+    "post"    (SimpleRequest$Builder/post path)
+    "put"     (SimpleRequest$Builder/put path)
+    "patch"   (SimpleRequest$Builder/patch path)
+    "delete"  (SimpleRequest$Builder/delete path)
+    "head"    (SimpleRequest$Builder/head path)
+    "options" (SimpleRequest$Builder/options path)
+    "trace"   (SimpleRequest$Builder/trace path)))
 
-(defn- additional-property-errors [path schema value]
-  (if (and (map? value) (false? (get schema "additionalProperties")))
-    (let [allowed (set (keys (get schema "properties" {})))]
-      (for [key (keys value)
-            :when (not (contains? allowed key))]
-        (str (schema-path (conj path key)) " is not allowed")))
-    []))
+(defn- validator-request [path method body]
+  (let [builder (validator-request-builder method path)]
+    (when (some? body)
+      (.withContentType builder "application/json")
+      (.withBody builder (json/generate-string body)))
+    (.build builder)))
 
-(defn- property-errors [openapi path schema value]
-  (if (map? value)
-    (mapcat (fn [[key property-schema]]
-              (when (contains? value key)
-                (schema-errors openapi (conj path key) property-schema (get value key))))
-            (get schema "properties" {}))
-    []))
+(defn- validator-response [response]
+  (let [builder (SimpleResponse$Builder/status (:status response))]
+    (when-let [content-type (get-in response [:headers "content-type"])]
+      (.withContentType builder content-type))
+    (when-let [body (:body response)]
+      (.withBody builder body))
+    (.build builder)))
 
-(defn- item-errors [openapi path schema value]
-  (if (and (vector? value) (contains? schema "items"))
-    (mapcat (fn [index item]
-              (schema-errors openapi (conj path index) (get schema "items") item))
-            (range)
-            value)
-    []))
+(defn- report-text [report]
+  (.apply (SimpleValidationReportFormat/getInstance) report))
 
-(defn- minimum-errors [path schema value]
-  (if (and (number? value)
-           (contains? schema "minimum")
-           (< value (get schema "minimum")))
-    [(str (schema-path path) " must be >= " (get schema "minimum"))]
-    []))
+(defn- assert-valid-report [label report]
+  (is (not (.hasErrors report))
+      (str label "\n" (report-text report))))
 
-(defn- min-length-errors [path schema value]
-  (if (and (string? value)
-           (contains? schema "minLength")
-           (< (count value) (get schema "minLength")))
-    [(str (schema-path path) " length must be >= " (get schema "minLength"))]
-    []))
+(defn- request-validation-report [path method body]
+  (.validateRequest @openapi-validator
+                    (validator-request path method body)))
 
-(defn- const-errors [path schema value]
-  (if (and (contains? schema "const") (not= value (get schema "const")))
-    [(str (schema-path path) " must be " (pr-str (get schema "const")))]
-    []))
-
-(defn- enum-errors [path schema value]
-  (if (and (contains? schema "enum")
-           (not (some #{value} (get schema "enum"))))
-    [(str (schema-path path) " must be one of " (pr-str (get schema "enum")))]
-    []))
-
-(defn- all-of-errors [openapi path schema value]
-  (mapcat #(schema-errors openapi path % value) (get schema "allOf" [])))
-
-(defn- one-of-errors [openapi path schema value]
-  (if-let [schemas (seq (get schema "oneOf"))]
-    (let [results (map #(schema-errors openapi path % value) schemas)
-          matches (count (filter empty? results))]
-      (when-not (= 1 matches)
-        [(str (schema-path path) " must match exactly one oneOf schema")]))
-    []))
-
-(defn- schema-errors [openapi path schema value]
-  (let [schema (resolve-ref-node openapi schema)]
-    (vec
-     (concat
-      (all-of-errors openapi path schema value)
-      (one-of-errors openapi path schema value)
-      (type-errors path schema value)
-      (required-errors path schema value)
-      (additional-property-errors path schema value)
-      (property-errors openapi path schema value)
-      (item-errors openapi path schema value)
-      (minimum-errors path schema value)
-      (min-length-errors path schema value)
-      (const-errors path schema value)
-      (enum-errors path schema value)))))
-
-(defn- request-schema [openapi path method]
-  (get-in openapi ["paths" path method "requestBody" "content" "application/json" "schema"]))
-
-(defn- response-schema [openapi path method status]
-  (->> (get-in openapi ["paths" path method "responses" (str status)])
-       (resolve-ref-node openapi)
-       (#(get-in % ["content" "application/json" "schema"]))))
+(defn- response-validation-report [path method response]
+  (.validateResponse @openapi-validator
+                     path
+                     (request-method method)
+                     (validator-response response)))
 
 (defn- assert-request-contract [path method body]
-  (let [openapi (contract)
-        schema  (request-schema openapi path method)
-        errors  (schema-errors openapi [] schema body)]
-    (is (some? schema) (str "missing request schema for " method " " path))
-    (is (= [] errors) (str method " " path " request: " (pr-str errors)))))
+  (assert-valid-report (str method " " path " request")
+                       (request-validation-report path method body)))
 
 (defn- assert-response-contract [path method response]
-  (let [openapi       (contract)
-        content-type  (get-in response [:headers "content-type"])
-        schema        (response-schema openapi path method (:status response))
-        body          (response-body response)
-        errors        (schema-errors openapi [] schema body)]
-    (is (str/starts-with? content-type "application/json")
-        (str method " " path " content-type was " (pr-str content-type)))
-    (is (some? schema)
-        (str "missing response schema for "
-             method
-             " "
-             path
-             " "
-             (:status response)))
-    (is (= [] errors)
-        (str method " "
-             path
-             " "
-             (:status response)
-             " response: "
-             (pr-str errors)))))
+  (assert-valid-report (str method " " path " "
+                            (:status response)
+                            " response")
+                       (response-validation-report path method response)))
+
+(def ^:private http-methods
+  #{"get" "put" "post" "delete" "options" "head" "patch" "trace"})
+
+(defn- operations [openapi]
+  (for [[path path-item] (sort-by key (get openapi "paths"))
+        [method operation] (sort-by key path-item)
+        :when (http-methods method)]
+    {:path path :method method :operation operation}))
+
+(defn- request-body-combinations []
+  (let [openapi (contract)]
+    (set
+     (for [{:keys [path method operation]} (operations openapi)
+           :let [request-body (some->> (get operation "requestBody")
+                                       (resolve-ref-node openapi))]
+           :when request-body
+           content-type (sort (keys (get request-body "content")))]
+       [path method content-type]))))
+
+(defn- response-content-combinations []
+  (let [openapi (contract)]
+    (set
+     (for [{:keys [path method operation]} (operations openapi)
+           [status response] (sort-by key (get operation "responses"))
+           :let [response (resolve-ref-node openapi response)]
+           content-type (sort (keys (get response "content")))]
+       [path method status content-type]))))
+
+(defn- compatible-content-type? [declared actual]
+  (or (= declared actual)
+      (str/starts-with? actual (str declared ";"))))
 
 (def add-item-task
   {"cart-id" "c1"
@@ -230,6 +203,176 @@
 (defn- add-item-task-for [cart-id]
   (assoc add-item-task "cart-id" cart-id))
 
+(defn- cart-only-task-for [cart-id]
+  {"cart-id" cart-id})
+
+(defn- call
+  ([handler method path]
+   (handler (request method path)))
+  ([handler method path body]
+   (handler (request method path body))))
+
+(defn- add-product-item! [handler cart-id]
+  (call handler :post "/commands/add-product-item" (add-item-task-for cart-id)))
+
+(defn- remove-product-item! [handler body]
+  (call handler :post "/commands/remove-product-item" body))
+
+(defn- confirm-cart! [handler body]
+  (call handler :post "/commands/confirm-cart" body))
+
+(defn- cancel-cart! [handler body]
+  (call handler :post "/commands/cancel-cart" body))
+
+(def ^:private valid-request-examples
+  {["/commands/add-product-item" "post" "application/json"] add-item-task
+   ["/commands/remove-product-item" "post" "application/json"] add-item-task
+   ["/commands/confirm-cart" "post" "application/json"] confirm-task
+   ["/commands/cancel-cart" "post" "application/json"] confirm-task
+   ["/queries/get-cart" "post" "application/json"] cart-query-request
+   ["/queries/get-cart-events" "post" "application/json"] cart-query-request})
+
+(def ^:private live-response-examples
+  {["/health" "get" "200" "application/json"]
+   (fn [] (call (new-handler) :get "/health"))
+
+   ["/openapi.json" "get" "200" "application/json"]
+   (fn [] (call (new-handler) :get "/openapi.json"))
+
+   ["/commands/add-product-item" "post" "201" "application/json"]
+   (fn []
+     (let [handler (new-handler)]
+       (add-product-item! handler "add-created")))
+
+   ["/commands/add-product-item" "post" "200" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "add-existing"]
+       (add-product-item! handler cart-id)
+       (call handler
+             :post
+             "/commands/add-product-item"
+             (assoc (add-item-task-for cart-id) "expected-version" "any"))))
+
+   ["/commands/add-product-item" "post" "400" "application/json"]
+   (fn [] (call (new-handler) :post "/commands/add-product-item" {}))
+
+   ["/commands/add-product-item" "post" "409" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "add-conflict"]
+       (add-product-item! handler cart-id)
+       (call handler
+             :post
+             "/commands/add-product-item"
+             (assoc (add-item-task-for cart-id) "expected-version" 0))))
+
+   ["/commands/add-product-item" "post" "422" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "add-rejected"]
+       (add-product-item! handler cart-id)
+       (confirm-cart! handler (cart-only-task-for cart-id))
+       (call handler
+             :post
+             "/commands/add-product-item"
+             (assoc (add-item-task-for cart-id) "expected-version" "any"))))
+
+   ["/commands/remove-product-item" "post" "200" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "remove-ok"]
+       (add-product-item! handler cart-id)
+       (remove-product-item! handler (add-item-task-for cart-id))))
+
+   ["/commands/remove-product-item" "post" "400" "application/json"]
+   (fn [] (call (new-handler) :post "/commands/remove-product-item" {}))
+
+   ["/commands/remove-product-item" "post" "409" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "remove-conflict"]
+       (add-product-item! handler cart-id)
+       (remove-product-item! handler
+                             (assoc (add-item-task-for cart-id)
+                                    "expected-version"
+                                    0))))
+
+   ["/commands/remove-product-item" "post" "422" "application/json"]
+   (fn []
+     (let [handler (new-handler)]
+       (remove-product-item! handler
+                             (add-item-task-for "remove-rejected"))))
+
+   ["/commands/confirm-cart" "post" "200" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "confirm-ok"]
+       (add-product-item! handler cart-id)
+       (confirm-cart! handler (cart-only-task-for cart-id))))
+
+   ["/commands/confirm-cart" "post" "400" "application/json"]
+   (fn [] (call (new-handler) :post "/commands/confirm-cart" {}))
+
+   ["/commands/confirm-cart" "post" "409" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "confirm-conflict"]
+       (add-product-item! handler cart-id)
+       (confirm-cart! handler
+                      (assoc (cart-only-task-for cart-id)
+                             "expected-version"
+                             0))))
+
+   ["/commands/confirm-cart" "post" "422" "application/json"]
+   (fn [] (confirm-cart! (new-handler) (cart-only-task-for "confirm-rejected")))
+
+   ["/commands/cancel-cart" "post" "200" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "cancel-ok"]
+       (add-product-item! handler cart-id)
+       (cancel-cart! handler (cart-only-task-for cart-id))))
+
+   ["/commands/cancel-cart" "post" "400" "application/json"]
+   (fn [] (call (new-handler) :post "/commands/cancel-cart" {}))
+
+   ["/commands/cancel-cart" "post" "409" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "cancel-conflict"]
+       (add-product-item! handler cart-id)
+       (cancel-cart! handler
+                     (assoc (cart-only-task-for cart-id)
+                            "expected-version"
+                            0))))
+
+   ["/commands/cancel-cart" "post" "422" "application/json"]
+   (fn []
+     (let [handler (new-handler)
+           cart-id "cancel-rejected"]
+       (add-product-item! handler cart-id)
+       (cancel-cart! handler (cart-only-task-for cart-id))
+       (cancel-cart! handler
+                     (assoc (cart-only-task-for cart-id)
+                            "expected-version"
+                            "any"))))
+
+   ["/queries/get-cart" "post" "200" "application/json"]
+   (fn [] (call (new-handler) :post "/queries/get-cart" cart-query-request))
+
+   ["/queries/get-cart" "post" "400" "application/json"]
+   (fn [] (call (new-handler) :post "/queries/get-cart" {}))
+
+   ["/queries/get-cart-events" "post" "200" "application/json"]
+   (fn [] (call (new-handler)
+                :post
+                "/queries/get-cart-events"
+                cart-query-request))
+
+   ["/queries/get-cart-events" "post" "400" "application/json"]
+   (fn [] (call (new-handler) :post "/queries/get-cart-events" {}))})
+
 (deftest health-check
   (let [response ((new-handler) (request :get "/health"))]
     (is (= 200 (:status response)))
@@ -239,6 +382,12 @@
   (let [response ((new-handler) (request :get "/openapi.json"))]
     (is (= 200 (:status response)))
     (is (= (contract) (response-body response)))))
+
+(deftest checked-in-openapi-contract-parses-with-swagger-parser
+  (let [result (parse-openapi-contract)]
+    (is (some? (.getOpenAPI result)))
+    (is (= [] (vec (.getMessages result)))
+        (str "OpenAPI parser messages: " (pr-str (vec (.getMessages result)))))))
 
 (deftest contract-declares-task-commands-and-post-queries
   (let [paths (get (contract) "paths")]
@@ -259,122 +408,60 @@
                   "/queries/get-cart-events"]]
       (is (= #{"post"} (set (keys (get paths path))))))))
 
-(deftest contract-command-and-query-routes-are-mounted
+(deftest contract-operations-are-mounted-with-declared-methods
   (let [handler (new-handler)]
-    (doseq [path ["/commands/add-product-item"
-                  "/commands/remove-product-item"
-                  "/commands/confirm-cart"
-                  "/commands/cancel-cart"
-                  "/queries/get-cart"
-                  "/queries/get-cart-events"]]
-      (testing path
-        (let [status (:status (handler (request :post path {})))]
+    (doseq [{:keys [path method]} (operations (contract))]
+      (testing (str method " " path)
+        (let [status (:status (call handler (keyword method) path {}))]
           (is (not= 404 status))
           (is (not= 405 status)))))
     (is (= 405 (:status (handler (request :get "/queries/get-cart")))))
     (is (= 405 (:status (handler (request :get "/queries/get-cart-events")))))))
 
-(deftest openapi-contract-validates-representative-request-bodies
-  (assert-request-contract "/commands/add-product-item" "post" add-item-task)
-  (assert-request-contract "/commands/add-product-item"
-                           "post"
-                           (assoc add-item-task "expected-version" 0))
-  (assert-request-contract "/commands/add-product-item"
-                           "post"
-                           (assoc add-item-task "expected-version" "any"))
-  (assert-request-contract "/commands/remove-product-item" "post" add-item-task)
-  (assert-request-contract "/commands/confirm-cart" "post" confirm-task)
-  (assert-request-contract "/commands/cancel-cart" "post" confirm-task)
-  (assert-request-contract "/queries/get-cart" "post" cart-query-request)
-  (assert-request-contract "/queries/get-cart-events" "post" cart-query-request)
-  (let [openapi (contract)
-        schema  (request-schema openapi "/commands/add-product-item" "post")]
-    (is (seq (schema-errors openapi
-                            []
-                            schema
-                            (assoc add-item-task "expected-version" "0")))
+(deftest every-openapi-request-body-content-type-has-a-valid-example
+  (let [expected (request-body-combinations)
+        actual   (set (keys valid-request-examples))]
+    (is (= expected actual)
+        (str "request example keys must match OpenAPI request bodies. missing="
+             (pr-str (sort (remove actual expected)))
+             " extra="
+             (pr-str (sort (remove expected actual)))))
+    (doseq [[path method content-type :as key] (sort expected)]
+      (testing (str method " " path " " content-type)
+        (is (= "application/json" content-type))
+        (assert-request-contract path method (get valid-request-examples key)))))
+
+  (doseq [expected-version [0 "any" "stream-does-not-exist"]]
+    (assert-request-contract "/commands/add-product-item"
+                             "post"
+                             (assoc add-item-task
+                                    "expected-version"
+                                    expected-version)))
+  (let [report (request-validation-report
+                "/commands/add-product-item"
+                "post"
+                (assoc add-item-task "expected-version" "0"))]
+    (is (.hasErrors report)
         "numeric expected-version strings must not satisfy the OpenAPI contract")))
 
-(deftest live-http-responses-conform-to-openapi-contract
-  (let [handler (new-handler)]
-    (assert-response-contract "/health" "get" (handler (request :get "/health")))
-    (assert-response-contract "/openapi.json"
-                              "get"
-                              (handler (request :get "/openapi.json")))
-
-    (let [add-created (handler (request :post
-                                        "/commands/add-product-item"
-                                        add-item-task))]
-      (is (= 201 (:status add-created)))
-      (assert-response-contract "/commands/add-product-item" "post" add-created))
-
-    (let [add-existing (handler (request :post
-                                         "/commands/add-product-item"
-                                         (assoc add-item-task
-                                                "expected-version"
-                                                "any")))]
-      (is (= 200 (:status add-existing)))
-      (assert-response-contract "/commands/add-product-item" "post" add-existing))
-
-    (let [summary (handler (request :post "/queries/get-cart" cart-query-request))]
-      (is (= 200 (:status summary)))
-      (assert-response-contract "/queries/get-cart" "post" summary))
-
-    (let [events (handler (request :post
-                                   "/queries/get-cart-events"
-                                   cart-query-request))]
-      (is (= 200 (:status events)))
-      (assert-response-contract "/queries/get-cart-events" "post" events))
-
-    (let [conflict (handler (request :post
-                                     "/commands/add-product-item"
-                                     (assoc add-item-task "expected-version" 0)))]
-      (is (= 409 (:status conflict)))
-      (assert-response-contract "/commands/add-product-item" "post" conflict))
-
-    (let [bad-request (handler (request :post
-                                        "/commands/add-product-item"
-                                        (assoc add-item-task
-                                               "expected-version"
-                                               "banana")))]
-      (is (= 400 (:status bad-request)))
-      (assert-response-contract "/commands/add-product-item" "post" bad-request))
-
-    (let [confirm-ok (handler (request :post "/commands/confirm-cart" confirm-task))]
-      (is (= 200 (:status confirm-ok)))
-      (assert-response-contract "/commands/confirm-cart" "post" confirm-ok)))
-
-  (let [handler (new-handler)
-        rejected (handler (request :post
-                                   "/commands/confirm-cart"
-                                   {"cart-id" "empty"}))]
-    (is (= 422 (:status rejected)))
-    (assert-response-contract "/commands/confirm-cart" "post" rejected))
-
-  (let [handler (new-handler)
-        _       (handler (request :post
-                                  "/commands/add-product-item"
-                                  (add-item-task-for "remove-c1")))
-        removed (handler (request :post
-                                  "/commands/remove-product-item"
-                                  (add-item-task-for "remove-c1")))]
-    (is (= 200 (:status removed)))
-    (assert-response-contract "/commands/remove-product-item" "post" removed))
-
-  (let [handler   (new-handler)
-        _         (handler (request :post
-                                    "/commands/add-product-item"
-                                    (add-item-task-for "cancel-c1")))
-        cancelled (handler (request :post
-                                    "/commands/cancel-cart"
-                                    {"cart-id" "cancel-c1"}))]
-    (is (= 200 (:status cancelled)))
-    (assert-response-contract "/commands/cancel-cart" "post" cancelled))
-
-  (let [handler   (new-handler)
-        bad-query (handler (request :post "/queries/get-cart" {}))]
-    (is (= 400 (:status bad-query)))
-    (assert-response-contract "/queries/get-cart" "post" bad-query)))
+(deftest every-openapi-json-response-has-a-live-conforming-example
+  (let [expected (response-content-combinations)
+        actual   (set (keys live-response-examples))]
+    (is (= expected actual)
+        (str "live response example keys must match OpenAPI responses. missing="
+             (pr-str (sort (remove actual expected)))
+             " extra="
+             (pr-str (sort (remove expected actual)))))
+    (doseq [[path method status content-type :as key] (sort expected)
+            :let [example (get live-response-examples key)]
+            :when example]
+      (testing (str method " " path " " status " " content-type)
+        (let [response (example)
+              actual-content-type (get-in response [:headers "content-type"])]
+          (is (= (Long/parseLong status) (:status response)))
+          (is (compatible-content-type? content-type actual-content-type)
+              (str "declared " content-type ", got " (pr-str actual-content-type)))
+          (assert-response-contract path method response))))))
 
 (deftest commands-go-through-the-command-port
   (let [called       (atom nil)

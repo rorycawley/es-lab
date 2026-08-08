@@ -2,6 +2,7 @@
   "Component system for the HTTP service."
   (:require [cart.adapter.driven.event-store-memory :as memory]
             [cart.adapter.driven.event-store-postgres :as postgres]
+            [cart.adapter.driven.event-store-sqlite :as sqlite]
             [cart.adapter.driving.http :as http]
             [cart.app.command :as app-command]
             [cart.app.query :as app-query]
@@ -28,6 +29,33 @@
     (if store
       this
       (assoc this :store (postgres/make-store (:datasource database)))))
+
+  (stop [this]
+    (assoc this :store nil)))
+
+(defrecord SQLiteDatabase [config datasource]
+  component/Lifecycle
+
+  (start [this]
+    (if datasource
+      this
+      (assoc this :datasource (sqlite/make-datasource config))))
+
+  (stop [this]
+    (when datasource
+      (.close datasource))
+    (assoc this :datasource nil)))
+
+(defrecord SQLiteEventStore [database store]
+  component/Lifecycle
+
+  (start [this]
+    (if store
+      this
+      (assoc this :store (sqlite/make-store
+                          (:datasource database)
+                          (select-keys (:config database)
+                                       [:busy-timeout-ms])))))
 
   (stop [this]
     (assoc this :store nil)))
@@ -89,14 +117,15 @@
   "Builds the service system.
 
    config:
-   {:store :postgres|:memory
+   {:store :postgres|:sqlite|:memory
     :db    {:jdbc-url ... :username ... :password ... :pool-size ...}
     :http  {:port 8080}
     :retry optional command retry config
     :clock optional zero-arg fn returning epoch millis}
 
-   Migrations are deliberately not part of service startup. Run Flyway as a
-   one-shot deployment step before starting this system."
+   Postgres migrations are deliberately not part of service startup. Run Flyway
+   as a one-shot deployment step before starting that system. SQLite is
+   embedded, so its datasource applies its own adapter migration by default."
   [{:keys [store db http retry clock]
     :or   {store :postgres
            http  {:port 8080}}}]
@@ -105,6 +134,19 @@
     (component/system-map
      :database (map->Database {:config db})
      :event-store (component/using (map->PostgresEventStore {})
+                                   [:database])
+     :cart-command (component/using (map->CartCommand {:retry retry})
+                                    [:event-store])
+     :cart-query (component/using (map->CartQuery {})
+                                  [:event-store])
+     :http-server (component/using (map->HttpServer {:config http
+                                                     :clock clock})
+                                   [:cart-command :cart-query]))
+
+    :sqlite
+    (component/system-map
+     :database (map->SQLiteDatabase {:config db})
+     :event-store (component/using (map->SQLiteEventStore {})
                                    [:database])
      :cart-command (component/using (map->CartCommand {:retry retry})
                                     [:event-store])

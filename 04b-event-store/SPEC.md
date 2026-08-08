@@ -1,7 +1,7 @@
 # SPEC
 
 A minimal event-sourced shopping cart, built to demonstrate **optimistic
-concurrency control** in Postgres.
+concurrency control** in Postgres and SQLite.
 
 The point of this project is one guarantee: *when two requests act on the same
 cart at the same moment, exactly one of them may write.*
@@ -22,7 +22,7 @@ cart.app.command           cart command use cases.
 cart.app.handle            stream-level command service: read -> fold -> decide -> append.
 cart.app.query             query use cases.
 cart.app.stream            stream id naming.
-cart.adapter.driven.*      postgres and in-memory event stores.
+cart.adapter.driven.*      postgres, sqlite and in-memory event stores.
 cart.adapter.driving.http  Ring/Reitit JSON API.
 cart.system                component lifecycle wiring.
 cart.main                  process entrypoint.
@@ -47,6 +47,25 @@ Application use cases depend on ports, never on concrete adapters.
 Driving adapters MUST NOT require `cart.core` directly. Commands enter through
 `cart.port.cart-command` and command use cases. Queries enter through
 `cart.port.cart-query` and query handlers.
+
+Ports are the application's allowed conversations with the outside world:
+
+- Inbound/driving ports are use-case boundaries. `cart.port.cart-command` and
+  `cart.port.cart-query` are the public command/query contracts used by HTTP,
+  CLI, tests, or any future driving adapter.
+- Outbound/driven ports are dependency-inversion contracts used by application
+  use cases. `cart.port.event-store` is implemented by memory, SQLite and
+  Postgres adapters.
+
+Tests are adapters in the same hexagonal sense. Unit tests are driving adapters
+that consume inbound ports directly. Outbound contract tests are test harnesses
+that drive concrete infrastructure adapters through the outbound port contract.
+
+Ports are component contracts. Implementations may be replaced in-process
+(`:memory`, `:sqlite`, `:postgres`) or later moved behind a service boundary, but
+the public behavior contract must remain stable. Cross-cutting concerns such as
+logging, retries, metrics and tracing belong in the imperative shell or
+use-case pipeline, not in `cart.core`.
 
 ### R1.3 — no side effects in the core
 
@@ -116,7 +135,7 @@ Two tables.
 |-------------------|--------|--------------------------|
 | `stream_id`       | TEXT   | primary key, non-empty   |
 | `stream_type`     | TEXT   | e.g. `shopping_cart`, non-empty |
-| `stream_position` | BIGINT | the version, positive    |
+| `stream_position` | BIGINT/INTEGER | the version, positive |
 
 This table exists so that concurrent writers have a single row to collide on.
 
@@ -125,16 +144,19 @@ This table exists so that concurrent writers have a single row to collide on.
 | column             | type        | notes                              |
 |--------------------|-------------|------------------------------------|
 | `stream_id`        | TEXT        |                                    |
-| `stream_position`  | BIGINT      | 1-based, per stream                |
-| `message_id`       | UUID        | unique event id                    |
+| `stream_position`  | BIGINT/INTEGER | 1-based, per stream             |
+| `message_id`       | UUID/TEXT   | unique event id                    |
 | `message_type`     | TEXT        | e.g. `cart.event/confirmed`        |
-| `message_data`     | JSONB       | plain JSON event payload           |
-| `message_metadata` | JSONB       | plain JSON request provenance      |
-| `global_position`  | BIGINT      | from a sequence; unused for now    |
-| `transaction_id`   | XID8        | `pg_current_xact_id()`; unused now |
-| `created`          | TIMESTAMPTZ |                                    |
+| `message_data`     | JSONB/TEXT  | plain JSON event payload           |
+| `message_metadata` | JSONB/TEXT  | plain JSON request provenance      |
+| `global_position`  | BIGINT/INTEGER | unused for now                  |
+| `transaction_id`   | XID8        | Postgres only; unused now          |
+| `created`          | TIMESTAMPTZ/TEXT |                               |
 
-`PRIMARY KEY (stream_id, stream_position)`.
+Postgres uses `PRIMARY KEY (stream_id, stream_position)`. SQLite uses
+`global_position INTEGER PRIMARY KEY` plus `UNIQUE (stream_id, stream_position)`
+because its autoincrementing rowid must be the integer primary key. The same
+per-stream uniqueness backstop is required in both persistent adapters.
 
 `messages.stream_id` has a foreign key to `streams.stream_id`. `message_id` is
 globally unique. `message_data` and `message_metadata` must be JSON objects; the
@@ -144,20 +166,22 @@ store does not accept arbitrary scalar/array JSON as an event payload.
 
 Real events start at position 1.
 
-### R3.2 — the primary key is a backstop
+### R3.2 — per-stream uniqueness is a backstop
 
-The PK on `messages` MUST exist so that a hole in the version logic surfaces as
-a database error rather than a silent double-write.
+The unique constraint on `(stream_id, stream_position)` MUST exist so that a
+hole in the version logic surfaces as a database error rather than a silent
+double-write.
 
-The DDL MUST also reject impossible state if the SQL function is bypassed:
-non-positive positions, orphan messages, duplicate message ids, empty message
-types and non-object JSON payloads/metadata.
+The DDL MUST also reject impossible state if the normal adapter path is
+bypassed: non-positive positions, orphan messages, duplicate message ids, empty
+message types and non-object JSON payloads/metadata.
 
 ### R3.3 — global_position and transaction_id are provisioned now, used later
 
-`messages` is append-only; adding columns to it later is expensive. Both columns
-fill themselves via `DEFAULT` and are ignored by application code until
-background projections exist.
+`messages` is append-only; adding columns to it later is expensive.
+`global_position` fills itself in both persistent stores and is ignored by
+application code until background projections exist. `transaction_id` is
+Postgres-only because it relies on `pg_current_xact_id()`.
 
 ---
 
@@ -173,10 +197,16 @@ the failure is a silent lost update.
 last event's `stream_position` in a **single query**, so events and version are
 always from the same snapshot.
 
-### R4.2 — check and write are one atomic statement
+### R4.2 — check and write are one atomic database operation
 
-The version check MUST happen inside the same statement as the write. A
-read-then-write from the client is a race no matter how carefully it is coded.
+The version check MUST happen inside the same database-enforced critical
+section as the write. A read-then-write from the client is a race no matter how
+carefully it is coded.
+
+Postgres implements this as one `append_to_stream` SQL function call. SQLite
+implements it as one `BEGIN IMMEDIATE` transaction: acquire the write lock,
+read the stream version, claim/update the stream row, insert messages, commit.
+The current version is never read outside the transaction that enforces it.
 
 ### R4.3 — losing means zero rows
 
@@ -188,6 +218,10 @@ read-then-write from the client is a race no matter how carefully it is coded.
 Both paths MUST report failure the same way. Neither may abort the transaction,
 because a losing write must not destroy other legitimate work in flight.
 
+SQLite serializes writers with `BEGIN IMMEDIATE`, so the loser detects the
+already-committed version before it attempts to insert messages. It still
+returns the same `[:conflict ...]` value and writes nothing.
+
 ### R4.4 — expected version has three modes
 
 | caller passes           | meaning                                    |
@@ -198,20 +232,21 @@ because a losing write must not destroy other legitimate work in flight.
 
 `:stream-does-not-exist` MUST be genuinely enforced.
 
-`:any` MUST NOT be able to conflict. Reading the version and then updating
-`WHERE stream_position = <that value>` is not "no check" — a writer committing
-in the gap moves the version and the update matches nothing, producing a
-conflict the caller explicitly opted out of. `:any` uses a real upsert
+`:any` MUST NOT be able to conflict. In Postgres it uses a real upsert
 (`ON CONFLICT ... DO UPDATE SET stream_position = streams.stream_position + n`),
 which blocks on the contended row and then applies on top of whatever
-committed.
+committed. In SQLite, `BEGIN IMMEDIATE` serializes writers before the current
+version is read, so appending on top of the committed current version is also
+not a check.
 
 ### R4.5 — the loser learns the real current version
 
 On conflict the store returns `[:conflict {:expected ... :current ...}]` where
 `:current` is the **freshest committed version at the moment the conflict was
-detected**. This requires re-reading `streams` after the conflict is detected;
-the value read at the start of the call is stale by then.
+detected**. In Postgres this requires re-reading `streams` after the conflict is
+detected; the value read at the start of the function is stale by then. In
+SQLite the writer lock is acquired before reading, so the conflict is detected
+against the current committed version inside the same transaction.
 
 With two writers that is exactly "the version after the winner committed". With
 three or more it may be *past* the immediate winner — a third writer can commit
@@ -241,7 +276,7 @@ factor 1.5.
 
 ---
 
-### R4.9 — read committed isolation is required
+### R4.9 — read committed isolation is required for Postgres
 
 The design rests on a losing `UPDATE` matching zero rows. That is a read
 committed behaviour: Postgres waits for the blocking transaction, then
@@ -254,7 +289,11 @@ which aborts the transaction and makes R4.3 false.
 `append_to_stream` MUST therefore assert its isolation level and raise if it is
 not read committed, so that the constraint fails loudly rather than silently.
 
-### R4.10 — the function validates its own inputs
+SQLite does not expose the same isolation levels. Its adapter MUST use
+`BEGIN IMMEDIATE`, not a deferred transaction that first reads and later tries
+to upgrade to a writer.
+
+### R4.10 — the Postgres function validates its own inputs
 
 `unnest` of several arrays pads the shorter ones with NULL and yields
 `max(length)` rows. It also flattens multidimensional arrays. Either behaviour
@@ -266,12 +305,12 @@ is claimed.
 
 ## 5. Serialisation
 
-### R5.1 — plain JSONB, not an opaque Clojure encoding
+### R5.1 — plain database JSON, not an opaque Clojure encoding
 
-Event payloads and metadata are stored as plain JSON in `jsonb` columns, using
-typed Postgres `jsonb` parameters from the adapter. This keeps stored events
-inspectable and queryable with native JSONB operators, for example
-`message_data ->> 'cart-id'`.
+Event payloads and metadata are stored as plain JSON: Postgres uses `jsonb`
+columns and SQLite uses UTF-8 text constrained with `json_valid`/`json_type`.
+This keeps stored events inspectable and queryable with native JSON operators,
+for example Postgres `message_data ->> 'cart-id'` or SQLite `json_extract`.
 
 The event type is not stored inside JSON. It lives in `message_type` as text and
 is reconstructed as a Clojure keyword on read. JSON fields themselves must be
@@ -280,9 +319,9 @@ values inside `message_data` or `message_metadata` are encoded as JSON strings.
 
 HTTP request bodies MUST be decoded as UTF-8, and JSON responses MUST declare
 `application/json; charset=utf-8`. The Postgres database used by the event store
-MUST be created with UTF8 encoding. English, Chinese and Arabic user data must
-round-trip through HTTP JSON, `text` columns and `jsonb` without lossy
-conversion.
+MUST be created with UTF8 encoding; SQLite databases MUST report UTF-8 encoding.
+English, Chinese and Arabic user data must round-trip through HTTP JSON, text
+columns and database JSON without lossy conversion.
 
 Domain events, commands and errors carry stable machine-readable values, not
 localized display text. Localized English, Chinese or Arabic labels/messages
@@ -291,9 +330,9 @@ not in `cart.core`.
 
 ### R5.2 — events are validated on the way out of storage
 
-Events read from Postgres MUST be validated against `cart.schema/Event`. A
-failure throws: an uninterpretable event means state would be computed from
-incomplete history.
+Events read from persistent stores MUST be validated against
+`cart.schema/Event`. A failure throws: an uninterpretable event means state
+would be computed from incomplete history.
 
 Commands built in-process are NOT re-validated at runtime.
 
@@ -315,16 +354,29 @@ event type and keep an `evolve` method for the old one indefinitely.
 
 ## 6. Tests
 
-### R6.1 — the core is tested without infrastructure
+### R6.1 — domain business logic is tested without infrastructure
 
-`cart.core` tests use no fixtures, no Docker, no I/O.
+`cart.core` tests use no fixtures, no Docker, no I/O. Aggregate invariants and
+business rules SHOULD be tested directly through pure public functions such as
+`decide` and `fold`, not through HTTP, databases or private helpers.
 
-### R6.2 — every command has a `decide` method
+### R6.2 — primary unit tests exercise inbound ports
+
+The primary unit/developer suite MUST test the application component through
+its inbound ports: `cart.port.cart-command`, `cart.port.cart-query`, and any
+future integration-event driving port.
+
+Unit tests MUST NOT enter through HTTP, Ring, Jetty, or concrete implementation
+namespaces such as `cart.app.handle`. HTTP tests are adapter contract tests.
+They prove transport mapping, OpenAPI conformance and dispatch into ports; they
+are not unit tests.
+
+### R6.3 — every command has a `decide` method
 
 A test compares the dispatch values in `cart.schema/Command` against
 `(methods decide)`. This substitutes for TypeScript's exhaustiveness check.
 
-### R6.3 — events survive the storage round trip
+### R6.4 — events survive the storage round trip
 
 A generative test encodes malli-generated events into their storage shape
 (`message_type`, `message_data`, `message_metadata`), decodes them, and asserts
@@ -332,7 +384,7 @@ equality. This catches drift in event type reconstruction, JSON keys and numeric
 values. A separate test fixes the explicit contract that keyword values inside
 JSON become strings.
 
-### R6.4 — concurrency is proven against real Postgres
+### R6.5 — concurrency is proven against real Postgres
 
 Two appends at the same expected version, released simultaneously by a
 `CyclicBarrier`, on **separate connections**. Assertions:
@@ -352,12 +404,12 @@ rather than the UPDATE path.
 Each race is repeated 20 times, because a race that happens not to interleave
 proves nothing.
 
-### R6.5 — the same suite runs against both adapters
+### R6.6 — the same suite runs against every event-store adapter
 
-The in-memory and Postgres stores are exercised by one shared set of contract
-tests, so the fast store cannot drift from the real one.
+The in-memory, Postgres and SQLite stores are exercised by one shared set of
+contract tests, so adapters cannot drift from each other.
 
-### R6.6 — Postgres tests run migrations through a Flyway Testcontainer
+### R6.7 — Postgres tests run migrations through a Flyway Testcontainer
 
 The Postgres adapter fixture MUST start a Postgres Testcontainer and then run a
 separate one-shot Flyway Testcontainer against it before tests receive a
@@ -367,7 +419,7 @@ The Testcontainers fixture should mirror local Compose: same Postgres major
 version, same initdb role script, same migration directory, same Flyway image,
 and the app role `cart_app` tested through the real EventStore port.
 
-### R6.7 — races are tested at two levels
+### R6.8 — Postgres races are tested at two levels
 
 | level    | file                       | asserts on                          |
 |----------|----------------------------|-------------------------------------|
@@ -377,7 +429,7 @@ and the app role `cart_app` tested through the real EventStore port.
 A failure at only one level localises the fault immediately: SQL function, or
 Clojure marshalling.
 
-### R6.8 — a crashed thread must not be counted as a clean loser
+### R6.9 — a crashed thread must not be counted as a clean loser
 
 Race results MUST be sorted into three buckets — won, lost, threw — never two.
 
@@ -387,6 +439,14 @@ whether the loser returned `success = false` or died with a unique-constraint
 violation — which is precisely the distinction R4.3 exists to enforce.
 
 Every race test MUST assert the `threw` bucket is empty.
+
+### R6.10 — SQLite races are proven through the EventStore port
+
+SQLite has no PL/pgSQL layer, so its race tests run through the adapter. They
+MUST cover concurrent expected-version appends, concurrent creates, multi-event
+appends, `:any` appends and `:any` creates. The assertions are the same:
+exactly the allowed writers win, conflicts are returned as data, no thread
+throws, and only winner rows exist.
 
 ---
 
@@ -466,24 +526,30 @@ Queries are POST endpoints with request bodies, not resource-shaped GETs:
 The current query implementation may rebuild state from events internally, but
 that is a query handler concern, not an HTTP concern.
 
-### R7.6 — Component owns service lifecycle, not schema lifecycle
+### R7.6 — Component owns service lifecycle
 
 The service system uses `com.stuartsierra/component` to own stateful resources:
-Postgres datasource, command event store, command handler, query handler, and
-Jetty server.
+datasource, command event store, command handler, query handler, and Jetty
+server.
 
-Starting the HTTP service MUST NOT run Flyway migrations. Schema migration is a
-separate deployment step, preferably a one-shot Flyway container or Kubernetes
-Job/init container before the app starts. The app database role MUST NOT require
-DDL privileges to serve traffic.
+Starting the Postgres HTTP service MUST NOT run Flyway migrations. Postgres
+schema migration is a separate deployment step, preferably a one-shot Flyway
+container or Kubernetes Job/init container before the app starts. The app
+database role MUST NOT require DDL privileges to serve traffic.
 
-Stopping the system MUST stop Jetty and close the datasource.
+SQLite is embedded in the app process, and in-memory SQLite cannot be migrated
+by a separate container. The SQLite datasource component MAY run the
+SQLite-specific Flyway migration on startup; that side effect remains in the
+imperative shell/adapter, not in the core or use cases.
+
+Stopping the system MUST stop Jetty and close the datasource when one is
+present.
 
 ### R7.7 — local Compose runs Flyway as a one-shot container
 
 `compose.yaml` provides a local Postgres service and a `flyway/flyway` service.
-The Flyway service mounts `resources/db/migration` read-only and exits after
-`migrate`.
+The Flyway service mounts `resources/db/postgres/migration` read-only and exits
+after `migrate`.
 
 The local app role is `cart_app`. It may read streams and execute
 `append_to_stream`; it must not need table-write or DDL privileges.
@@ -495,13 +561,23 @@ POST query reads, business rejection, optimistic conflict, `:any`, malformed
 JSON, invalid expected version, invalid command shape, invalid query shape and
 removal of legacy resource-shaped routes.
 
+The checked-in OpenAPI document MUST parse with Swagger Parser. HTTP adapter
+contract tests MUST validate every declared request-body content type and every
+declared response status/content-type combination with an OpenAPI
+request/response validator. Representative examples are not enough once the
+contract is the source of truth.
+
 ---
 
 ## 8. Environment
 
 - Postgres **18.4**, started per test run by Testcontainers.
-- Schema applied by Flyway from `resources/db/migration`.
+- Postgres schema applied by Flyway from `resources/db/postgres/migration`.
+- SQLite schema applied by Flyway from `resources/db/sqlite/migration`.
 - Local development may use Compose: `postgres` stays up, `flyway` is a
   one-shot migration container, and `cart_app` is the app role.
+- Local SQLite development may use `bb run:sqlite` with
+  `target/cart-event-store.sqlite3`.
 - Tooling pinned by `mise.toml`; tasks in `bb.edn`.
-- Docker must be running for adapter tests. Core tests do not need it.
+- Docker must be running for Postgres adapter tests. Core, memory, SQLite and
+  HTTP adapter tests do not need it.

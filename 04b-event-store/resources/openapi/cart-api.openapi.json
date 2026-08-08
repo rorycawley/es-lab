@@ -540,47 +540,44 @@
       "Error": {
         "type": "object",
         "required": ["error"],
+        "additionalProperties": true,
         "properties": {
           "error": {
             "type": "string"
-          }
+          },
+          "details": {},
+          "expected-version": {}
         }
       },
       "VersionConflict": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Error"
+        "type": "object",
+        "required": ["error", "expected", "current"],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
           },
-          {
-            "type": "object",
-            "required": ["expected", "current"],
-            "properties": {
-              "expected": {
-                "$ref": "#/components/schemas/ExpectedVersion"
-              },
-              "current": {
-                "type": "integer",
-                "minimum": 0
-              }
-            }
+          "expected": {
+            "$ref": "#/components/schemas/ExpectedVersion"
+          },
+          "current": {
+            "type": "integer",
+            "minimum": 0
           }
-        ]
+        }
       },
       "CommandRejected": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Error"
+        "type": "object",
+        "required": ["error", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
           },
-          {
-            "type": "object",
-            "required": ["reason"],
-            "properties": {
-              "reason": {
-                "type": "string"
-              }
-            }
+          "reason": {
+            "type": "string"
           }
-        ]
+        }
       }
     }
   }

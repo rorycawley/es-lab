@@ -1,6 +1,6 @@
 (ns cart.adapter.driven.event-store-postgres
   "Postgres event store. All concurrency control lives in the SQL function
-   append_to_stream (see resources/db/migration/V1__event_store.sql)."
+   append_to_stream (see resources/db/postgres/migration/V1__event_store.sql)."
   (:require [cart.port.event-store :as port]
             [cart.schema :as schema]
             [cheshire.core :as json]

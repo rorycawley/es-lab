@@ -1,5 +1,5 @@
 (ns cart.adapter.driven.event-store-postgres-test
-  "SPEC R6.4 — proves that when two requests act on the same cart at the same
+  "SPEC R6.5 — proves that when two requests act on the same cart at the same
    moment, exactly one may write."
   (:require [cart.adapter.driven.event-store-contract :as contract]
             [cart.adapter.driven.event-store-postgres :as pg]
@@ -447,7 +447,7 @@
                           :metadata))))))
 
 ;; ---------------------------------------------------------------------------
-;; Shared contract (SPEC R6.5)
+;; Shared contract (SPEC R6.6)
 ;; ---------------------------------------------------------------------------
 
 (deftest satisfies-the-event-store-contract

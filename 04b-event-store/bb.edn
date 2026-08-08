@@ -22,7 +22,12 @@
           (def local-postgres-env
             {"JDBC_URL"    "jdbc:postgresql://localhost:5432/event_store"
              "DB_USERNAME" "cart_app"
-             "DB_PASSWORD" "cart_app"}))
+             "DB_PASSWORD" "cart_app"})
+
+          (def local-sqlite-env
+            {"CART_STORE"        "sqlite"
+             "SQLITE_JDBC_URL"  "jdbc:sqlite:target/cart-event-store.sqlite3"
+             "SQLITE_POOL_SIZE" "4"}))
 
   help
   {:doc              "Show setup prerequisites and available tasks"
@@ -32,20 +37,24 @@
        (println "Prerequisites:")
        (println "  1. Install mise: curl https://mise.run | sh")
        (println "  2. Run: bb install")
-       (println "  3. Docker running (adapter tests only)")
+       (println "  3. Docker running (Postgres adapter tests only)")
        (println "")
        (println "Then:")
        (println "  bb tasks       list all tasks")
        (println "  bb precommit   local no-Docker gate before committing")
        (println "  bb ci          full CI gate, including Postgres 18.4 via Testcontainers")
-       (println "  bb test:core   pure core + serialisation. fast, no Docker.")
-       (println "  bb test:perf   HTTP performance smoke tests")
+       (println "  bb test:business-logic pure core invariants. fast, no Docker.")
+       (println "  bb test:unit   primary unit tests through command/query ports. fast, no Docker.")
+       (println "  bb test:outbound-sqlite SQLite EventStore contract tests. fast, no Docker.")
+       (println "  bb test:http-contract HTTP adapter + OpenAPI contract tests")
+       (println "  bb test:http-perf HTTP performance smoke tests")
        (println "  bb test        full suite, including Postgres 18.4 via Testcontainers")
        (println "  bb up          start Postgres, run Flyway, then start the HTTP API")
        (println "  bb down        stop local containers, remove the DB volume, clean artefacts")
        (println "  bb db:up       start the local Postgres container")
        (println "  bb migrate     run Flyway in its own one-shot container")
        (println "  bb run:memory  start the HTTP API with the in-memory store")
+       (println "  bb run:sqlite  start the HTTP API with a local SQLite file")
        (println "  bb run         start the HTTP API with Postgres; needs JDBC_URL")
        (println "  bb db:down     stop local containers and remove the dev volume")
        (println "")
@@ -71,41 +80,113 @@
   {:doc  "Install pinned tools via mise"
    :task (sh "mise" "install")}
 
-  test:core
-  {:doc  "Run the pure core and serialisation tests (no Docker needed)"
-   :task (sh "clojure" "-M:test" "--focus" ":core")}
+  test:business-logic
+  {:doc  "Run pure domain behavior and aggregate invariant tests"
+   :task (sh "clojure" "-M:test" "--focus" ":business-logic")}
 
-  test:app
-  {:doc  "Run application/use-case tests (no Docker needed)"
-   :task (sh "clojure" "-M:test" "--focus" ":app")}
+  test:serialisation
+  {:doc  "Run event storage JSON serialisation boundary tests"
+   :task (sh "clojure" "-M:test" "--focus" ":boundary-serialisation")}
 
-  test:memory
-  {:doc  "Run in-memory adapter contract tests (no Docker needed)"
-   :task (sh "clojure" "-M:test" "--focus" ":adapter-memory")}
+  test:unit
+  {:doc  "Run primary unit tests through inbound command/query/integration-event ports"
+   :task (sh "clojure" "-M:test" "--focus" ":unit")}
 
-  test:http
-  {:doc  "Run HTTP adapter and OpenAPI contract tests (no Docker needed)"
-   :task (sh "clojure" "-M:test" "--focus" ":http")}
+  test:outbound-memory
+  {:doc  "Run in-memory EventStore outbound port contract tests"
+   :task (sh "clojure" "-M:test" "--focus" ":outbound-memory")}
 
-  test:perf
+  test:outbound-sqlite
+  {:doc  "Run SQLite EventStore outbound port contract tests (no Docker needed)"
+   :task (sh "clojure" "-M:test" "--focus" ":outbound-sqlite")}
+
+  test:outbound-postgres
+  {:doc  "Run Postgres SQL and EventStore outbound port tests"
+   :task (sh {:extra-env (docker-env)}
+             "clojure"
+             "-M:test"
+             "--focus"
+             ":outbound-postgres")}
+
+  test:http-contract
+  {:doc  "Run HTTP driving adapter and OpenAPI contract tests (no Docker needed)"
+   :task (sh "clojure" "-M:test" "--focus" ":http-contract")}
+
+  test:component-lifecycle
+  {:doc  "Run Component lifecycle and memory-backed Jetty smoke tests"
+   :task (sh "clojure" "-M:test" "--focus" ":component-lifecycle")}
+
+  test:http-perf
   {:doc  "Run HTTP performance smoke tests (no Docker needed)"
-   :task (sh "clojure" "-M:test" "--focus" ":perf")}
+   :task (sh "clojure" "-M:test" "--focus" ":http-perf")}
+
+  test:system-sqlite
+  {:doc  "Run HTTP system smoke tests with SQLite (no Docker needed)"
+   :task (sh "clojure" "-M:test" "--focus" ":system-sqlite")}
+
+  test:system-postgres
+  {:doc  "Run HTTP system smoke tests with Postgres/Flyway/Testcontainers"
+   :task (sh {:extra-env (docker-env)}
+             "clojure"
+             "-M:test"
+             "--focus"
+             ":system-postgres")}
 
   test:fast
   {:doc  "Run all no-Docker test suites"
-   :depends [test:core test:app test:memory test:http]}
+   :depends [test:business-logic
+             test:serialisation
+             test:unit
+             test:outbound-memory
+             test:outbound-sqlite
+             test:http-contract
+             test:component-lifecycle
+             test:system-sqlite]}
 
   precommit
   {:doc  "Run the local no-Docker gate before committing"
    :depends [check test:fast]}
 
   test:postgres
-  {:doc  "Run Postgres/Flyway/Testcontainers tests"
-   :task (sh {:extra-env (docker-env)} "clojure" "-M:test" "--focus" ":postgres")}
+  {:doc  "Run all Postgres/Flyway/Testcontainers tests"
+   :depends [test:outbound-postgres test:system-postgres]}
+
+  test:outbound
+  {:doc  "Run outbound adapter contract tests, including Postgres"
+   :depends [test:outbound-memory test:outbound-sqlite test:outbound-postgres]}
+
+  test:adapters
+  {:doc  "Run adapter, component and system tests, including Postgres"
+   :depends [test:outbound test:http-contract test:component-lifecycle
+             test:system-sqlite test:system-postgres]}
+
+  test:core
+  {:doc  "Alias: run domain business-logic and serialisation boundary tests"
+   :depends [test:business-logic test:serialisation]}
+
+  test:app
+  {:doc  "Alias: run primary unit tests through inbound ports"
+   :depends [test:unit]}
+
+  test:memory
+  {:doc  "Alias: run in-memory EventStore outbound port contract tests"
+   :depends [test:outbound-memory]}
+
+  test:sqlite
+  {:doc  "Alias: run SQLite outbound adapter and SQLite system smoke tests"
+   :depends [test:outbound-sqlite test:system-sqlite]}
+
+  test:http
+  {:doc  "Alias: run HTTP contract and component lifecycle tests"
+   :depends [test:http-contract test:component-lifecycle]}
+
+  test:perf
+  {:doc  "Alias: run HTTP performance smoke tests"
+   :depends [test:http-perf]}
 
   test:adapter
-  {:doc  "Run adapter tests, including Postgres/Flyway/Testcontainers"
-   :depends [test:memory test:http test:postgres]}
+  {:doc  "Alias: run adapter, component and system tests"
+   :depends [test:adapters]}
 
   test
   {:doc  "Run the whole suite (requires Docker)"
@@ -128,6 +209,10 @@
   run:memory
   {:doc  "Run the HTTP API with the in-memory store"
    :task (sh {:extra-env {"CART_STORE" "memory"}} "clojure" "-M:run")}
+
+  run:sqlite
+  {:doc  "Run the HTTP API with a local SQLite file"
+   :task (sh {:extra-env local-sqlite-env} "clojure" "-M:run")}
 
   up
   {:doc  "Start local Postgres, migrate it, then run the HTTP API with Postgres"

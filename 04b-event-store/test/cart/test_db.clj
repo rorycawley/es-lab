@@ -40,7 +40,7 @@
 (defn- flyway-container [network]
   (doto (GenericContainer. (DockerImageName/parse flyway-image))
     (.withNetwork network)
-    (.withFileSystemBind (host-path "resources/db/migration")
+    (.withFileSystemBind (host-path "resources/db/postgres/migration")
                          "/flyway/migrations"
                          BindMode/READ_ONLY)
     (.withCommand (into-array String

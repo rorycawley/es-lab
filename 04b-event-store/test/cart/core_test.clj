@@ -66,8 +66,17 @@
           :product-item {:product-id product-id :quantity quantity :unit-price 1999}}
    :metadata {:now now}})
 
+(defn- remove-cmd [product-id quantity]
+  {:type :cart.command/remove-product-item
+   :data {:cart-id "c1"
+          :product-item {:product-id product-id :quantity quantity :unit-price 1999}}
+   :metadata {:now now}})
+
 (def confirm-cmd
   {:type :cart.command/confirm :data {:cart-id "c1"} :metadata {:now now}})
+
+(def cancel-cmd
+  {:type :cart.command/cancel :data {:cart-id "c1"} :metadata {:now now}})
 
 (deftest adding-to-an-empty-cart-succeeds
   (let [[outcome events] (core/decide (add-cmd "shoes" 3) core/initial-state)]
@@ -75,25 +84,47 @@
     (is (= 1 (count events)))
     (is (= :cart.event/product-item-added (:type (first events))))
     (is (= now (get-in (first events) [:data :added-at]))
-        "timestamp comes from command metadata, not a clock")))
+        "timestamp comes from command metadata, not a clock")
+    (is (not-any? #(contains? % :metadata) events)
+        "request metadata is added by the application shell, not by cart.core")))
 
 (deftest adding-to-a-closed-cart-is-an-error
   (let [state (core/fold [(added "shoes" 3) confirmed])]
     (is (= [:error {:reason :cart-closed}]
            (core/decide (add-cmd "hat" 1) state)))))
 
+(deftest removing-from-an-open-cart-succeeds
+  (let [state (core/fold [(added "shoes" 3)])
+        [outcome events] (core/decide (remove-cmd "shoes" 1) state)]
+    (is (= :ok outcome))
+    (is (= [{:type :cart.event/product-item-removed
+             :data {:cart-id "c1"
+                    :product-item {:product-id "shoes"
+                                   :quantity 1
+                                   :unit-price 1999}
+                    :removed-at now}}]
+           events))))
+
 (deftest removing-more-than-held-is-an-error
   (let [state (core/fold [(added "shoes" 2)])
-        cmd   {:type :cart.command/remove-product-item
-               :data {:cart-id "c1"
-                      :product-item {:product-id "shoes" :quantity 5 :unit-price 1999}}
-               :metadata {:now now}}]
+        cmd   (remove-cmd "shoes" 5)]
     (is (= [:error {:reason :insufficient-quantity}]
            (core/decide cmd state)))))
+
+(deftest removing-from-a-closed-cart-is-an-error
+  (let [state (core/fold [(added "shoes" 3) confirmed])]
+    (is (= [:error {:reason :cart-closed}]
+           (core/decide (remove-cmd "shoes" 1) state)))))
 
 (deftest confirming-an-empty-cart-is-an-error
   (is (= [:error {:reason :not-opened}]
          (core/decide confirm-cmd core/initial-state))))
+
+(deftest confirming-an-open-cart-with-no-items-is-an-error
+  (testing "aggregate invariant: a cart with no held items cannot be confirmed"
+    (let [state (core/fold [(added "shoes" 1) (removed "shoes" 1)])]
+      (is (= [:error {:reason :empty-cart}]
+             (core/decide confirm-cmd state))))))
 
 (deftest confirming-an-already-closed-cart-is-an-error
   (let [state (core/fold [(added "shoes" 3) confirmed])]
@@ -106,6 +137,26 @@
     (is (= :ok outcome))
     (is (= :cart.event/confirmed (:type (first events))))))
 
+(deftest cancelling-an-empty-cart-succeeds
+  (let [[outcome events] (core/decide cancel-cmd core/initial-state)]
+    (is (= :ok outcome))
+    (is (= [{:type :cart.event/cancelled
+             :data {:cart-id "c1" :cancelled-at now}}]
+           events))))
+
+(deftest cancelling-an-open-cart-succeeds
+  (let [state (core/fold [(added "shoes" 3)])
+        [outcome events] (core/decide cancel-cmd state)]
+    (is (= :ok outcome))
+    (is (= [{:type :cart.event/cancelled
+             :data {:cart-id "c1" :cancelled-at now}}]
+           events))))
+
+(deftest cancelling-an-already-closed-cart-is-an-error
+  (let [state (core/fold [(added "shoes" 3) confirmed])]
+    (is (= [:error {:reason :already-closed}]
+           (core/decide cancel-cmd state)))))
+
 (deftest decide-is-pure
   (testing "same inputs, same outputs, no clock"
     (let [state (core/fold [(added "shoes" 3)])]
@@ -113,7 +164,7 @@
              (core/decide confirm-cmd state))))))
 
 ;; ---------------------------------------------------------------------------
-;; Exhaustiveness (SPEC R6.2)
+;; Exhaustiveness (SPEC R6.3)
 ;; ---------------------------------------------------------------------------
 
 (deftest every-command-in-the-schema-has-a-decide-method

@@ -1,25 +1,44 @@
 #kaocha/v1
-{:tests [{:id          :core
+{:tests [{:id          :business-logic
           :test-paths  ["test"]
-          :ns-patterns ["cart\\.core-test" "cart\\.serialisation-test"]}
+          :ns-patterns ["cart\\.core-test"]}
 
-         {:id          :app
+         {:id          :boundary-serialisation
           :test-paths  ["test"]
-          :ns-patterns ["cart\\.app\\..*"]}
+          :ns-patterns ["cart\\.serialisation-test"]}
 
-         {:id          :adapter-memory
+         {:id          :unit
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.app\\.(command-test|query-test|integration-events.*-test)"]}
+
+         {:id          :outbound-memory
           :test-paths  ["test"]
           :ns-patterns ["cart\\.adapter\\.driven\\.event-store-memory-test"]}
 
-         {:id          :http
+         {:id          :outbound-sqlite
           :test-paths  ["test"]
-          :ns-patterns ["cart\\.adapter\\.driving\\..*"]}
+          :ns-patterns ["cart\\.adapter\\.driven\\.event-store-sqlite-test"]}
 
-         {:id          :perf
+         {:id          :outbound-postgres
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.adapter\\.driven\\.(append-fn-test|event-store-postgres-test)"]}
+
+         {:id          :http-contract
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.adapter\\.driving\\.http-test"]}
+
+         {:id          :component-lifecycle
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.adapter\\.driving\\.system-test"]}
+
+         {:id          :http-perf
           :test-paths  ["test"]
           :ns-patterns ["cart\\.perf\\..*"]}
 
-         {:id          :postgres
+         {:id          :system-sqlite
           :test-paths  ["test"]
-          :ns-patterns ["cart\\.adapter\\.driven\\.(append-fn-test|event-store-postgres-test)"
-                        "cart\\.acceptance\\.http-postgres-test"]}]}
+          :ns-patterns ["cart\\.system\\.http-sqlite-test"]}
+
+         {:id          :system-postgres
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.system\\.http-postgres-test"]}]}

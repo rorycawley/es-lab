@@ -25,8 +25,10 @@
 (defn- parse-store [value]
   (case (or value "postgres")
     "postgres" :postgres
+    "sqlite"   :sqlite
     "memory"   :memory
-    (throw (ex-info "CART_STORE must be postgres or memory" {:value value}))))
+    (throw (ex-info "CART_STORE must be postgres, sqlite or memory"
+                    {:value value}))))
 
 (defn db-config-from-env []
   (let [db {:jdbc-url  (or (env "JDBC_URL") (env "DATABASE_URL"))
@@ -37,6 +39,18 @@
       (throw (ex-info "JDBC_URL is required" {})))
     db))
 
+(defn sqlite-config-from-env []
+  {:jdbc-url        (or (env "SQLITE_JDBC_URL")
+                        (some->> (env "SQLITE_PATH") (str "jdbc:sqlite:"))
+                        "jdbc:sqlite:target/cart-event-store.sqlite3")
+   :pool-size       (parse-long-env "SQLITE_POOL_SIZE"
+                                    (env "SQLITE_POOL_SIZE")
+                                    4)
+   :busy-timeout-ms (parse-long-env "SQLITE_BUSY_TIMEOUT_MS"
+                                    (env "SQLITE_BUSY_TIMEOUT_MS")
+                                    5000)
+   :migrate?        true})
+
 (defn config-from-env []
   (let [store (parse-store (env "CART_STORE"))]
     (cond-> {:store store
@@ -46,7 +60,8 @@
                                                   (env "RETRY_MIN_TIMEOUT_MS")
                                                   100)
                      :factor      (parse-double-env "RETRY_FACTOR" (env "RETRY_FACTOR") 1.5)}}
-      (= :postgres store) (assoc :db (db-config-from-env)))))
+      (= :postgres store) (assoc :db (db-config-from-env))
+      (= :sqlite store) (assoc :db (sqlite-config-from-env)))))
 
 (defn -main [& _]
   (let [config (config-from-env)

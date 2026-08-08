@@ -1,5 +1,5 @@
 (ns cart.serialisation-test
-  "SPEC R6.3 — malli generates events, we push their storage representation
+  "SPEC R6.4 — malli generates events, we push their storage representation
    through the JSON encoder and decoder, and assert we got back what storage
    promises to preserve."
   (:require [cart.schema :as schema]

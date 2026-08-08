@@ -1,5 +1,5 @@
 (ns cart.adapter.driven.event-store-contract
-  "One set of behaviours both stores must satisfy (SPEC R6.5), so the fast
+  "One set of behaviours all stores must satisfy (SPEC R6.6), so the fast
    in-memory store cannot drift from the real one."
   (:require [cart.port.event-store :as store]
             [clojure.test :refer [is testing]]
