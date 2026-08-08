@@ -7,8 +7,15 @@ inside an imperative shell.
 
 ## 1. Requirements Review
 
-The specification contains five use cases, 24 prepared slices, 65 black-box
-acceptance tests, and 21 system-wide requirements. All 24 slices are Must.
+The specification contains five use cases, 24 prepared slices, 83 black-box
+acceptance tests, and 22 system-wide requirements. All 24 slices are Must.
+
+This plan realizes `SPEC2.md` as committed in `55b63b3`. That revision fixed the
+outcome evaluation order in `SWR-022`, defined the invalid-input and
+business-rejection categories in `SWR-008`, widened `SWR-002` to every
+cart-changing command and `SWR-020` to every response carrying cart items, and
+added the confirm and cancel retry flows `UC-03-A6`, `UC-03-A7`, `UC-04-A6` and
+`UC-04-A7`. Section 8 assigns the resulting test cases to increments.
 
 The following decisions are fixed before the HTTP contract is frozen:
 
@@ -29,7 +36,8 @@ The following decisions are fixed before the HTTP contract is frozen:
 | Persistent stores | PostgreSQL, SQLite and in-memory adapters must satisfy the same event-store, idempotency and projection contracts. |
 | JSON contract | Reject every unknown request field, including nested unknown fields and all price fields. |
 | Command result | Every successful command returns the complete cart view and observation produced by that command. An idempotent replay returns the stored original result, which may now be stale. |
-| Error precedence | Validate request shape first; then resolve request-ID replay or misuse; then authenticate the observation, detect staleness, and evaluate business rules. |
+| Error precedence | Implement `SWR-022` literally, and let the first failing step alone decide the response: validate request shape and every input value including observation-token authenticity; then resolve request-ID replay or misuse; then detect staleness; then evaluate business rules. A stale observation of a cart that has since been closed is therefore `409 conflict`, not `422 rejected`, and an invalid request carrying a stale observation is `400 invalid`. Write this ordering as one shared pipeline used by all four command handlers rather than per-slice conditionals, so no slice can reorder it. |
+| Outcome categories | Follow the `SWR-008` split. Invalid input (`400`) means malformed or out-of-declared-range, independent of cart state: non-UUID or missing identifier, quantity outside 1 through 1000, unknown field, unauthentic observation token, cart identifier that finds no cart, or a missing observation where one is required. Business rejection (`422`) means well formed but forbidden by cart state: cart closed, removal below zero, confirmation of an empty cart, or an addition pushing a held quantity above 1000. |
 | Observation integrity | Use versioned HMAC-signed opaque tokens bound to the cart. Forged, altered and wrong-cart tokens are invalid; authentic old tokens are conflicts. |
 | Observation lifetime | Observations have no time-based expiry. They remain current until an accepted command changes the cart; they do not lock or reserve it. |
 | History delivery | Change history is required release scope and returns the complete ordered history without pagination. It is intentionally unbounded. |
@@ -274,8 +282,13 @@ next command but does not send the old cart contents back. The marker is not the
 cart identifier, a lock, a reservation or a server-side session. It has no
 time-to-live: elapsed time alone does not affect it. It remains current until one
 accepted command changes that cart, at which point it becomes stale and any new
-command based on it receives a conflict. After a conflict, the actor must view
-the cart and make a new decision from the newly returned observation.
+command based on it receives a conflict. This holds regardless of what the newer
+state is: a stale observation of a cart that a confirmation or cancellation has
+since closed is `409 conflict`, not `422 cart-closed`, because `SWR-022` checks
+observation currency before business rules. `422 cart-closed` is reserved for a
+command carrying the cart's *current* post-closure observation. After a conflict,
+the actor must view the cart and make a new decision from the newly returned
+observation.
 
 An exact retry of an accepted command is the deliberate exception in response
 handling, not in observation state. Its input observation is stale after the
@@ -286,7 +299,9 @@ using that old marker receives a conflict.
 Never expose or accept raw stream versions, `:any`, or
 `stream-does-not-exist` as the observation marker in the HTTP API.
 
-Use a versioned, HMAC-signed token containing:
+`SWR-019` requires only that a marker be system-authenticated and cart-bound, and
+`SPEC2.md` decision 21 leaves the mechanism to this document. The mechanism
+chosen here is a versioned, HMAC-signed token containing:
 
 - the exact cart identifier
 - the expected internal stream revision
@@ -346,6 +361,21 @@ Use stable machine-readable response envelopes:
 | Business rejection | 422 | `outcome=rejected` and a stable domain reason. |
 | Concurrent change | 409 | `outcome=conflict`, `code=cart-changed`, and `next-action=view-cart-before-retrying`. |
 | Unexpected failure | 500 | Correlation ID and a generic stable code; no internals. |
+
+`SWR-008` fixes exactly four business rejections. Each gets one stable `422`
+code, and no other condition may return `422`:
+
+| Condition | Stable code | Applies to |
+|---|---|---|
+| Cart is closed | `cart-closed` | add, remove, confirm, cancel |
+| Removal exceeds the held quantity | `insufficient-product-quantity` | remove |
+| Confirmation of a cart with no product items | `cart-has-no-items` | confirm |
+| Addition would push a held quantity above 1000 | `product-quantity-limit-exceeded` | add |
+
+`cart-closed` covers confirm and cancel as well as content changes, matching the
+widened `SWR-002`. Repeating a closure with a *new* request UUID is therefore
+`422 cart-closed`, while repeating it with the *original* request UUID is a
+`200` replay; the pipeline order in section 1 is what separates them.
 
 `product-item` contains only UUID `product-id` and integer `quantity` from 1
 through 1000. The resulting quantity held for that product may not exceed 1000.
@@ -522,7 +552,10 @@ inbound handler, domain decision/query, event store, and automated evidence.
   PostgreSQL concurrency, and CQRS query strategy.
 - Create the Clojure project, lifecycle, configuration, quality tasks, health
   endpoints, OpenAPI skeleton, and empty PostgreSQL and SQLite migration paths.
-- Add a requirements traceability table keyed by all 65 test case IDs.
+- Add a requirements traceability table keyed by all 83 test case IDs, with a
+  column recording the `SWR-008` outcome category each rejection case asserts.
+- Implement the `SWR-022` evaluation pipeline as one shared function with its own
+  unit tests, before any slice handler uses it.
 
 Exit: the empty service starts locally, migrations run separately, architectural
 dependency checks pass, and CI can run lint and tests.
@@ -539,6 +572,9 @@ dependency checks pass, and CI can run lint and tests.
   distinct carts, and sequential or concurrent repeats create one cart and apply
   quantity once. Prove a retry after later cart changes still returns the exact
   original result without changing the current projection.
+- `UC-01/S01/TC07`: prove a request UUID rejected as invalid input is *not*
+  recorded, so reusing it for a valid first addition succeeds. Only `commit!`
+  writes `command_requests`; no validation or rejection path may touch it.
 
 Exit: the actor can establish and then view a cart without a separate creation
 task or a nonexistent-cart observation.
@@ -551,12 +587,21 @@ task or a nonexistent-cart observation.
   validation, the 1000-unit per-product bound, checked arithmetic, UUID handling,
   strict unknown-field and price-field rejection, and projected open-cart views.
 - Distinguish invalid requested quantities (`400`) from valid additions rejected
-  because the resulting product total would exceed 1000 (`422`). Serialize cart
-  items in deterministic ascending product-UUID order.
+  because the resulting product total would exceed 1000 (`422`). Return
+  `422 cart-closed` for content changes carrying a closed cart's current
+  observation, and `422 insufficient-product-quantity` for a removal below zero.
+- Serialize cart items in deterministic ascending product-UUID order on command
+  results *and* on `view-cart`, per the widened `SWR-020`. `UC-01/S02/TC02` and
+  `UC-02/S04/TC01` both add a product whose UUID sorts before one already held,
+  so insertion order and UUID order disagree and a natural-order read model fails.
 - Apply request-UUID idempotency to additions and removals on existing carts,
   including sequential and concurrent repeats and request-ID misuse.
+- `UC-02/S02/TC03`: prove two consecutive `view-cart` calls return identical
+  contents and an identical observation token, and append no history. This
+  requires the token to be a deterministic function of cart and revision, not to
+  embed a nonce or issue timestamp.
 - Verify every rejection leaves stream revision, projections and event rows
-  unchanged in memory, SQLite and PostgreSQL.
+  unchanged in memory, SQLite and PostgreSQL, and asserts its `SWR-008` category.
 
 Exit: an open cart can be managed completely and safely.
 
@@ -566,16 +611,37 @@ Exit: an open cart can be managed completely and safely.
 - Race competing additions/removals against the same existing observation on
   separate database connections.
 - Return stable conflict guidance and prove the actor can view and retry with a
-  fresh observation.
+  fresh observation. `UC-01/S05/TC04` makes this recovery path an explicit test
+  rather than an implied one: conflict, re-view, resubmit with the fresh
+  observation and a new request UUID, and assert the change is accepted.
+- `UC-01/S05/TC05`: hold an open-cart observation, confirm the cart from another
+  actor, then submit a content change on the old observation. Assert
+  `409 cart-changed`, not `422 cart-closed`. This is the first test that can
+  detect an inverted `SWR-022` pipeline, so it must run against every adapter.
 
-Exit: no stale content change can overwrite an accepted change.
+Exit: no stale content change can overwrite an accepted change, and outcome
+precedence is proven rather than assumed.
 
 ### Increment 4: Confirm Cart
 
-- Deliver every `UC-03` slice plus `UC-02/S03` for confirmed carts.
-- Add confirmation rules for empty, closed, invalid, and stale carts.
+- Deliver every `UC-03` slice (`S01`–`S05`, 17 test cases) plus `UC-02/S03` for
+  confirmed carts.
+- Add confirmation rules for empty, closed, invalid, and stale carts. Empty-cart
+  confirmation is `422 cart-has-no-items`; confirming an already closed cart on
+  its current observation is `422 cart-closed`.
 - Apply command request idempotency to confirmation and return the complete
-  original success when an accepted confirmation is repeated.
+  original success when an accepted confirmation is repeated. `UC-03-A6` and
+  `UC-03-A7` are new spec flows: cover the accepted replay, concurrent identical
+  confirmations sharing one request UUID (`UC-03/S01/TC04`), and reuse of a
+  succeeded confirmation UUID for a different cart or command
+  (`UC-03/S01/TC05`).
+- Cover the confirm-side conflict extensions that previously had no tests: two
+  actors confirming from one observation (`UC-03/S04/TC02`) and conflict-then-
+  re-view-then-reconfirm (`UC-03/S04/TC03`).
+- Cover the cross-cutting request rules on confirm, which `UC-01` already had but
+  `UC-03` did not: missing or non-UUID request identifier (`UC-03/S05/TC03`),
+  undeclared field (`UC-03/S05/TC04`), and altered, fabricated or wrong-cart
+  observation token (`UC-03/S05/TC05`, which must be `400`, not `409`).
 - Preserve final projected quantities, expose public closed status, and reject
   later content changes.
 
@@ -583,12 +649,21 @@ Exit: confirmation is atomic, terminal, and conflict-safe.
 
 ### Increment 5: Cancel Cart
 
-- Deliver every `UC-04` slice plus `UC-02/S03` for cancelled carts.
+- Deliver every `UC-04` slice (`S01`–`S05`, 16 test cases) plus `UC-02/S03` for
+  cancelled carts.
 - Cover cancellation after all quantities are removed, cancellation with
   contents, repeat closure, stale observations, and a concurrent cancellation
   versus content change.
 - Apply command request idempotency to cancellation and distinguish an accepted
-  retry from a new attempt to cancel an already closed cart.
+  retry (`200`, original result) from a new attempt to cancel an already closed
+  cart (`422 cart-closed`). `UC-04-A6` and `UC-04-A7` are new spec flows: cover
+  concurrent identical cancellations sharing one request UUID
+  (`UC-04/S02/TC04`) and reuse of a succeeded cancellation UUID
+  (`UC-04/S02/TC05`).
+- Add the conflict recovery test `UC-04/S04/TC03`, and the cross-cutting request
+  rules on cancel: missing or non-UUID request identifier (`UC-04/S05/TC03`),
+  undeclared field (`UC-04/S05/TC04`), and unauthentic observation token
+  (`UC-04/S05/TC05`, `400` rather than `409`).
 
 Exit: cancellation is atomic and terminal for every existing open-cart shape.
 
@@ -600,6 +675,8 @@ Exit: cancellation is atomic and terminal for every existing open-cart shape.
   times, delta quantities for item changes and empty closure business data.
 - Prove rejected, conflicted and idempotently repeated attempts do not add
   history entries.
+- `UC-05/S01/TC05`: prove two consecutive history reads return identical entries
+  and leave cart contents, status and current observation unchanged.
 
 Exit: support can distinguish confirmation from cancellation and explain every
 accepted state transition.
@@ -623,11 +700,12 @@ Exit: all Must slices are Verified against the intended release artifact.
 |---|---|
 | Pure domain tests | Exercise decisions, folding, quantity bounds, invariants, and rejected-command no-event behavior without mocks or IO. |
 | Observation codec tests | Prove valid, altered, fabricated and wrong-cart markers; prove elapsed clock time does not expire a marker; prove key identifiers select retained verification keys. |
-| Slice handler tests | Exercise each inbound command/query port using memory persistence and deterministic clock/ID sources. Cover exact accepted-command replay before observation checks and reuse of UUIDs from unsuccessful attempts. |
+| Slice handler tests | Exercise each inbound command/query port using memory persistence and deterministic clock/ID sources. Cover exact accepted-command replay before observation checks and reuse of UUIDs from unsuccessful attempts. Confirm and cancel carry the same request-identifier, unknown-field and token-authenticity cases as add and remove; none of the four may special-case the pipeline. |
 | Persistence port contracts | Run event-store, projection, global command-idempotency and atomic-unit-of-work behavior against memory, SQLite and PostgreSQL adapters, including one-based revisions, identical acceptance instants and no expiry/deletion behavior. |
 | Persistent race tests | Use barriers and separate connections to prove one winner for shared observations and one accepted change for concurrent repeated command UUIDs in SQLite and PostgreSQL. |
 | HTTP contract tests | Validate every request and response against OpenAPI, including required command UUIDs, unknown fields at every object level, deterministic item ordering, fixed history shapes, UTC RFC 3339 timestamps, `400` versus `422` quantity outcomes, all-success `200`, malformed JSON, and UTF-8. |
-| Acceptance tests | Implement all 65 `SPEC2.md` cases with their IDs visible in test names and run them through HTTP with PostgreSQL and SQLite. |
+| Outcome precedence tests | Drive the shared `SWR-022` pipeline with requests that fail more than one step at once, and assert the earlier step always wins: stale plus closed is `409`; stale plus unauthentic token is `400`; stale plus accepted replay is `200`; replay plus closed is `200`. |
+| Acceptance tests | Implement all 83 `SPEC2.md` cases with their IDs visible in test names and run them through HTTP with PostgreSQL and SQLite. Every rejection case asserts its `SWR-008` outcome category and stable code, not just a non-2xx status. |
 | Architecture tests | Prevent the domain and slices from importing concrete HTTP, database, runtime, clock, or logging namespaces. |
 
 Minimum local gates:
@@ -663,10 +741,16 @@ A slice is done only when:
   are rejected; per-product quantity stays between 1 and 1000
 - invalid requested quantities return `400`; additions exceeding the resulting
   quantity cap return `422`
+- every rejection returns the `SWR-008` category and stable code the spec
+  requires, and `422` is returned only for the four conditions listed in section 5
+- the shared `SWR-022` pipeline decides every command outcome, and the overlap
+  cases in section 9 prove the ordering
 - every query reads a projection rather than folding the event stream
 - successful changes are immediately present in both projections
 - every successful command returns its complete resulting cart and observation
-- every successful business response uses `200`; cart items are sorted by UUID
+- every successful business response uses `200`; cart items are sorted by
+  ascending product UUID in every response that carries them, including
+  `view-cart`, regardless of insertion order
 - history uses one-based revisions, fixed change types, delta quantities and UTC
   RFC 3339 acceptance times, and returns in full without pagination
 - cart data and accepted-command results have no expiry, deletion or archival
@@ -676,7 +760,7 @@ A slice is done only when:
 - logs and responses do not expose stack traces, secrets, or database details
 - the traceability table identifies the implementing namespaces and tests
 
-The release is done when all 24 slices and 65 acceptance tests are Verified,
+The release is done when all 24 slices and 83 acceptance tests are Verified,
 PostgreSQL and SQLite migrations succeed from empty databases, both persistent
 race suites are stable under repetition, and the built artifact passes the
 system tests with both persistent configurations.
