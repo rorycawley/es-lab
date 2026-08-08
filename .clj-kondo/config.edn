@@ -1,0 +1,17 @@
+;; Workspace-root clj-kondo config.
+;;
+;; Each lab has its own .clj-kondo/config.edn, which is what `bb check:lint`
+;; picks up because it runs with that lab as the working directory. Editors,
+;; though, are usually rooted at this repository, so they resolve THIS config
+;; dir instead and never see the per-lab one. Without the entries below,
+;; macro-defined vars show up as "Unresolved symbol" in the Problems panel
+;; while the command line stays clean — the same rule, two different answers.
+;;
+;; So this file mirrors the per-lab :lint-as entries. Adding one to a lab means
+;; adding it here too, or the editor and CI will disagree again.
+{:lint-as {;; 04b-event-store: defspec defines a var named by its first argument.
+           clojure.test.check.clojure-test/defspec clojure.test/deftest
+
+           ;; 03-task-persistence: both return a reified protocol instance.
+           spy.protocol/mock clojure.core/reify
+           spy.protocol/spy  clojure.core/reify}}
