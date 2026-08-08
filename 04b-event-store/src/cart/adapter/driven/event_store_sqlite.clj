@@ -52,15 +52,24 @@
   (when-let [file (sqlite-file-from-jdbc-url jdbc-url)]
     (io/make-parents file)))
 
-(defn- execute-pragmas! [conn busy-timeout-ms]
-  (jdbc/execute-one! conn [(str "PRAGMA busy_timeout = " (long busy-timeout-ms))])
-  (jdbc/execute-one! conn ["PRAGMA foreign_keys = ON"]))
+(defn- pragma-properties
+  "Pragmas that must hold on EVERY pooled connection, handed to the driver as
+   connection properties.
 
-(defn- configure-database! [datasource busy-timeout-ms]
-  (with-open [conn (jdbc/get-connection datasource)]
-    (execute-pragmas! conn busy-timeout-ms)
-    (jdbc/execute-one! conn ["PRAGMA journal_mode = WAL"])
-    (jdbc/execute-one! conn ["PRAGMA synchronous = NORMAL"])))
+   busy_timeout, foreign_keys and synchronous are per-connection state. Running
+   them as statements against one borrowed connection at startup configured only
+   that connection and left the rest of the pool on driver defaults. As
+   connection properties they apply wherever Hikari opens a connection, and they
+   stay off the read/append path instead of being re-issued per operation.
+
+   journal_mode belongs to the database file rather than the connection, but
+   restating it is harmless and means a fresh file is in WAL mode from its very
+   first connection."
+  [busy-timeout-ms]
+  {"busy_timeout" (str (long busy-timeout-ms))
+   "foreign_keys" "true"
+   "journal_mode" "WAL"
+   "synchronous"  "NORMAL"})
 
 (defn migrate!
   "Applies SQLite migrations to the supplied datasource.
@@ -86,7 +95,7 @@
     :migrate? true}
 
    File-backed databases are put in WAL mode for concurrent reads. In-memory
-   SQLite keeps its own journal mode; the PRAGMA is harmless there."
+   SQLite keeps its own journal mode; the pragma is harmless there."
   ^HikariDataSource [{:keys [jdbc-url pool-size busy-timeout-ms migrate?]
                       :or   {pool-size 4
                              busy-timeout-ms default-busy-timeout-ms
@@ -95,11 +104,11 @@
     (ensure-parent-directory! jdbc-url)
     (let [cfg (doto (HikariConfig.)
                 (.setJdbcUrl jdbc-url)
-                (.setMaximumPoolSize pool-size)
-                (.setConnectionInitSql "PRAGMA foreign_keys = ON"))
+                (.setMaximumPoolSize pool-size))
+          _   (doseq [[k v] (pragma-properties busy-timeout-ms)]
+                (.addDataSourceProperty cfg k v))
           ds  (HikariDataSource. cfg)]
       (try
-        (configure-database! ds busy-timeout-ms)
         (when migrate? (migrate! ds))
         ds
         (catch Throwable t
@@ -129,16 +138,14 @@
                        :errors (me/humanize errs)}))
       event)))
 
-(defn- read-stream* [ds busy-timeout-ms stream-id]
-  (with-open [conn (jdbc/get-connection ds)]
-    (execute-pragmas! conn busy-timeout-ms)
-    (let [rows (jdbc/execute! conn [read-sql stream-id]
-                              {:builder-fn rs/as-unqualified-lower-maps})]
-      (if (seq rows)
-        {:events  (mapv decode-event rows)
-         :version (:stream_position (peek rows))
-         :exists? true}
-        {:events [] :version 0 :exists? false}))))
+(defn- read-stream* [ds stream-id]
+  (let [rows (jdbc/execute! ds [read-sql stream-id]
+                            {:builder-fn rs/as-unqualified-lower-maps})]
+    (if (seq rows)
+      {:events  (mapv decode-event rows)
+       :version (:stream_position (peek rows))
+       :exists? true}
+      {:events [] :version 0 :exists? false})))
 
 ;; ---------------------------------------------------------------------------
 ;; Appending
@@ -256,14 +263,13 @@
         (catch Throwable _))
       (throw t))))
 
-(defn- append!* [ds busy-timeout-ms stream-id events expected-version]
+(defn- append!* [ds stream-id events expected-version]
   (when (empty? events)
     (throw (ex-info "append-to-stream called with no events" {:stream-id stream-id})))
   (when-not (valid-expected-version? expected-version)
     (throw (ex-info "Invalid expected version"
                     {:expected-version expected-version})))
   (with-open [conn (jdbc/get-connection ds)]
-    (execute-pragmas! conn busy-timeout-ms)
     (immediate-transaction
      conn
      (fn []
@@ -284,18 +290,15 @@
 ;; Component
 ;; ---------------------------------------------------------------------------
 
-(defrecord SQLiteEventStore [datasource busy-timeout-ms]
+(defrecord SQLiteEventStore [datasource]
   port/EventStore
   (read-stream [_ stream-id]
-    (read-stream* datasource (or busy-timeout-ms default-busy-timeout-ms) stream-id))
+    (read-stream* datasource stream-id))
   (append-to-stream [_ stream-id events expected-version]
-    (append!* datasource
-              (or busy-timeout-ms default-busy-timeout-ms)
-              stream-id
-              events
-              expected-version)))
+    (append!* datasource stream-id events expected-version)))
 
 (defn make-store
-  ([datasource] (make-store datasource {}))
-  ([datasource {:keys [busy-timeout-ms]}]
-   (->SQLiteEventStore datasource (or busy-timeout-ms default-busy-timeout-ms))))
+  "The busy timeout is a property of the datasource's connections, so it is
+   configured in make-datasource rather than carried on the store."
+  [datasource]
+  (->SQLiteEventStore datasource))

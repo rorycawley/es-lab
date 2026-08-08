@@ -31,7 +31,7 @@
 (use-fixtures :each with-sqlite)
 
 (defn- make-store []
-  (sqlite/make-store *datasource* {:busy-timeout-ms 10000}))
+  (sqlite/make-store *datasource*))
 
 (defn- stream-id []
   (str "shopping_cart-" (random-uuid)))
@@ -202,17 +202,27 @@
                id]
               {:builder-fn rs/as-unqualified-lower-maps}))))))
 
+(defn- connection-settings [conn]
+  (jdbc/execute-one! conn
+                     ["SELECT
+                          (SELECT encoding FROM pragma_encoding) AS encoding,
+                          (SELECT journal_mode FROM pragma_journal_mode) AS journal_mode,
+                          (SELECT foreign_keys FROM pragma_foreign_keys) AS foreign_keys,
+                          (SELECT timeout FROM pragma_busy_timeout) AS busy_timeout"]
+                     {:builder-fn rs/as-unqualified-lower-maps}))
+
 (deftest sqlite-pragmas-and-ddl-constraints-are-active
-  (let [settings (jdbc/execute-one! *datasource*
-                                    ["SELECT
-                                         (SELECT encoding FROM pragma_encoding) AS encoding,
-                                         (SELECT journal_mode FROM pragma_journal_mode) AS journal_mode,
-                                         (SELECT foreign_keys FROM pragma_foreign_keys) AS foreign_keys"]
-                                    {:builder-fn rs/as-unqualified-lower-maps})]
-    (is (= {:encoding "UTF-8"
-            :journal_mode "wal"
-            :foreign_keys 1}
-           settings)))
+  (testing "every pooled connection carries the pragmas, not just the first —
+            busy_timeout and foreign_keys are per-connection state, so a
+            connection that missed them would silently drop the write lock wait
+            and the foreign key backstop"
+    (dotimes [_ 4]
+      (with-open [conn (jdbc/get-connection *datasource*)]
+        (is (= {:encoding "UTF-8"
+                :journal_mode "wal"
+                :foreign_keys 1
+                :busy_timeout 10000}
+               (connection-settings conn))))))
 
   (testing "orphan messages are rejected"
     (is (thrown? Exception

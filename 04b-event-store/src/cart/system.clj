@@ -52,10 +52,7 @@
   (start [this]
     (if store
       this
-      (assoc this :store (sqlite/make-store
-                          (:datasource database)
-                          (select-keys (:config database)
-                                       [:busy-timeout-ms])))))
+      (assoc this :store (sqlite/make-store (:datasource database)))))
 
   (stop [this]
     (assoc this :store nil)))

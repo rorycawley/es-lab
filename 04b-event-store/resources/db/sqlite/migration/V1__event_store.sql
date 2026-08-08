@@ -21,6 +21,11 @@ CREATE TABLE messages (
     created          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
 
     CONSTRAINT messages_stream_fk FOREIGN KEY (stream_id) REFERENCES streams (stream_id),
+    -- R3.2 backstop, and the read path's index. SQLite backs a UNIQUE
+    -- constraint with an implicit index over exactly these columns in this
+    -- order, so `WHERE stream_id = ? ORDER BY stream_position` is already
+    -- served. A separate CREATE INDEX on the same pair would only double the
+    -- write cost of an append-only table.
     CONSTRAINT messages_stream_position_unique UNIQUE (stream_id, stream_position),
     CONSTRAINT messages_message_id_unique UNIQUE (message_id),
     CONSTRAINT messages_stream_position_positive CHECK (stream_position > 0),
@@ -33,6 +38,3 @@ CREATE TABLE messages (
         json_valid(message_metadata) AND json_type(message_metadata) = 'object'
     )
 );
-
-CREATE INDEX messages_stream_read_idx
-    ON messages (stream_id, stream_position);
