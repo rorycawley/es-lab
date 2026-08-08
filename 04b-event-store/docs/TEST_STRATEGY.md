@@ -168,20 +168,42 @@ Terminology in this repository:
 
 ## Test Layers
 
-| Layer | Size | What it proves | Current tests |
-|---|---:|---|---|
-| Business logic / aggregate invariants | Small | Pure business decisions, state transitions and invariants without IO | `bb test:business-logic`, `test/cart/core_test.clj` |
-| Serialisation boundary | Small | Event database JSON shape is stable without Transit and survives generated cases | `bb test:serialisation`, `test/cart/serialisation_test.clj` |
-| Primary unit: inbound ports | Small/Medium | Command/query behavior through the application component contract; future integration-event behavior belongs here too | `bb test:unit`, `test/cart/app/command_test.clj`, `test/cart/app/query_test.clj` |
-| Outbound port contract: memory | Medium | The fast adapter obeys the same event-store port contract as persistent stores | `bb test:outbound-memory`, `event_store_memory_test.clj`, `event_store_contract.clj` |
-| Outbound port contract: SQLite | Medium | Embedded SQLite migration, JSON text storage, DDL checks and write serialization obey the event-store port contract | `bb test:outbound-sqlite`, `event_store_sqlite_test.clj` |
-| Outbound adapter integration: Postgres | Large | `append_to_stream`, DDL, Clojure marshalling and JSONB preserve the event-store contract and race semantics | `bb test:outbound-postgres`, `append_fn_test.clj`, `event_store_postgres_test.clj` |
-| HTTP adapter contract | Medium | HTTP goes through command/query ports, task routes are mounted, old routes are gone, OpenAPI request/response schemas hold | `bb test:http-contract`, `http_test.clj` |
-| Component lifecycle | Medium | Jetty, datasource and handler lifecycle wiring starts and stops cleanly | `bb test:component-lifecycle`, `system_test.clj` |
-| HTTP performance smoke | Medium | Task/query HTTP paths stay inside coarse latency budgets without Docker | `bb test:http-perf`, `http_perf_test.clj` |
-| System smoke: HTTP + SQLite | Medium | Jetty, command/query use cases and a file-backed SQLite database work across service restart | `bb test:system-sqlite`, `test/cart/system/http_sqlite_test.clj` |
-| System smoke: HTTP + Postgres | Large | Jetty, command/query use cases, runtime DB role and migrated Postgres work together | `bb test:system-postgres`, `test/cart/system/http_postgres_test.clj` |
-| Manual local system | Large | Compose Postgres, one-shot Flyway and the API work together for exploration | `bb up`, `bb down` |
+| Layer | Size | Typical run | What it proves | Current tests |
+|---|---:|---:|---|---|
+| Business logic / aggregate invariants | Small | ~1.5s | Pure business decisions, state transitions and invariants without IO | `bb test:business-logic`, `test/cart/core_test.clj` |
+| Serialisation boundary | Small | ~1.5s | Event database JSON shape is stable without Transit and survives generated cases | `bb test:serialisation`, `test/cart/serialisation_test.clj` |
+| Primary unit: inbound ports | Small/Medium | ~1.5s | Command/query behavior through the application component contract; future integration-event behavior belongs here too | `bb test:unit`, `test/cart/app/command_test.clj`, `test/cart/app/query_test.clj` |
+| Outbound port contract: memory | Medium | ~1.7s | The fast adapter obeys the same event-store port contract as persistent stores | `bb test:outbound-memory`, `event_store_memory_test.clj`, `event_store_contract.clj` |
+| Outbound port contract: SQLite | Medium | ~3s | Embedded SQLite migration, JSON text storage, DDL checks and write serialization obey the event-store port contract | `bb test:outbound-sqlite`, `event_store_sqlite_test.clj` |
+| Outbound adapter integration: Postgres | Large | ~11s | `append_to_stream`, DDL, Clojure marshalling and JSONB preserve the event-store contract and race semantics | `bb test:outbound-postgres`, `append_fn_test.clj`, `event_store_postgres_test.clj` |
+| HTTP adapter contract | Medium | ~2s | HTTP goes through command/query ports, task routes are mounted, old routes are gone, OpenAPI request/response schemas hold | `bb test:http-contract`, `http_test.clj` |
+| Component lifecycle | Medium | ~3s | Jetty, datasource and handler lifecycle wiring starts and stops cleanly | `bb test:component-lifecycle`, `system_test.clj` |
+| HTTP performance smoke | Medium | ~2s | Task/query HTTP paths stay inside coarse latency budgets without Docker | `bb test:http-perf`, `http_perf_test.clj` |
+| System smoke: HTTP + SQLite | Medium | ~3s | Jetty, command/query use cases and a file-backed SQLite database work across service restart | `bb test:system-sqlite`, `test/cart/system/http_sqlite_test.clj` |
+| System smoke: HTTP + Postgres | Large | ~7s | Jetty, command/query use cases, runtime DB role and migrated Postgres work together | `bb test:system-postgres`, `test/cart/system/http_postgres_test.clj` |
+| Manual local system | Large | interactive | Compose Postgres, one-shot Flyway and the API work together for exploration | `bb up`, `bb down` |
+
+Size and run time are two different axes, which is why both columns are here.
+
+Size is a *constraint*: what a test is allowed to touch. It is what the
+isolation rules below are written against — small and medium tests must not
+depend on ordering, Docker-backed tests must own their infrastructure. A test's
+size does not change when the hardware does.
+
+Run time is a *measurement*, and it exists to answer one question: which gate
+can you afford in the inner loop. Treat the numbers as orders of magnitude, not
+budgets. They were taken on one developer machine with a warm `.cpcache` and
+Docker images already pulled; a cold JVM, a cold classpath cache or a first-run
+image pull all dominate them.
+
+The numbers also show why one column cannot replace the other. Every suite pays
+a fixed JVM and classpath cost of roughly 1.4s before a single assertion runs,
+so the small suites are almost entirely startup — the business-logic suite does
+about 0.1s of actual work. Meanwhile the largest suite, which starts two
+containers and runs 1583 assertions, finishes in about 11s. Sorting this table
+by time would put suites that touch nothing next to suites that touch Docker
+and change almost no ordering, while losing the property the isolation rules
+depend on.
 
 Unicode and internationalization boundary coverage is split across these
 layers: the serialization tests prove JSON round trips, the HTTP tests prove
@@ -218,7 +240,7 @@ Run:
 bb precommit
 ```
 
-`bb precommit` is the no-Docker local gate. It runs:
+`bb precommit` is the no-Docker local gate, about 18s end to end. It runs:
 
 - `bb check`
 - `bb test:business-logic`
@@ -322,6 +344,7 @@ The HTTP test suite must keep proving:
 - every request-body content type in the contract has a valid test example
 - every response status/content-type combination in the contract has a live
   handler response example
+- every status the handler actually emits is declared in the contract
 - valid requests and live responses are validated with Atlassian's OpenAPI
   request validator
 - deliberately invalid request examples fail OpenAPI request validation
@@ -331,6 +354,15 @@ The validator is intentionally test-scoped. It is an HTTP adapter contract test,
 not a runtime dependency and not a unit test. The exhaustive example maps are
 part of the contract governance: adding a request body, response status or media
 type to the OpenAPI file requires adding a live validating example.
+
+Those example maps only walk contract → handler, so on their own they cannot see
+a status the adapter really returns but the document never declared. The suite
+therefore also walks handler → contract: each command endpoint is driven through
+the situations a client can put a cart in — missing, open, closed, stale
+expected version, `any`, and an invalid body — and every status that comes back
+must be declared. That direction is what catches a `201` missing from
+`cancel-cart`, which is reachable because cancelling a cart that does not exist
+is a legal decision and creates its stream.
 
 For CI governance, add these later when the API has consumers:
 

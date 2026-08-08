@@ -110,7 +110,9 @@ All commands carry `:metadata {:now <instant>}`.
 - R2.1 — adding or removing on a `:closed` cart is an error (`:cart-closed`).
 - R2.2 — removing more of a product than the cart holds is an error
   (`:insufficient-quantity`).
-- R2.3 — confirming a cart that is not `:opened` is an error (`:not-opened`).
+- R2.3 — confirming is an error unless the cart is `:opened` (`:not-opened`) and
+  holds at least one item (`:empty-cart`). Removing the last item leaves an
+  `:opened` cart holding nothing, which is exactly what `:empty-cart` covers.
 - R2.4 — cancelling a `:closed` cart is an error (`:already-closed`).
 - R2.5 — money is stored as integer minor units, never a decimal.
 
@@ -260,7 +262,7 @@ re-read the stream, which is what R4.8's retry does.
 ### R4.6 — conflicts are data, not exceptions
 
 `append-to-stream` returns `[:ok {...}]` or `[:conflict {...}]`. The shell
-decides whether that becomes a retry or an HTTP 412.
+decides whether that becomes a retry or an HTTP 409 (R7.4).
 
 ### R4.7 — an empty decision writes nothing
 
@@ -512,7 +514,15 @@ Invalid values return `400`.
 | `[:conflict {:expected ... :current ...}]` | `409`       |
 
 Malformed JSON, invalid command shape, invalid query shape and out-of-contract
-fields return `400`.
+fields return `400`. An unhandled failure below the adapter returns `500`.
+
+Note that `201` is reachable from any command endpoint whose decision is legal
+against an `:empty` cart, not only from `add-product-item`. Cancelling a cart
+that does not exist creates its stream, so `cancel-cart` returns `201` too.
+
+Every status the adapter can emit MUST be declared in the OpenAPI document. The
+document is the source of truth, so a status that ships without being declared
+is a contract defect even when the response body is correct.
 
 ### R7.5 — query responses come from the query stack
 
@@ -566,6 +576,12 @@ contract tests MUST validate every declared request-body content type and every
 declared response status/content-type combination with an OpenAPI
 request/response validator. Representative examples are not enough once the
 contract is the source of truth.
+
+That walk goes contract → handler, so it cannot see a status the handler emits
+but the document never declares. Tests MUST therefore also walk handler →
+contract: drive each command endpoint against a cart that does not exist and
+assert the resulting status is declared. That is the direction that catches a
+`201` missing from `cancel-cart`.
 
 ---
 
