@@ -60,6 +60,15 @@ Out of scope:
 - publishing accepted cart changes to external consumers
 - localization of display messages
 
+### Trust Boundary
+
+This version may be deployed only behind a trusted boundary that authenticates
+callers and authorizes their access to cart-management or support operations.
+Those controls are supplied outside the Shopping Cart System. A cart identifier
+or observation marker is not a credential and must not be treated as proof that
+its holder is allowed to view or change a cart. Direct exposure of this version
+to untrusted callers is outside its permitted deployment boundary.
+
 ## 2. Actors
 
 | Actor | Description |
@@ -122,6 +131,8 @@ Support User
 | Requested Quantity | The number of units an actor asks to add or remove in one command. It must be a positive whole number no greater than 1000. |
 | Held Quantity | The number of units of one product the cart currently holds. It must not exceed 1000. A product whose held quantity reaches zero no longer appears in cart contents. |
 | Command Request Identifier | An actor-supplied UUID from one system-wide namespace that identifies one cart-changing command so an accepted command can be retried without being applied twice. |
+| Logical Command | One cart-changing intent identified by a command request identifier and its complete declared input. It may be delivered one or more times. |
+| Delivery Attempt | One submission of a logical command. Multiple identical delivery attempts may return the same successful result while producing one accepted change. |
 | Open Cart | A cart that can still be changed. |
 | Closed Cart | A cart that has been confirmed or cancelled and cannot be changed further. |
 | Confirmed Cart | A closed cart that the Cart Manager has submitted as ready for the next business step. |
@@ -162,6 +173,25 @@ and does not expire merely because time passes. It remains current until an
 accepted command changes the cart. There is no observation before the first
 accepted product addition because no cart yet exists.
 
+More than one authentic marker may represent the same cart revision, for example
+after signing-key rotation. Marker byte equality is not part of observation
+equality; currency depends only on the cart and revision represented by the
+marker.
+
+### Command and Result Equality
+
+Two delivery attempts have the same command input when they have the same
+command type and the same values for every declared command field after those
+values have been parsed. Representation details such as JSON whitespace, object
+field order and uppercase versus lowercase UUID text do not make otherwise equal
+inputs different. An undeclared field remains invalid input rather than becoming
+part of command equality.
+
+The exact original successful result means the same business response data,
+including the original cart identifier, cart state and observation marker. It
+does not include delivery-specific transport metadata such as a correlation
+identifier, response date or tracing data.
+
 ### System-Wide Requirements
 
 | ID | Requirement |
@@ -179,15 +209,15 @@ accepted product addition because no cart yet exists.
 | SWR-011 | Cart viewing reports confirmed and cancelled carts as closed and preserves their final product identifiers and quantities. The accepted change history is the place to distinguish how the cart was closed. |
 | SWR-012 | This requirements version defines no quantified performance, availability or durability service levels beyond the correctness and no-partial-change requirements above. It defines no deletion or archival behavior: carts, accepted changes, cart views and accepted-command results are retained indefinitely. |
 | SWR-013 | A request to change an existing cart that is not based on an observation of that cart must be rejected as invalid input. A first product addition made without a cart identifier creates a new cart and is the only cart-changing request that does not require a prior cart observation. |
-| SWR-014 | If two otherwise acceptable cart-changing requests are based on the same observation of an existing cart, the system must accept at most one of them. A request rejected because another request has already changed that observation must be reported as a concurrent-change conflict and must not partially change the cart. |
+| SWR-014 | If two otherwise acceptable logical commands with different command request identifiers are based on the same observation of an existing cart, the system must accept at most one of them. A command rejected because another command has already changed that observation must be reported as a concurrent-change conflict and must not partially change the cart. Multiple identical delivery attempts using one command request identifier are one logical command governed by `SWR-016`, not competing commands under this requirement. |
 | SWR-015 | A valid first product addition made without a cart identifier or observation must atomically create one open cart containing that product quantity and return a unique system-generated cart identifier and current observation. An invalid or failed first addition must not create a cart or accepted change history. An add request that supplies only one of cart identifier or observation must be rejected as invalid input. |
-| SWR-016 | Every cart-changing command must include a command request identifier from the system-wide namespace. Repeating an accepted command with the same request identifier and the same complete input, whether later or concurrently, must return its exact original successful result, including its original cart state and observation, without accepting another change. This remains true if the cart has since changed, and accepted command results are retained indefinitely in this version. Reusing an identifier established by an accepted command for a different command or different input must be rejected as invalid input and must not change a cart. Only accepted commands establish this replay behavior; an identifier used only by an invalid, rejected or conflicting attempt remains available for a later command. A missing or non-UUID request identifier must be rejected as invalid input. |
+| SWR-016 | Every logical cart-changing command must include a command request identifier from the system-wide namespace. Repeating an accepted command with the same request identifier and semantically equal complete input, whether later or concurrently, must return its exact original business result without accepting another change. This remains true if the cart has since changed, and accepted command results are retained indefinitely in this version. If otherwise acceptable delivery attempts concurrently use one previously unestablished request identifier with different command types or input, exactly one logical command must be accepted; after it is accepted, every non-equal attempt must be rejected as invalid input and must not change any cart. Only accepted commands establish replay behavior; an identifier used only by invalid, business-rejected or conflicting attempts remains available for later use. A missing or non-UUID request identifier must be rejected as invalid input. |
 | SWR-017 | Change-history viewing must return the complete ordered accepted history without pagination. Revisions start at 1 and increase by one for each accepted change. Stable change types are `product-item-added`, `product-item-removed`, `cart-confirmed` and `cart-cancelled`. Addition and removal business data contains the product identifier and changed quantity, not the resulting total; confirmation and cancellation have no change-specific business data. Acceptance time is generated by the system when the change is durably accepted. History must not expose internal storage identifiers or persistence metadata. |
 | SWR-018 | Every input object must reject fields that are not declared for that request. This includes, but is not limited to, price fields in a product item. |
 | SWR-019 | A cart observation marker must be system-authenticated and bound to its cart. A marker that has been altered, fabricated or issued for a different cart must be rejected as invalid input rather than being treated as a current or stale observation. An observation has no time-based expiry: it remains current while the cart is unchanged and becomes stale when an accepted command changes the cart. |
 | SWR-020 | Every successful cart-changing command must return the complete cart state produced by that command and its resulting observation. Every response that carries cart items, including a cart view, represents them as product-identifier and held-quantity pairs in ascending product-identifier UUID order, independently of the order in which the products were added. An idempotent replay returns the original successful result, which need not be the cart's current state if later commands have succeeded. |
 | SWR-021 | Once a successful command result has been returned, subsequent cart-view and change-history requests must include that accepted change. |
-| SWR-022 | Every cart-changing command must be evaluated in this fixed order, and the first failing step alone determines the reported outcome: (1) input validity, giving invalid input; (2) accepted-command replay, giving the original successful result, or invalid input when the request identifier was established by different input; (3) observation currency, giving a concurrent-change conflict; (4) business rules, giving a business rejection. No step may partially change a cart. A stale observation of a cart that is also closed is therefore reported as a concurrent-change conflict, and an invalid request based on a stale observation is reported as invalid input. |
+| SWR-022 | Every cart-changing delivery attempt must be evaluated in this fixed order, and the first failing step alone determines the reported outcome: (1) input validity, giving invalid input; (2) accepted-command replay, giving the original successful result, or invalid input when the request identifier was established by non-equal input; (3) observation currency for commands concerning an existing cart, giving a concurrent-change conflict; (4) business rules, giving a business rejection. The observation step does not apply to a first product addition because no cart or observation yet exists. No step may partially change a cart. A stale observation of a cart that is also closed is therefore reported as a concurrent-change conflict, and an invalid request based on a stale observation is reported as invalid input. |
 
 ### Shared Concurrent-Change Extension
 
@@ -198,7 +228,7 @@ change based on a cart observation that is no longer current.
 | Shared Extension ID | Applies To | Behavior |
 |---|---|---|
 | EXT-CONFLICT-001 | Manage Cart Contents, Confirm Cart, Cancel Cart | If a requested change is based on an older cart observation, the system rejects it as a concurrent-change conflict and leaves the cart at the newer state. |
-| EXT-CONFLICT-002 | Manage Cart Contents, Confirm Cart, Cancel Cart | If two actors submit changes based on the same cart observation, the system accepts no more than one request against that observation. Any later request based on the old observation is rejected as a conflict. |
+| EXT-CONFLICT-002 | Manage Cart Contents, Confirm Cart, Cancel Cart | If two actors submit distinct logical commands with different request identifiers based on the same cart observation, the system accepts no more than one command against that observation. Any other command based on the old observation is rejected as a conflict. |
 | EXT-CONFLICT-003 | Manage Cart Contents, Confirm Cart, Cancel Cart | After a conflict, the actor can view the current cart and submit a new request based on the current state. |
 
 ### Shared Accepted-Command Retry Extension
@@ -209,9 +239,19 @@ lost or uncertain.
 
 | Shared Extension ID | Applies To | Behavior |
 |---|---|---|
-| EXT-RETRY-001 | Manage Cart Contents, Confirm Cart, Cancel Cart | Repeating an accepted command with the same command request identifier and complete input returns the exact original successful result and accepts no additional change, even if the cart has subsequently changed. |
-| EXT-RETRY-002 | Manage Cart Contents, Confirm Cart, Cancel Cart | Concurrent identical commands using one command request identifier return the same successful result and accept the change once. |
-| EXT-RETRY-003 | Manage Cart Contents, Confirm Cart, Cancel Cart | Reusing a command request identifier for a different command or different input is invalid and changes no cart. |
+| EXT-RETRY-001 | Manage Cart Contents, Confirm Cart, Cancel Cart | Repeating an accepted logical command with the same command request identifier and semantically equal complete input returns the exact original business result and accepts no additional change, even if the cart has subsequently changed. |
+| EXT-RETRY-002 | Manage Cart Contents, Confirm Cart, Cancel Cart | Concurrent identical delivery attempts using one command request identifier return the same successful business result and accept one logical command and one change. |
+| EXT-RETRY-003 | Manage Cart Contents, Confirm Cart, Cancel Cart | Reusing a command request identifier for a different command or non-equal input is invalid and changes no cart. If different otherwise acceptable attempts race while the identifier is unestablished, exactly one logical command is accepted and every non-equal loser is invalid. |
+
+### Acceptance-Test Conventions
+
+Unless a test case explicitly describes a repeat, reuse or race involving a
+command request identifier, each cart-changing command uses a fresh globally
+unused identifier. Unless a test explicitly describes an older, altered,
+fabricated or different-cart observation, it uses the current authentic
+observation for the named cart. "Same result" means the same business response
+data as defined under Command and Result Equality, not identical transport
+metadata. Every rejected command asserts one outcome category from `SWR-008`.
 
 ## 5. Use Cases
 
@@ -299,10 +339,12 @@ accepted addition.
 | UC-01/S01/TC05 | UC-01/S01 | Cart Manager has no cart and the command request identifier is missing or is not a UUID | Cart Manager submits the first addition | request is rejected as invalid input and no cart or accepted change history is created |
 | UC-01/S01/TC06 | UC-01/S01 | two first-addition commands use the same command request identifier, product identifier and quantity | both requests are submitted concurrently | both receive the same successful result; exactly one cart and one accepted addition exist and quantity is applied once |
 | UC-01/S01/TC07 | UC-01/S01 | a first addition using a given command request identifier was rejected as invalid input | Cart Manager submits a valid first addition reusing that same request identifier | addition is accepted and a cart is created, because an identifier used only by a rejected attempt remains available |
+| UC-01/S01/TC08 | UC-01/S01 | two otherwise valid first-addition delivery attempts use the same previously unestablished command request identifier but different product identifiers | both attempts are submitted concurrently | exactly one logical command is accepted and creates one cart; the other receives invalid input and no second cart or accepted addition is created |
 | UC-01/S02/TC01 | UC-01/S02 | Cart Manager has observed cart contains product A quantity 2 | Cart Manager adds 3 more units of product A based on that observation | cart is open and shows product A quantity 5 |
 | UC-01/S02/TC02 | UC-01/S02 | cart contains product B only, and product A's UUID sorts before product B's UUID | Cart Manager adds product A based on the current observation | cart shows product A before product B, confirming items are ordered by product-identifier UUID and not by the order they were added |
 | UC-01/S02/TC03 | UC-01/S02 | an addition to an existing cart succeeded and the cart subsequently changed | Cart Manager repeats the addition using its original command request identifier and complete input | system returns the exact original successful result and accepts no additional change; the cart remains at its later state |
 | UC-01/S02/TC04 | UC-01/S02 | two identical additions to an existing cart use the same new command request identifier and observation | both requests are submitted concurrently | both receive the same successful result and exactly one addition is accepted |
+| UC-01/S02/TC05 | UC-01/S02 | Cart Manager received an observation of an open cart and time has passed without an accepted command changing that cart | Cart Manager adds a product using that observation and a fresh command request identifier | addition is accepted because elapsed time alone does not expire the observation |
 | UC-01/S03/TC01 | UC-01/S03 | Cart Manager has observed cart contains product A quantity 5 | Cart Manager removes 2 units of product A based on that observation | cart is open and shows product A quantity 3 |
 | UC-01/S03/TC02 | UC-01/S03 | Cart Manager has observed cart contains product A quantity 2 | Cart Manager removes 2 units of product A based on that observation | cart remains open and product A no longer appears in contents |
 | UC-01/S03/TC03 | UC-01/S03 | a removal succeeded using a new command request identifier | Cart Manager repeats the same removal using that request identifier and complete input | system returns the exact original successful result, no additional quantity is removed and no additional history entry is accepted |
@@ -319,11 +361,14 @@ accepted addition.
 | UC-01/S04/TC11 | UC-01/S04 | a command request identifier has already succeeded | Cart Manager reuses it for a different command, cart or input | request is rejected as invalid input and no cart is changed |
 | UC-01/S04/TC12 | UC-01/S04 | a content-change input object contains a field not declared for that request | Cart Manager submits the command | request is rejected as invalid input and no cart is changed |
 | UC-01/S04/TC13 | UC-01/S04 | Cart Manager supplies an altered, fabricated or different-cart observation marker | Cart Manager submits a content change | request is rejected as invalid input rather than as a conflict and no cart is changed |
+| UC-01/S04/TC14 | UC-01/S04 | Cart Manager has observed a closed cart containing product A quantity 2 | Cart Manager removes 1 unit of product A using that current observation and a fresh command request identifier | request receives a business rejection and the closed cart remains unchanged |
 | UC-01/S05/TC01 | UC-01/S05 | Cart Manager observed an older cart observation | Cart Manager submits a content change based on that older observation | request is rejected as a conflict and cart remains at the newer state |
 | UC-01/S05/TC02 | UC-01/S05 | two Cart Managers observed the same cart observation | both submit content changes based on that observation | no more than one change based on that observation is accepted; rejected changes leave the cart unchanged and are reported as conflicts |
 | UC-01/S05/TC03 | UC-01/S05 | two Cart Managers observed the same cart immediately after its first product addition | both submit further content changes based on that same observation | no more than one further change is accepted; rejected changes leave the cart unchanged and are reported as conflicts |
 | UC-01/S05/TC04 | UC-01/S05 | a content change was rejected as a conflict | Cart Manager views the cart again and resubmits the change based on the newly returned observation, using a new command request identifier | resubmitted change is accepted and the cart reflects it |
 | UC-01/S05/TC05 | UC-01/S05 | Cart Manager holds an observation of an open cart that has since been confirmed by another actor | Cart Manager adds a product item based on that older observation | request is reported as a concurrent-change conflict rather than as a closed-cart business rejection, and the cart remains closed |
+| UC-01/S05/TC06 | UC-01/S05 | Cart Manager holds an older observation and supplies a requested quantity of zero | Cart Manager submits the content change | request is rejected as invalid input rather than as a concurrent-change conflict, and the cart remains unchanged |
+| UC-01/S05/TC07 | UC-01/S05 | Cart Manager observed product A quantity 2, after which another command reduced it to quantity 1 | Cart Manager requests removing 2 units using the older observation and a fresh command request identifier | request is reported as a concurrent-change conflict rather than as an insufficient-quantity business rejection, and product A remains at quantity 1 |
 
 ### UC-02 - View Cart
 
@@ -378,7 +423,7 @@ accepted addition.
 | UC-02/S01/TC01 | UC-02/S01 | a first addition established a cart containing product A quantity 1 | Cart Manager views the cart using the returned cart identifier | system reports open status, product A quantity 1 and the current cart observation |
 | UC-02/S02/TC01 | UC-02/S02 | cart contains product A quantity 2 | Cart Manager views the cart | system reports open status, product A quantity 2 and a current cart observation |
 | UC-02/S02/TC02 | UC-02/S02 | a content-change command has just returned success | Cart Manager immediately views the cart | view includes the change accepted by that command |
-| UC-02/S02/TC03 | UC-02/S02 | cart contains product A quantity 2 | Cart Manager views the cart twice with no intervening command | both views report the same contents and the same cart observation, and no accepted change is added to history |
+| UC-02/S02/TC03 | UC-02/S02 | cart contains product A quantity 2 | Cart Manager views the cart twice with no intervening command | both views report the same cart state and current revision, and no accepted change is added to history; exact observation-marker equality is not required |
 | UC-02/S03/TC01 | UC-02/S03 | cart has been confirmed | Cart Manager views the cart | system reports closed status without reporting the closure reason and includes a current cart observation |
 | UC-02/S03/TC02 | UC-02/S03 | cart has been cancelled | Cart Manager views the cart | system reports closed status without reporting the closure reason and includes a current cart observation |
 | UC-02/S04/TC01 | UC-02/S04 | cart held product A quantity 2 and product B quantity 1 when it was closed, product B having been added first, and product A's UUID sorting before product B's | Cart Manager views the closed cart | viewed cart still shows product A quantity 2 and product B quantity 1, with product A listed before product B |
@@ -450,7 +495,7 @@ accepted addition.
 | Test Case ID | Slice | Given | When | Then |
 |---|---|---|---|---|
 | UC-03/S01/TC01 | UC-03/S01 | Cart Manager has observed an open cart containing product A quantity 1 | Cart Manager confirms the cart based on that observation | cart becomes confirmed and closed |
-| UC-03/S01/TC02 | UC-03/S01 | Cart Manager has observed the cart has been confirmed | Cart Manager attempts to add a product based on that observation | content change is rejected |
+| UC-03/S01/TC02 | UC-03/S01 | Cart Manager has observed the cart has been confirmed | Cart Manager attempts to add a product based on that current observation using a fresh command request identifier | content change receives a closed-cart business rejection |
 | UC-03/S01/TC03 | UC-03/S01 | confirmation succeeded using a new command request identifier | Cart Manager repeats the same confirmation using that request identifier and complete input | system returns the exact original successful result and one confirmation appears in history |
 | UC-03/S01/TC04 | UC-03/S01 | two identical confirmations of an eligible cart use the same new command request identifier and observation | both requests are submitted concurrently | both receive the same successful result and exactly one confirmation is accepted |
 | UC-03/S01/TC05 | UC-03/S01 | a confirmation command request identifier has already succeeded | Cart Manager reuses it for a different cart or a different command | request is rejected as invalid input and no cart is changed |
@@ -461,6 +506,7 @@ accepted addition.
 | UC-03/S04/TC01 | UC-03/S04 | Cart Manager observed an older cart observation | Cart Manager confirms based on that older observation | confirmation is rejected as a conflict and cart remains at the newer state |
 | UC-03/S04/TC02 | UC-03/S04 | two Cart Managers observed the same cart observation | both submit confirmations based on that observation using different command request identifiers | no more than one confirmation is accepted; the rejected one leaves the cart unchanged and is reported as a conflict |
 | UC-03/S04/TC03 | UC-03/S04 | a confirmation was rejected as a conflict | Cart Manager views the cart again and reconfirms based on the newly returned observation, using a new command request identifier | reconfirmation is accepted and the cart becomes confirmed and closed |
+| UC-03/S04/TC04 | UC-03/S04 | Cart Manager holds an observation of an open cart that has since been cancelled by another actor | Cart Manager confirms using the older observation and a fresh command request identifier | confirmation is reported as a concurrent-change conflict rather than as a closed-cart business rejection, and the cart remains cancelled |
 | UC-03/S05/TC01 | UC-03/S05 | supplied cart identifier does not identify an existing cart | Cart Manager confirms the cart | confirmation is rejected as invalid input and no cart is changed |
 | UC-03/S05/TC02 | UC-03/S05 | Cart Manager has not supplied a cart observation for the confirmation | Cart Manager confirms the cart | confirmation is rejected as invalid input and cart remains unchanged |
 | UC-03/S05/TC03 | UC-03/S05 | the confirmation has no command request identifier or a non-UUID identifier | Cart Manager confirms the cart | confirmation is rejected as invalid input and cart remains unchanged |
@@ -532,7 +578,7 @@ accepted addition.
 |---|---|---|---|---|
 | UC-04/S01/TC01 | UC-04/S01 | Cart Manager has observed an open cart after all product quantities were removed | Cart Manager cancels the cart based on that observation | cart becomes cancelled and closed |
 | UC-04/S02/TC01 | UC-04/S02 | Cart Manager has observed an open cart containing product A | Cart Manager cancels the cart based on that observation | cart becomes cancelled and closed |
-| UC-04/S02/TC02 | UC-04/S02 | Cart Manager has observed the cart has been cancelled | Cart Manager attempts to add a product based on that observation | content change is rejected |
+| UC-04/S02/TC02 | UC-04/S02 | Cart Manager has observed the cart has been cancelled | Cart Manager attempts to add a product based on that current observation using a fresh command request identifier | content change receives a closed-cart business rejection |
 | UC-04/S02/TC03 | UC-04/S02 | cancellation succeeded using a new command request identifier | Cart Manager repeats the same cancellation using that request identifier and complete input | system returns the exact original successful result and one cancellation appears in history |
 | UC-04/S02/TC04 | UC-04/S02 | two identical cancellations of an open cart use the same new command request identifier and observation | both requests are submitted concurrently | both receive the same successful result and exactly one cancellation is accepted |
 | UC-04/S02/TC05 | UC-04/S02 | a cancellation command request identifier has already succeeded | Cart Manager reuses it for a different cart or a different command | request is rejected as invalid input and no cart is changed |
@@ -541,6 +587,7 @@ accepted addition.
 | UC-04/S04/TC01 | UC-04/S04 | Cart Manager observed an older cart observation | Cart Manager cancels based on that older observation | cancellation is rejected as a conflict and cart remains at the newer state |
 | UC-04/S04/TC02 | UC-04/S04 | two Cart Managers observed the same cart observation | one submits cancellation and the other submits a content change based on that observation | no more than one change based on that observation is accepted; rejected changes leave the cart unchanged and are reported as conflicts |
 | UC-04/S04/TC03 | UC-04/S04 | a cancellation was rejected as a conflict | Cart Manager views the cart again and recancels based on the newly returned observation, using a new command request identifier | recancellation is accepted and the cart becomes cancelled and closed |
+| UC-04/S04/TC04 | UC-04/S04 | Cart Manager holds an observation of an open cart that has since been confirmed by another actor | Cart Manager cancels using the older observation and a fresh command request identifier | cancellation is reported as a concurrent-change conflict rather than as a closed-cart business rejection, and the cart remains confirmed |
 | UC-04/S05/TC01 | UC-04/S05 | supplied cart identifier does not identify an existing cart | Cart Manager cancels the cart | cancellation is rejected as invalid input and no cart is changed |
 | UC-04/S05/TC02 | UC-04/S05 | Cart Manager has not supplied a cart observation for the cancellation | Cart Manager cancels the cart | cancellation is rejected as invalid input and cart remains unchanged |
 | UC-04/S05/TC03 | UC-04/S05 | the cancellation has no command request identifier or a non-UUID identifier | Cart Manager cancels the cart | cancellation is rejected as invalid input and cart remains unchanged |
@@ -605,7 +652,8 @@ accepted addition.
 | UC-05/S01/TC04 | UC-05/S01 | a cart-changing command has just returned success | Support User immediately reviews history | history includes the change accepted by that command |
 | UC-05/S01/TC05 | UC-05/S01 | a cart has accepted changes | Support User reviews history twice with no intervening command | both reviews report the same entries, and the cart's contents, status and current observation are unchanged |
 | UC-05/S02/TC01 | UC-05/S02 | a first product addition established the cart and no later changes were accepted | Support User reviews history | the first product addition is shown as the first and only accepted change |
-| UC-05/S03/TC01 | UC-05/S03 | a cart has accepted a product addition of quantity 2 | Support User reviews history | entry reports its sequential cart revision, change type `product-item-added`, system-generated acceptance time, product identifier and changed quantity 2 rather than the resulting total, and does not expose an internal storage identifier or persistence metadata |
+| UC-05/S03/TC01 | UC-05/S03 | a cart held product A quantity 2 and then accepted an addition of 3 units | Support User reviews history | the later addition entry reports its sequential cart revision, change type `product-item-added`, system-generated acceptance time, product identifier and changed quantity 3 rather than resulting total 5, and does not expose an internal storage identifier or persistence metadata |
+| UC-05/S03/TC02 | UC-05/S03 | a cart held product A quantity 5 and then accepted removal of 2 units | Support User reviews history | the removal entry reports change type `product-item-removed`, product identifier and changed quantity 2 rather than resulting total 3 |
 | UC-05/S04/TC01 | UC-05/S04 | supplied cart identifier does not identify an existing cart | Support User reviews history | request is rejected as invalid input and no history is reported |
 | UC-05/S04/TC02 | UC-05/S04 | a change-history input object contains a field not declared for that request | Support User submits the query | request is rejected as invalid input and no history is reported |
 
@@ -638,6 +686,37 @@ accepted addition.
 | UC-05/S03 | Review explanatory history details | Must | Prepared |
 | UC-05/S04 | Reject invalid history identifier | Must | Prepared |
 
+### System-Wide Requirement Traceability
+
+The following table identifies the slices to which each system-wide requirement
+applies and representative verification evidence. The test references are not an
+exhaustive list when a requirement governs many rejection paths.
+
+| Requirement | Applicable Slices | Representative Evidence |
+|---|---|---|
+| SWR-001 | UC-01/S01 through UC-01/S04 | UC-01/S01/TC01, TC05; UC-01/S04/TC03, TC04, TC09 |
+| SWR-002 | UC-01/S04, UC-03/S03, UC-04/S03 | UC-01/S04/TC01, TC14; every UC-03/S03 and UC-04/S03 test |
+| SWR-003 | UC-02/S03, UC-03/S01, UC-04/S02 | every UC-02/S03 test; UC-03/S01/TC01; UC-04/S02/TC01 |
+| SWR-004 | Every rejection and conflict slice | Every test whose expected outcome is invalid input, business rejection or conflict |
+| SWR-005 | Existing-cart command slices in UC-01, UC-03 and UC-04 | UC-01/S04/TC07, TC08; UC-01/S05/TC01; UC-03/S04/TC01; UC-04/S04/TC01 |
+| SWR-006 | UC-01/S05, UC-03/S04, UC-04/S04 | UC-01/S05/TC04; UC-03/S04/TC03; UC-04/S04/TC03 |
+| SWR-007 | UC-01/S01, UC-01/S04 and every cart-result slice | UC-01/S01/TC01; UC-01/S04/TC05; cart-view tests contain no price data |
+| SWR-008 | Every rejection and conflict slice | Every rejecting acceptance test asserts invalid input, business rejection or conflict explicitly |
+| SWR-009 | Realization boundary | Review of public outcome contracts; localization is absent from cart behavior |
+| SWR-010 | All 24 slices | All acceptance tests in this specification |
+| SWR-011 | UC-02/S03, UC-02/S04, UC-05/S01 | every UC-02/S03 and UC-02/S04 test; UC-05/S01/TC03 |
+| SWR-012 | Realization boundary and all persistent behavior | Retention inspection verifies there is no deletion, archival or expiry operation |
+| SWR-013 | UC-01/S01, UC-01/S04, UC-03/S05, UC-04/S05 | UC-01/S01/TC01; UC-01/S04/TC07, TC08; UC-03/S05/TC02; UC-04/S05/TC02 |
+| SWR-014 | UC-01/S05, UC-03/S04, UC-04/S04 | UC-01/S05/TC02, TC03; UC-03/S04/TC02; UC-04/S04/TC02 |
+| SWR-015 | UC-01/S01, UC-01/S04 | every UC-01/S01 test; UC-01/S04/TC03 through TC05, TC08 |
+| SWR-016 | Retry-capable command slices in UC-01, UC-03 and UC-04 | UC-01/S01/TC03, TC06 through TC08; UC-01/S02/TC03, TC04; UC-03/S01/TC03 through TC05; UC-04/S02/TC03 through TC05 |
+| SWR-017 | UC-05/S01 through UC-05/S03 | every UC-05/S01, UC-05/S02 and UC-05/S03 test |
+| SWR-018 | UC-01/S04, UC-02/S05, UC-03/S05, UC-04/S05, UC-05/S04 | UC-01/S04/TC05, TC12; UC-02/S05/TC02; UC-03/S05/TC04; UC-04/S05/TC04; UC-05/S04/TC02 |
+| SWR-019 | Existing-cart command slices in UC-01, UC-03 and UC-04 | UC-01/S02/TC05; UC-01/S04/TC13; UC-03/S05/TC05; UC-04/S05/TC05 |
+| SWR-020 | Every successful command slice and cart-view slice | UC-01/S01/TC01; UC-01/S02/TC02; UC-02/S04/TC01; successful retry tests |
+| SWR-021 | UC-02/S02, UC-05/S01 | UC-02/S02/TC02; UC-05/S01/TC04 |
+| SWR-022 | Every command rejection and conflict slice | UC-01/S05/TC05 through TC07; UC-03/S04/TC04; UC-04/S04/TC04; accepted retry tests |
+
 ## 7. Verification Rule
 
 A use case is Flow Structure Understood, the state recorded in section 3, when:
@@ -649,17 +728,21 @@ A use case is Flow Structure Understood, the state recorded in section 3, when:
 A use-case slice is Prepared when:
 
 - its actor and goal are clear
-- the flows and system-wide requirements it covers are named in its Flow and
-  Requirement Coverage entry
+- the flows it covers are named in its Flow and Requirement Coverage entry
+- every applicable system-wide requirement is associated with the slice in the
+  System-Wide Requirement Traceability table
 - it has at least one test case for every flow and requirement it names, and each
   test case defines observable success or rejection, including which outcome
   category of `SWR-008` a rejection falls into
+- realization-boundary requirements that cannot be demonstrated by a black-box
+  use-case test name their required inspection evidence in the traceability table
 - any questions raised for the slice are answered or explicitly left out of the slice
 
 A use-case slice is Verified when:
 
 - every test case for the slice passes
 - every applicable system-wide requirement is satisfied
+- the release deployment satisfies the Trust Boundary constraint
 - the tested system version is the one intended for release
 
 The test cases in this document are black-box acceptance tests. They say what
@@ -702,11 +785,12 @@ version of the spec:
    prior cart observation; the system generates and returns a unique cart
    identifier and the cart's first observation.
 3. Repeating any accepted command with the same command request identifier and
-   complete input returns its exact original successful result without accepting
-   another change, even if the cart has subsequently changed. Reuse for a
-   different command or different input is invalid. Invalid, rejected and
-   conflicting attempts do not establish idempotency and do not consume their
-   request identifiers.
+   semantically equal complete input returns its exact original business result
+   without accepting another change, even if the cart has subsequently changed.
+   Representation details and delivery-specific transport metadata do not define
+   command or result equality. Reuse for a different command or non-equal input
+   is invalid. Invalid, rejected and conflicting attempts do not establish
+   idempotency and do not consume their request identifiers.
 4. An invalid or failed first product addition does not create a cart or
    accepted change history.
 5. The cart owns product-identifier UUIDs and quantities only. Product prices
@@ -737,8 +821,10 @@ version of the spec:
 14. A concurrent-change conflict is defined by a stale observation of an
    existing cart, not by physical timing alone. Observations have no time-based
    expiry and do not lock or reserve carts.
-15. If two cart-changing requests are based on the same observation of an
-   existing cart, at most one may be accepted.
+15. If two logical commands with different command request identifiers are based
+   on the same observation of an existing cart, at most one may be accepted.
+   Identical delivery attempts sharing one identifier are one logical command and
+   may all return its single successful result.
 16. Two first-addition requests with different command request identifiers
    establish separate carts. Repeating an accepted first addition with the same
    request identifier does not.
@@ -754,7 +840,8 @@ version of the spec:
 21. Cart observation markers are system-authenticated, opaque and bound to the
    cart for which they were issued. Altered, fabricated and different-cart
    markers are invalid input. How the system authenticates a marker is a
-   realization concern.
+   realization concern. Multiple different authentic markers may represent one
+   cart revision, so marker byte equality is not required.
 22. Every successful command returns the complete cart state and observation it
    produced. A replay returns that exact original result, even when it is no
    longer the current cart state.
@@ -777,9 +864,19 @@ version of the spec:
    input validity, then accepted-command replay, then observation currency, then
    business rules. The first failing step alone determines the reported outcome,
    so a stale observation of a cart that has since been closed is reported as a
-   concurrent-change conflict, not as a closed-cart business rejection.
+   concurrent-change conflict, not as a closed-cart business rejection. The
+   observation-currency step does not apply to the first product addition.
 32. Invalid input means the request is malformed or outside a declared range,
    independently of cart state. Business rejection means the request is well
    formed but the cart's state forbids it, which covers a closed cart, a removal
    that would take a held quantity below zero, confirmation of a cart with no
    product items, and an addition that would push a held quantity above 1000.
+33. This version is permitted to run only behind a trusted boundary that supplies
+   authentication and authorization. Cart identifiers and observation markers
+   are not credentials.
+34. A command request identifier denotes one logical command. Repeated identical
+   delivery attempts can all return success while producing one accepted change.
+35. If different otherwise acceptable command inputs concurrently use one
+   previously unestablished global request identifier, exactly one logical
+   command is accepted. Once established, every non-equal attempt receives
+   invalid input.

@@ -7,15 +7,14 @@ inside an imperative shell.
 
 ## 1. Requirements Review
 
-The specification contains five use cases, 24 prepared slices, 83 black-box
+The specification contains five use cases, 24 prepared slices, 91 black-box
 acceptance tests, and 22 system-wide requirements. All 24 slices are Must.
 
-This plan realizes `SPEC2.md` as committed in `55b63b3`. That revision fixed the
-outcome evaluation order in `SWR-022`, defined the invalid-input and
-business-rejection categories in `SWR-008`, widened `SWR-002` to every
-cart-changing command and `SWR-020` to every response carrying cart items, and
-added the confirm and cancel retry flows `UC-03-A6`, `UC-03-A7`, `UC-04-A6` and
-`UC-04-A7`. Section 8 assigns the resulting test cases to increments.
+This plan realizes the finalized `SPEC2.md`, including its fixed outcome
+evaluation order, distinction between logical commands and delivery attempts,
+semantic command equality, global request-ID race behavior, trusted deployment
+boundary and system-wide requirement traceability. Section 8 assigns all test
+cases to iterations.
 
 The following decisions are fixed before the HTTP contract is frozen:
 
@@ -24,7 +23,7 @@ The following decisions are fixed before the HTTP contract is frozen:
 | Cart ownership | A cart owns product UUIDs and quantities only. It accepts and stores no price data. |
 | Identifiers | Cart, product and command request identifiers are UUIDs. Command request UUIDs occupy one global namespace. Any supplied cart identifier that finds no cart has one `invalid-cart` outcome; format and existence are not separate public errors. |
 | Product references | A valid product UUID is accepted as an opaque reference without a catalogue lookup. There is no product-catalogue port or adapter in this delivery. |
-| Command idempotency | Every command requires a request UUID. Only an accepted command stores the UUID and result. Repeating it with the same complete canonical input returns the exact stored success, even after later cart changes; reuse for another command or input is invalid. Concurrent identical repeats accept one change. Invalid, rejected and conflicting attempts do not consume their UUIDs. |
+| Command idempotency | Every logical command requires a request UUID. Only an accepted command stores the UUID and business result. Semantically equal deliveries return that result, excluding delivery-specific metadata, even after later cart changes. Identical concurrent deliveries accept one logical command and one change. Different otherwise valid inputs racing on one unestablished UUID serialize so exactly one command succeeds and every loser is invalid. Invalid, rejected and conflicting attempts do not consume their UUIDs. |
 | Idempotency retention | Accepted command results are retained indefinitely with the other cart data and have no independent expiry. |
 | Quantity outcome | A requested quantity outside the integer range 1 through 1000 is invalid input (`400`). An otherwise valid addition that would raise the held quantity above 1000 is a business rejection (`422`). Use checked arithmetic. |
 | Cart item representation | JSON cart views contain an `items` array of `{product-id, quantity}` objects sorted by the string form of product UUID in ascending order. |
@@ -40,15 +39,23 @@ The following decisions are fixed before the HTTP contract is frozen:
 | Outcome categories | Follow the `SWR-008` split. Invalid input (`400`) means malformed or out-of-declared-range, independent of cart state: non-UUID or missing identifier, quantity outside 1 through 1000, unknown field, unauthentic observation token, cart identifier that finds no cart, or a missing observation where one is required. Business rejection (`422`) means well formed but forbidden by cart state: cart closed, removal below zero, confirmation of an empty cart, or an addition pushing a held quantity above 1000. |
 | Observation integrity | Use versioned HMAC-signed opaque tokens bound to the cart. Forged, altered and wrong-cart tokens are invalid; authentic old tokens are conflicts. |
 | Observation lifetime | Observations have no time-based expiry. They remain current until an accepted command changes the cart; they do not lock or reserve it. |
+| Observation equality | Different authentic marker strings may represent the same cart revision, including across signing-key rotation. Compare represented cart and revision, never marker bytes. |
 | History delivery | Change history is required release scope and returns the complete ordered history without pagination. It is intentionally unbounded. |
 | Data retention | Retain carts, events, projections and accepted-command records indefinitely. This release has no deletion or archival operation. |
 | Cart size | Do not impose a business limit on distinct product lines or accepted changes in a cart. |
 | HTTP success | Every successful command and query, including first addition and idempotent replay, returns `200`. Cart creation is incidental to the add-product-item task, so it does not use `201`. |
+| Trust boundary | Run this version only behind an upstream boundary that authenticates and authorizes callers. Cart UUIDs and observation tokens are concurrency data, not credentials. Do not expose the service directly to untrusted callers. |
 
 Domain events remain internal to the backend. This delivery exposes no external
 event stream and includes no broker, outbox, publisher port or public event
 contract. Internally stored domain events, event sourcing and event-driven
 projections are part of the delivery.
+
+The deployment model must place the backend on a private listener or network
+reachable only through the trusted upstream boundary. Document this as a release
+precondition and verify the deployment configuration. The backend does not infer
+authorization from a cart UUID or observation token. In-service identity and
+permission enforcement remain deferred; direct public ingress does not.
 
 The adjacent `04b-event-store` project is useful as a technical reference, but
 must not be copied unchanged. Its optional expected version, `:any` writes, and
@@ -165,36 +172,47 @@ errors fail loudly rather than being translated into domain rejection.
 
 For an existing cart, the imperative command shell performs this sequence:
 
-1. Validate the strict transport shape, command request UUID and domain input.
-2. Look up the command request UUID. For a stored accepted command, compare the
-   complete canonical command: return the exact original result when it matches,
-   or invalid input when it differs.
-3. Verify and decode the cart-bound observation token.
-4. Load the event stream through the event-store port.
-5. Compare the token's expected stream state with the loaded stream.
-6. Fold events and call the pure decision function.
-7. Enrich proposed events with event ID, timestamp, schema version, and metadata.
-8. Derive cart-view and history projection changes from those events using pure
+1. Validate the strict transport shape, command request UUID and domain input;
+   verify and decode the observation token's signature and cart binding without
+   checking whether its represented revision is current.
+2. Look up the command request UUID. For a stored accepted logical command,
+   compare the semantic canonical command: return the stored business result
+   when it matches, or invalid input when it differs.
+3. Load the event stream through the event-store port.
+4. Compare the token's expected stream state with the loaded stream.
+5. Fold events and call the pure decision function.
+6. Enrich proposed events with event ID, timestamp, schema version, and metadata.
+7. Derive cart-view and history projection changes from those events using pure
    projector functions.
-9. Atomically append, apply projection changes and record the command result
+8. Atomically append, apply projection changes and record the command result
    using the observation's expected revision.
-10. Return success with the complete new cart view and observation, or return
+9. Return success with the complete new cart view and observation, or return
     conflict.
 
 For a first addition, the same shell omits the stream read and observation steps.
 The unit of work atomically checks the command request UUID, appends the first
 `product-item-added` event, applies its projections, and records the successful
 result. A repeat with the same canonical command returns that exact stored result;
-a repeat with different input is invalid. Concurrent repeats serialize on the
-request UUID and create one cart. A generated cart-identifier collision creates
-no partial rows and is retried with a new UUID.
+a repeat with different input is invalid. All attempts using one request UUID
+serialize globally. Identical concurrent deliveries create one cart; different
+concurrent inputs make exactly one command create a cart and make every loser
+invalid. A generated cart-identifier collision creates no partial rows and
+is retried with a new UUID.
 
-Idempotency is deliberately resolved before observation verification and stale
-revision detection. The first successful use of an observation makes that
-observation stale, so reversing these steps would turn a valid retry into a 409.
+Observation authenticity is deliberately resolved before idempotency, while
+observation currency is resolved after idempotency. The first successful use of
+an observation makes that observation stale, so checking currency before replay
+would turn a valid retry into a 409; accepting a forged marker before replay
+would violate the invalid-input precedence in `SWR-022`.
 Only an already accepted command receives replay treatment; the treatment of
 invalid, rejected and conflicting commands is not stored, so their request UUIDs
 remain available for later use.
+
+Canonical command equality is semantic: parse declared values first, normalize
+UUID values, and canonicalize structured data independently of JSON whitespace
+or object-field order. Undeclared fields fail validation. Persist and replay only
+the business response payload; generate correlation, date and tracing metadata
+separately for each delivery attempt.
 
 Do not retry an optimistic conflict. A retry against newer state would replace
 the actor's observation with a server observation and break the central business
@@ -328,6 +346,12 @@ retain an old verification key while observations signed by it can still be
 presented. Removing a verification key necessarily invalidates its outstanding
 observations and is therefore an exceptional operational action, not normal
 time-based expiry.
+
+Token generation need not reproduce the same bytes for repeated views of one
+revision. Key identifiers, format versions or other non-semantic token details
+may differ. Decode authentic tokens and compare their represented cart UUID and
+revision; never compare marker strings to decide observation equality or
+currency.
 
 There is no public observation for a nonexistent cart. The first product
 addition omits both cart identifier and observation; the shell generates the
@@ -501,6 +525,14 @@ returns conflict data and changes neither events nor projections. Constraints
 backstop revisions, unique positions, UUIDs, per-product quantities from 1
 through 1000, projection revision alignment and JSON object shapes.
 
+The unit of work must serialize a request UUID before any stream append, then
+recheck `command_requests` inside the transaction. This lock is global rather
+than stream-scoped so different inputs racing on different carts cannot both
+commit. PostgreSQL uses a transaction-scoped request-key lock, SQLite's immediate
+write transaction serializes the check and write, and memory performs both in
+one atomic transition. A lock or transaction for an unsuccessful command leaves
+no persistent idempotency record.
+
 These ports and adapters expose no cart-data deletion or archival operation.
 Migrations must not add automatic expiry or cascading cleanup for event streams,
 projections or accepted-command records. Capacity monitoring is operational;
@@ -540,19 +572,24 @@ Pin exact versions during scaffolding and commit the resolved dependency basis.
 Keep validation/schema libraries outside the pure decision functions when their
 presence would couple business behavior to transport or persistence shapes.
 
-## 8. Delivery Increments
+## 8. Delivery Iterations
 
-Each increment is a complete vertical slice through OpenAPI, HTTP adapter,
+Each iteration is a complete vertical slice through OpenAPI, HTTP adapter,
 inbound handler, domain decision/query, event store, and automated evidence.
 
-### Increment 0: Decisions and Walking Skeleton
+### Iteration 0: Decisions and Walking Skeleton
 
+- Establish `docs/TEST_STRATEGY.md` with stable test-boundary terminology,
+  small/medium/large isolation rules, no-Docker precommit and Docker-backed CI
+  gates, and an explicit distinction between planned traceability and Verified
+  acceptance behavior.
 - Record the fixed section 1 decisions in OpenAPI and ADRs.
 - Record ADRs for module boundaries, event sourcing, observation tokens,
-  PostgreSQL concurrency, and CQRS query strategy.
+  PostgreSQL concurrency, CQRS query strategy, global request-ID serialization,
+  and the trusted deployment boundary.
 - Create the Clojure project, lifecycle, configuration, quality tasks, health
   endpoints, OpenAPI skeleton, and empty PostgreSQL and SQLite migration paths.
-- Add a requirements traceability table keyed by all 83 test case IDs, with a
+- Add a requirements traceability table keyed by all 91 test case IDs, with a
   column recording the `SWR-008` outcome category each rejection case asserts.
 - Implement the `SWR-022` evaluation pipeline as one shared function with its own
   unit tests, before any slice handler uses it.
@@ -560,7 +597,7 @@ inbound handler, domain decision/query, event store, and automated evidence.
 Exit: the empty service starts locally, migrations run separately, architectural
 dependency checks pass, and CI can run lint and tests.
 
-### Increment 1: First Addition and First View
+### Iteration 1: First Addition and First View
 
 - Deliver `UC-02/S01` and `UC-01/S01`.
 - Build the pure fold/decide/evolve core, pure projectors, observation codec,
@@ -575,11 +612,14 @@ dependency checks pass, and CI can run lint and tests.
 - `UC-01/S01/TC07`: prove a request UUID rejected as invalid input is *not*
   recorded, so reusing it for a valid first addition succeeds. Only `commit!`
   writes `command_requests`; no validation or rejection path may touch it.
+- `UC-01/S01/TC08`: race different first-addition inputs using one unestablished
+  global request UUID. Prove exactly one cart and command are accepted and every
+  non-equal loser is invalid in memory, SQLite and PostgreSQL.
 
 Exit: the actor can establish and then view a cart without a separate creation
 task or a nonexistent-cart observation.
 
-### Increment 2: Manage and View Contents
+### Iteration 2: Manage and View Contents
 
 - Deliver `UC-01/S02`, `UC-01/S03`, `UC-01/S04`, `UC-02/S02`, `UC-02/S04`, and
   `UC-02/S05`.
@@ -597,15 +637,17 @@ task or a nonexistent-cart observation.
 - Apply request-UUID idempotency to additions and removals on existing carts,
   including sequential and concurrent repeats and request-ID misuse.
 - `UC-02/S02/TC03`: prove two consecutive `view-cart` calls return identical
-  contents and an identical observation token, and append no history. This
-  requires the token to be a deterministic function of cart and revision, not to
-  embed a nonce or issue timestamp.
+  cart state at the same revision and append no history. Do not assert marker
+  byte equality; different authentic tokens may represent that revision.
+- Prove elapsed time does not invalidate an otherwise current observation
+  (`UC-01/S02/TC05`) and removal from a closed cart is a business rejection
+  (`UC-01/S04/TC14`).
 - Verify every rejection leaves stream revision, projections and event rows
   unchanged in memory, SQLite and PostgreSQL, and asserts its `SWR-008` category.
 
 Exit: an open cart can be managed completely and safely.
 
-### Increment 3: Existing-Stream Concurrency
+### Iteration 3: Existing-Stream Concurrency
 
 - Deliver `UC-01/S05` and the shared conflict extensions.
 - Race competing additions/removals against the same existing observation on
@@ -618,13 +660,16 @@ Exit: an open cart can be managed completely and safely.
   actor, then submit a content change on the old observation. Assert
   `409 cart-changed`, not `422 cart-closed`. This is the first test that can
   detect an inverted `SWR-022` pipeline, so it must run against every adapter.
+- Complete content-command precedence with invalid input plus staleness
+  (`UC-01/S05/TC06`) and a stale removal that would otherwise exceed the held
+  quantity (`UC-01/S05/TC07`).
 
 Exit: no stale content change can overwrite an accepted change, and outcome
 precedence is proven rather than assumed.
 
-### Increment 4: Confirm Cart
+### Iteration 4: Confirm Cart
 
-- Deliver every `UC-03` slice (`S01`–`S05`, 17 test cases) plus `UC-02/S03` for
+- Deliver every `UC-03` slice (`S01`–`S05`, 18 test cases) plus `UC-02/S03` for
   confirmed carts.
 - Add confirmation rules for empty, closed, invalid, and stale carts. Empty-cart
   confirmation is `422 cart-has-no-items`; confirming an already closed cart on
@@ -638,6 +683,8 @@ precedence is proven rather than assumed.
 - Cover the confirm-side conflict extensions that previously had no tests: two
   actors confirming from one observation (`UC-03/S04/TC02`) and conflict-then-
   re-view-then-reconfirm (`UC-03/S04/TC03`).
+- Prove stale confirmation of a cart since cancelled returns conflict before the
+  closed-cart rule (`UC-03/S04/TC04`).
 - Cover the cross-cutting request rules on confirm, which `UC-01` already had but
   `UC-03` did not: missing or non-UUID request identifier (`UC-03/S05/TC03`),
   undeclared field (`UC-03/S05/TC04`), and altered, fabricated or wrong-cart
@@ -647,9 +694,9 @@ precedence is proven rather than assumed.
 
 Exit: confirmation is atomic, terminal, and conflict-safe.
 
-### Increment 5: Cancel Cart
+### Iteration 5: Cancel Cart
 
-- Deliver every `UC-04` slice (`S01`–`S05`, 16 test cases) plus `UC-02/S03` for
+- Deliver every `UC-04` slice (`S01`–`S05`, 17 test cases) plus `UC-02/S03` for
   cancelled carts.
 - Cover cancellation after all quantities are removed, cancellation with
   contents, repeat closure, stale observations, and a concurrent cancellation
@@ -664,10 +711,12 @@ Exit: confirmation is atomic, terminal, and conflict-safe.
   rules on cancel: missing or non-UUID request identifier (`UC-04/S05/TC03`),
   undeclared field (`UC-04/S05/TC04`), and unauthentic observation token
   (`UC-04/S05/TC05`, `400` rather than `409`).
+- Prove stale cancellation of a cart since confirmed returns conflict before the
+  closed-cart rule (`UC-04/S04/TC04`).
 
 Exit: cancellation is atomic and terminal for every existing open-cart shape.
 
-### Increment 6: Support History
+### Iteration 6: Support History
 
 - Deliver every `UC-05` slice.
 - Project accepted events into complete ordered history DTOs with one-based
@@ -675,13 +724,15 @@ Exit: cancellation is atomic and terminal for every existing open-cart shape.
   times, delta quantities for item changes and empty closure business data.
 - Prove rejected, conflicted and idempotently repeated attempts do not add
   history entries.
+- Prove add and remove history quantities are deltas rather than resulting totals
+  (`UC-05/S03/TC01`, `UC-05/S03/TC02`).
 - `UC-05/S01/TC05`: prove two consecutive history reads return identical entries
   and leave cart contents, status and current observation unchanged.
 
 Exit: support can distinguish confirmation from cancellation and explain every
 accepted state transition.
 
-### Increment 7: Release Hardening
+### Iteration 7: Release Hardening
 
 - Complete OpenAPI request/response validation for every declared status.
 - Prove every successful business endpoint returns `200`, including first
@@ -689,6 +740,9 @@ accepted state transition.
 - Run all acceptance cases over real HTTP with migrated PostgreSQL and SQLite.
 - Add structured logs, correlation IDs, readiness checks, graceful shutdown,
   datasource limits, request body limits, and secret handling.
+- Verify deployment manifests expose the backend only to the trusted upstream
+  boundary and document that cart UUIDs and observation tokens are not access
+  credentials.
 - Build one runnable artifact/container and document local start, migration,
   test, and rollback procedures.
 
@@ -700,12 +754,13 @@ Exit: all Must slices are Verified against the intended release artifact.
 |---|---|
 | Pure domain tests | Exercise decisions, folding, quantity bounds, invariants, and rejected-command no-event behavior without mocks or IO. |
 | Observation codec tests | Prove valid, altered, fabricated and wrong-cart markers; prove elapsed clock time does not expire a marker; prove key identifiers select retained verification keys. |
-| Slice handler tests | Exercise each inbound command/query port using memory persistence and deterministic clock/ID sources. Cover exact accepted-command replay before observation checks and reuse of UUIDs from unsuccessful attempts. Confirm and cancel carry the same request-identifier, unknown-field and token-authenticity cases as add and remove; none of the four may special-case the pipeline. |
+| Slice handler tests | Exercise each inbound command/query port using memory persistence and deterministic clock/ID sources. Cover observation-authenticity validation before replay, exact accepted-command replay before currency checks, and reuse of UUIDs from unsuccessful attempts. Confirm and cancel carry the same request-identifier, unknown-field and token-authenticity cases as add and remove; none of the four may special-case the pipeline. |
 | Persistence port contracts | Run event-store, projection, global command-idempotency and atomic-unit-of-work behavior against memory, SQLite and PostgreSQL adapters, including one-based revisions, identical acceptance instants and no expiry/deletion behavior. |
-| Persistent race tests | Use barriers and separate connections to prove one winner for shared observations and one accepted change for concurrent repeated command UUIDs in SQLite and PostgreSQL. |
+| Persistent race tests | Use barriers and separate connections to prove one winner for distinct commands sharing an observation, one accepted change for identical deliveries sharing a request UUID, and exactly one accepted logical command when otherwise valid non-equal inputs race on one global request UUID, including across different carts. Run these against SQLite and PostgreSQL. |
 | HTTP contract tests | Validate every request and response against OpenAPI, including required command UUIDs, unknown fields at every object level, deterministic item ordering, fixed history shapes, UTC RFC 3339 timestamps, `400` versus `422` quantity outcomes, all-success `200`, malformed JSON, and UTF-8. |
 | Outcome precedence tests | Drive the shared `SWR-022` pipeline with requests that fail more than one step at once, and assert the earlier step always wins: stale plus closed is `409`; stale plus unauthentic token is `400`; stale plus accepted replay is `200`; replay plus closed is `200`. |
-| Acceptance tests | Implement all 83 `SPEC2.md` cases with their IDs visible in test names and run them through HTTP with PostgreSQL and SQLite. Every rejection case asserts its `SWR-008` outcome category and stable code, not just a non-2xx status. |
+| Acceptance tests | Implement all 91 `SPEC2.md` cases with their IDs visible in test names and run them through HTTP with PostgreSQL and SQLite. Every rejection case asserts its `SWR-008` outcome category and stable code, not just a non-2xx status. |
+| Deployment-boundary tests | Inspect deployment configuration to prove there is no direct public ingress and only the trusted upstream boundary can reach the backend. |
 | Architecture tests | Prevent the domain and slices from importing concrete HTTP, database, runtime, clock, or logging namespaces. |
 
 Minimum local gates:
@@ -736,6 +791,8 @@ A slice is done only when:
 - invalid, rejected, and conflicting paths append no events
 - event append, projection updates and accepted-command idempotency record are
   one atomic operation
+- semantic command equality ignores JSON representation details, and replayed
+  business results exclude delivery-specific transport metadata
 - the domain core remains deterministic and side-effect free
 - cart, product and command request identifiers are UUIDs; all unknown fields
   are rejected; per-product quantity stays between 1 and 1000
@@ -756,19 +813,23 @@ A slice is done only when:
 - cart data and accepted-command results have no expiry, deletion or archival
   path; cart line and change counts have no business maximum
 - no external domain-event publishing surface is included
+- deployment exposes no direct untrusted ingress and documents the required
+  upstream authentication and authorization boundary
 - memory, SQLite and PostgreSQL pass the same persistence contracts
 - logs and responses do not expose stack traces, secrets, or database details
 - the traceability table identifies the implementing namespaces and tests
 
-The release is done when all 24 slices and 83 acceptance tests are Verified,
+The release is done when all 24 slices and 91 acceptance tests are Verified,
 PostgreSQL and SQLite migrations succeed from empty databases, both persistent
 race suites are stable under repetition, and the built artifact passes the
 system tests with both persistent configurations.
 
 ## 11. Explicitly Deferred
 
-Authentication, authorization, catalog integration, stock, totals, payment,
-orders, localization, snapshots, asynchronous projections, external brokers,
-multi-tenancy, pagination, SLOs, and high-availability topology remain outside
-this delivery. Add them only through new use cases and ports rather than by
-expanding the cart core or leaking infrastructure into existing slices.
+In-service authentication and authorization, catalog integration, stock, totals,
+payment, orders, localization, snapshots, asynchronous projections, external
+brokers, multi-tenancy, pagination, SLOs, and high-availability topology remain
+outside this delivery. The trusted upstream boundary and absence of direct
+public ingress are release preconditions, not deferred work. Add deferred
+capabilities only through new use cases and ports rather than by expanding the
+cart core or leaking infrastructure into existing slices.

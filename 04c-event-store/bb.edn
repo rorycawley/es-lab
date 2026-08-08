@@ -1,0 +1,159 @@
+{:paths ["."]
+ :tasks
+ {:requires ([babashka.process :refer [shell]]
+             [clojure.string :as str])
+
+  :init
+  (do
+    (defn sh [& args]
+      (binding [*out* *err*]
+        (apply println "+" (remove map? args)))
+      (apply shell args))
+
+    (defn docker-env []
+      (let [configured-host (System/getenv "DOCKER_HOST")
+            context-host    (str/trim
+                             (:out
+                              (shell {:out :string}
+                                     "docker" "context" "inspect"
+                                     "--format" "{{.Endpoints.docker.Host}}")))
+            host-ip         (or (System/getenv "TESTCONTAINERS_HOST_OVERRIDE")
+                                (try
+                                  (let [value (str/trim
+                                               (:out
+                                                (shell {:out :string
+                                                        :continue true}
+                                                       "rdctl" "info"
+                                                       "--field" "ip-address")))]
+                                    (when-not (str/blank? value) value))
+                                  (catch Exception _ nil)))]
+        (cond-> {"TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" "/var/run/docker.sock"}
+          (not (str/blank? (or configured-host context-host)))
+          (assoc "DOCKER_HOST" (or configured-host context-host))
+          (not (str/blank? host-ip))
+          (assoc "TESTCONTAINERS_HOST_OVERRIDE" host-ip)))))
+
+  help
+  {:doc              "Show prerequisites and the Iteration 0 commands"
+   :override-builtin true
+   :task
+   (do
+     (println "Prerequisites: Java 21, Clojure CLI, Babashka and mise")
+     (println "Run `bb install`, then `bb ci`.")
+     (println "Run `bb precommit` for the no-Docker local gate.")
+     (println "Use `bb run:memory` to start the walking skeleton."))}
+
+  install
+  {:doc  "Install pinned tools through mise"
+   :task (sh "mise" "install")}
+
+  test:policy
+  {:doc  "Test shared cross-slice application policy"
+   :task (sh "clojure" "-M:test" "--focus" ":policy")}
+
+  test:slices
+  {:doc     "Iteration 0 compatibility alias; no use-case slice is delivered yet"
+   :depends [test:policy]}
+
+  test:config
+  {:doc  "Test configuration and deployment-boundary validation"
+   :task (sh "clojure" "-M:test" "--focus" ":config")}
+
+  test:http-contract
+  {:doc  "Test operational HTTP behavior and the OpenAPI contract"
+   :task (sh "clojure" "-M:test" "--focus" ":http-contract")}
+
+  test:component
+  {:doc  "Test Component lifecycle assembly"
+   :task (sh "clojure" "-M:test" "--focus" ":component-lifecycle")}
+
+  test:architecture
+  {:doc  "Test dependency direction and functional-core boundaries"
+   :task (sh "clojure" "-M:test" "--focus" ":architecture")}
+
+  test:traceability
+  {:doc  "Verify all SPEC2 acceptance cases are present in traceability"
+   :task (sh "clojure" "-M:test" "--focus" ":traceability")}
+
+  test:migrations
+  {:doc  "Test migration configuration against temporary SQLite"
+   :task (sh "clojure" "-M:test" "--focus" ":migrations")}
+
+  test:migrations-postgres
+  {:doc  "Test PostgreSQL init and migrations through disposable containers"
+   :task (sh {:extra-env (docker-env)}
+             "clojure" "-M:test" "--focus" ":migrations-postgres")}
+
+  test:fast
+  {:doc     "Run every Iteration 0 test without Docker"
+   :depends [test:policy test:config test:http-contract test:component
+             test:architecture test:traceability test:migrations]}
+
+  precommit
+  {:doc     "Run static checks and every no-Docker Iteration 0 suite"
+   :depends [check test:fast]}
+
+  test:all
+  {:doc  "Run all suites, including Testcontainers PostgreSQL"
+   :task (sh {:extra-env (docker-env)} "clojure" "-M:test")}
+
+  test
+  {:doc     "Alias for the complete current suite"
+   :depends [test:all]}
+
+  check:lint
+  {:doc  "Lint source and tests with clj-kondo"
+   :task (sh "mise" "exec" "--" "clj-kondo"
+             "--cache-dir" "target/clj-kondo-cache"
+             "--parallel" "--lint" "src:test")}
+
+  check:fmt
+  {:doc  "Check Clojure formatting"
+   :task (sh "mise" "exec" "--" "cljfmt" "check" "src" "test")}
+
+  check:whitespace
+  {:doc  "Check Git whitespace"
+   :task (sh "git" "diff" "--check")}
+
+  check
+  {:doc     "Run static checks"
+   :depends [check:lint check:fmt check:whitespace]}
+
+  ci
+  {:doc     "Run the Iteration 0 quality gate"
+   :depends [check test:all]}
+
+  fix
+  {:doc  "Format Clojure source and tests"
+   :task (do
+           (sh "mise" "exec" "--" "cljfmt" "fix" "src" "test")
+           (sh "mise" "exec" "--" "cljfmt" "check" "src" "test"))}
+
+  repl
+  {:doc              "Start a development REPL"
+   :override-builtin true
+   :task (sh "clojure" "-M:dev:test" "-r")}
+
+  run:memory
+  {:doc  "Start the memory-configured walking skeleton"
+   :task (sh {:extra-env {"CART_STORE" "memory"}} "clojure" "-M:run")}
+
+  migrate:sqlite
+  {:doc  "Run SQLite migrations as a separate step"
+   :task (sh {:extra-env {"CART_STORE" "sqlite"}} "clojure" "-M:migrate")}
+
+  db:up
+  {:doc  "Start local PostgreSQL"
+   :task (sh "docker" "compose" "up" "-d" "postgres")}
+
+  migrate
+  {:doc  "Run PostgreSQL Flyway migrations separately from service startup"
+   :task (sh "docker" "compose" "run" "--rm" "flyway")}
+
+  db:down
+  {:doc  "Stop local PostgreSQL and remove its development volume"
+   :task (sh "docker" "compose" "down" "-v")}
+
+  clean
+  {:doc  "Remove build artifacts"
+   :task (sh "rm" "-rf" "target" ".cpcache")}}}

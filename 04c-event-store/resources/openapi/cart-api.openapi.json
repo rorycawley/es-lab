@@ -1,0 +1,384 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Shopping Cart Backend",
+    "version": "0.1.0-iteration-0",
+    "description": "Task-based JSON API for the finalized SPEC2 cart behavior. The service must run behind a trusted upstream authentication and authorization boundary. Cart identifiers and observation markers are not credentials."
+  },
+  "x-deployment-constraint": "No direct untrusted ingress. Authentication and authorization are supplied by a trusted upstream boundary.",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "The process is alive.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}}
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "readiness",
+        "responses": {
+          "200": {
+            "description": "The process is ready to serve traffic.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReadyResponse"}}}
+          },
+          "503": {
+            "description": "The process is not ready to serve traffic.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NotReadyResponse"}}}
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "openapiDocument",
+        "responses": {
+          "200": {
+            "description": "This OpenAPI document.",
+            "content": {"application/json": {"schema": {"type": "object"}}}
+          }
+        }
+      }
+    },
+    "/commands/add-product-item": {
+      "post": {
+        "operationId": "addProductItem",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AddProductItemRequest"}}}
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/CartSuccess"},
+          "400": {"$ref": "#/components/responses/InvalidInput"},
+          "409": {"$ref": "#/components/responses/ConcurrentChange"},
+          "422": {"$ref": "#/components/responses/BusinessRejection"},
+          "500": {"$ref": "#/components/responses/UnexpectedFailure"}
+        }
+      }
+    },
+    "/commands/remove-product-item": {
+      "post": {
+        "operationId": "removeProductItem",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RemoveProductItemRequest"}}}
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/CartSuccess"},
+          "400": {"$ref": "#/components/responses/InvalidInput"},
+          "409": {"$ref": "#/components/responses/ConcurrentChange"},
+          "422": {"$ref": "#/components/responses/BusinessRejection"},
+          "500": {"$ref": "#/components/responses/UnexpectedFailure"}
+        }
+      }
+    },
+    "/commands/confirm-cart": {
+      "post": {
+        "operationId": "confirmCart",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExistingCartCommandRequest"}}}
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/CartSuccess"},
+          "400": {"$ref": "#/components/responses/InvalidInput"},
+          "409": {"$ref": "#/components/responses/ConcurrentChange"},
+          "422": {"$ref": "#/components/responses/BusinessRejection"},
+          "500": {"$ref": "#/components/responses/UnexpectedFailure"}
+        }
+      }
+    },
+    "/commands/cancel-cart": {
+      "post": {
+        "operationId": "cancelCart",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExistingCartCommandRequest"}}}
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/CartSuccess"},
+          "400": {"$ref": "#/components/responses/InvalidInput"},
+          "409": {"$ref": "#/components/responses/ConcurrentChange"},
+          "422": {"$ref": "#/components/responses/BusinessRejection"},
+          "500": {"$ref": "#/components/responses/UnexpectedFailure"}
+        }
+      }
+    },
+    "/queries/view-cart": {
+      "post": {
+        "operationId": "viewCart",
+        "description": "Reads the cart-view projection.",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CartQueryRequest"}}}
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/CartSuccess"},
+          "400": {"$ref": "#/components/responses/InvalidInput"},
+          "500": {"$ref": "#/components/responses/UnexpectedFailure"}
+        }
+      }
+    },
+    "/queries/review-cart-change-history": {
+      "post": {
+        "operationId": "reviewCartChangeHistory",
+        "description": "Reads the complete ordered cart-history projection.",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CartQueryRequest"}}}
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/HistorySuccess"},
+          "400": {"$ref": "#/components/responses/InvalidInput"},
+          "500": {"$ref": "#/components/responses/UnexpectedFailure"}
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "CartSuccess": {
+        "description": "Successful task result. Commands always use 200, including the first addition and idempotent replay.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CartSuccessResponse"}}}
+      },
+      "HistorySuccess": {
+        "description": "Complete ordered accepted cart history.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HistorySuccessResponse"}}}
+      },
+      "InvalidInput": {
+        "description": "Malformed or invalid request input.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InvalidResponse"}}}
+      },
+      "BusinessRejection": {
+        "description": "A well-formed command forbidden by current cart state.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RejectedResponse"}}}
+      },
+      "ConcurrentChange": {
+        "description": "The command used an authentic but stale cart observation.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConflictResponse"}}}
+      },
+      "UnexpectedFailure": {
+        "description": "Unexpected failure without implementation details.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UnexpectedResponse"}}}
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {"status": {"const": "ok"}}
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {"status": {"const": "ready"}}
+      },
+      "NotReadyResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {"status": {"const": "not-ready"}}
+      },
+      "ProductItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product-id", "quantity"],
+        "properties": {
+          "product-id": {"type": "string", "format": "uuid"},
+          "quantity": {"type": "integer", "minimum": 1, "maximum": 1000}
+        }
+      },
+      "FirstAddProductItemRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["request-id", "product-item"],
+        "properties": {
+          "request-id": {"type": "string", "format": "uuid"},
+          "product-item": {"$ref": "#/components/schemas/ProductItem"}
+        }
+      },
+      "ExistingAddProductItemRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["request-id", "cart-id", "cart-observation", "product-item"],
+        "properties": {
+          "request-id": {"type": "string", "format": "uuid"},
+          "cart-id": {"type": "string", "format": "uuid"},
+          "cart-observation": {"type": "string", "minLength": 1},
+          "product-item": {"$ref": "#/components/schemas/ProductItem"}
+        }
+      },
+      "AddProductItemRequest": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/FirstAddProductItemRequest"},
+          {"$ref": "#/components/schemas/ExistingAddProductItemRequest"}
+        ]
+      },
+      "RemoveProductItemRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["request-id", "cart-id", "cart-observation", "product-id", "quantity"],
+        "properties": {
+          "request-id": {"type": "string", "format": "uuid"},
+          "cart-id": {"type": "string", "format": "uuid"},
+          "cart-observation": {"type": "string", "minLength": 1},
+          "product-id": {"type": "string", "format": "uuid"},
+          "quantity": {"type": "integer", "minimum": 1, "maximum": 1000}
+        }
+      },
+      "ExistingCartCommandRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["request-id", "cart-id", "cart-observation"],
+        "properties": {
+          "request-id": {"type": "string", "format": "uuid"},
+          "cart-id": {"type": "string", "format": "uuid"},
+          "cart-observation": {"type": "string", "minLength": 1}
+        }
+      },
+      "CartQueryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cart-id"],
+        "properties": {
+          "cart-id": {"type": "string", "format": "uuid"}
+        }
+      },
+      "CartItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product-id", "quantity"],
+        "properties": {
+          "product-id": {"type": "string", "format": "uuid"},
+          "quantity": {"type": "integer", "minimum": 1, "maximum": 1000}
+        }
+      },
+      "Cart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cart-id", "status", "items", "cart-observation"],
+        "properties": {
+          "cart-id": {"type": "string", "format": "uuid"},
+          "status": {"type": "string", "enum": ["open", "closed"]},
+          "items": {
+            "type": "array",
+            "description": "Items sorted by ascending canonical product UUID.",
+            "items": {"$ref": "#/components/schemas/CartItem"}
+          },
+          "cart-observation": {"type": "string", "minLength": 1}
+        }
+      },
+      "CartSuccessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["outcome", "result"],
+        "properties": {
+          "outcome": {"const": "success"},
+          "result": {"$ref": "#/components/schemas/Cart"}
+        }
+      },
+      "ItemChangeBusinessData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product-id", "quantity"],
+        "properties": {
+          "product-id": {"type": "string", "format": "uuid"},
+          "quantity": {"type": "integer", "minimum": 1, "maximum": 1000, "description": "Accepted delta, not resulting total."}
+        }
+      },
+      "ClosureBusinessData": {
+        "type": "object",
+        "additionalProperties": false,
+        "maxProperties": 0
+      },
+      "HistoryEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision", "change-type", "accepted-at", "business-data"],
+        "properties": {
+          "revision": {"type": "integer", "minimum": 1},
+          "change-type": {"type": "string", "enum": ["product-item-added", "product-item-removed", "cart-confirmed", "cart-cancelled"]},
+          "accepted-at": {"type": "string", "format": "date-time"},
+          "business-data": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/ItemChangeBusinessData"},
+              {"$ref": "#/components/schemas/ClosureBusinessData"}
+            ]
+          }
+        }
+      },
+      "HistoryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cart-id", "entries"],
+        "properties": {
+          "cart-id": {"type": "string", "format": "uuid"},
+          "entries": {"type": "array", "items": {"$ref": "#/components/schemas/HistoryEntry"}}
+        }
+      },
+      "HistorySuccessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["outcome", "result"],
+        "properties": {
+          "outcome": {"const": "success"},
+          "result": {"$ref": "#/components/schemas/HistoryResult"}
+        }
+      },
+      "FieldError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "code"],
+        "properties": {
+          "field": {"type": "string"},
+          "code": {"type": "string"}
+        }
+      },
+      "InvalidResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["outcome", "code", "field-errors"],
+        "properties": {
+          "outcome": {"const": "invalid"},
+          "code": {"type": "string"},
+          "field-errors": {"type": "array", "items": {"$ref": "#/components/schemas/FieldError"}}
+        }
+      },
+      "RejectedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["outcome", "code"],
+        "properties": {
+          "outcome": {"const": "rejected"},
+          "code": {"type": "string", "enum": ["cart-closed", "insufficient-product-quantity", "cart-has-no-items", "product-quantity-limit-exceeded"]}
+        }
+      },
+      "ConflictResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["outcome", "code", "next-action"],
+        "properties": {
+          "outcome": {"const": "conflict"},
+          "code": {"const": "cart-changed"},
+          "next-action": {"const": "view-cart-before-retrying"}
+        }
+      },
+      "UnexpectedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["outcome", "code", "correlation-id"],
+        "properties": {
+          "outcome": {"const": "error"},
+          "code": {"const": "internal-server-error"},
+          "correlation-id": {"type": "string", "format": "uuid"}
+        }
+      }
+    }
+  }
+}

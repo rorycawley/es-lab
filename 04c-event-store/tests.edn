@@ -1,0 +1,32 @@
+#kaocha/v1
+{:tests [{:id          :policy
+          :test-paths  ["test"]
+          :ns-patterns ["cart\\.application\\.command-pipeline-test"]}
+
+         {:id          :config
+          :test-paths  ["test"]
+          :ns-patterns ["platform\\.runtime\\.config-test"]}
+
+         {:id          :http-contract
+          :test-paths  ["test"]
+          :ns-patterns ["platform\\.http\\.(router|openapi)-test"]}
+
+         {:id          :component-lifecycle
+          :test-paths  ["test"]
+          :ns-patterns ["platform\\.runtime\\.system-test"]}
+
+         {:id          :architecture
+          :test-paths  ["test"]
+          :ns-patterns ["architecture-test"]}
+
+         {:id          :traceability
+          :test-paths  ["test"]
+          :ns-patterns ["requirements-traceability-test"]}
+
+         {:id          :migrations
+          :test-paths  ["test"]
+          :ns-patterns ["platform\\.persistence\\.migrations-test"]}
+
+         {:id          :migrations-postgres
+          :test-paths  ["test"]
+          :ns-patterns ["platform\\.persistence\\.postgres-migrations-test"]}]}

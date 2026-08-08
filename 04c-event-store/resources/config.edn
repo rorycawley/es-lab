@@ -1,0 +1,19 @@
+{:store #or [#env CART_STORE "memory"]
+
+ :http {:host #or [#env BIND_HOST "127.0.0.1"]
+        :port #long #or [#env PORT "8080"]}
+
+ :deployment
+ {:trusted-upstream? #boolean #or [#env TRUSTED_UPSTREAM_ENFORCED "false"]}
+
+ :db #profile
+ {:postgres {:jdbc-url #or [#env JDBC_URL #env DATABASE_URL]
+             :username #env DB_USERNAME
+             :password #env DB_PASSWORD
+             :pool-size #long #or [#env DB_POOL_SIZE "10"]}
+
+  :sqlite {:jdbc-url #or [#env SQLITE_JDBC_URL
+                           "jdbc:sqlite:target/cart-event-store.sqlite3"]
+           :pool-size #long #or [#env SQLITE_POOL_SIZE "4"]}
+
+  :memory nil}}
