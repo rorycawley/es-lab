@@ -29,6 +29,19 @@
                    :cart-query   (app-query/make-event-store-query event-store)
                    :clock        (constantly now)})))
 
+(defn- failing-handler
+  "Every port call blows up, so the adapter's last-resort 500 is reachable from
+   a live handler rather than asserted from a hand-written body."
+  []
+  (let [boom (fn [] (throw (RuntimeException. "event store unavailable")))]
+    (http/handler {:cart-command (reify cart-command/CartCommand
+                                   (handle-cart-command [_ _ _] (boom))
+                                   (handle-cart-command [_ _ _ _] (boom)))
+                   :cart-query   (reify cart-query/CartQuery
+                                   (cart-summary [_ _] (boom))
+                                   (cart-events [_ _] (boom)))
+                   :clock        (constantly now)})))
+
 (defn- body-stream [body]
   (ByteArrayInputStream.
    (.getBytes (json/generate-string body) StandardCharsets/UTF_8)))
@@ -327,6 +340,12 @@
    ["/commands/confirm-cart" "post" "422" "application/json"]
    (fn [] (confirm-cart! (new-handler) (cart-only-task-for "confirm-rejected")))
 
+   ["/commands/cancel-cart" "post" "201" "application/json"]
+   (fn []
+     ;; Cancelling a cart that does not exist is a legal decision, so this
+     ;; command creates its stream exactly like add-product-item does.
+     (cancel-cart! (new-handler) (cart-only-task-for "cancel-created")))
+
    ["/commands/cancel-cart" "post" "200" "application/json"]
    (fn []
      (let [handler (new-handler)
@@ -371,7 +390,28 @@
                 cart-query-request))
 
    ["/queries/get-cart-events" "post" "400" "application/json"]
-   (fn [] (call (new-handler) :post "/queries/get-cart-events" {}))})
+   (fn [] (call (new-handler) :post "/queries/get-cart-events" {}))
+
+   ["/commands/add-product-item" "post" "500" "application/json"]
+   (fn [] (add-product-item! (failing-handler) "boom"))
+
+   ["/commands/remove-product-item" "post" "500" "application/json"]
+   (fn [] (remove-product-item! (failing-handler) (add-item-task-for "boom")))
+
+   ["/commands/confirm-cart" "post" "500" "application/json"]
+   (fn [] (confirm-cart! (failing-handler) (cart-only-task-for "boom")))
+
+   ["/commands/cancel-cart" "post" "500" "application/json"]
+   (fn [] (cancel-cart! (failing-handler) (cart-only-task-for "boom")))
+
+   ["/queries/get-cart" "post" "500" "application/json"]
+   (fn [] (call (failing-handler) :post "/queries/get-cart" cart-query-request))
+
+   ["/queries/get-cart-events" "post" "500" "application/json"]
+   (fn [] (call (failing-handler)
+                :post
+                "/queries/get-cart-events"
+                cart-query-request))})
 
 (deftest health-check
   (let [response ((new-handler) (request :get "/health"))]
@@ -462,6 +502,78 @@
           (is (compatible-content-type? content-type actual-content-type)
               (str "declared " content-type ", got " (pr-str actual-content-type)))
           (assert-response-contract path method response))))))
+
+(def ^:private command-endpoints
+  {"/commands/add-product-item"    add-item-task-for
+   "/commands/remove-product-item" add-item-task-for
+   "/commands/confirm-cart"        cart-only-task-for
+   "/commands/cancel-cart"         cart-only-task-for})
+
+(defn- declared-statuses [path method]
+  (set (keys (get-in (contract) ["paths" path method "responses"]))))
+
+(defn- command-situations
+  "Drives one command endpoint through the situations a client can actually put
+   a cart in. Handlers are stateful, so the cases run in order and each sees
+   whatever the previous one left behind."
+  [path body-for]
+  (let [cart-id (str "sweep-" (random-uuid))
+        missing (new-handler)
+        opened  (new-handler)
+        closed  (new-handler)]
+    (add-product-item! opened cart-id)
+    (add-product-item! closed cart-id)
+    (confirm-cart! closed (cart-only-task-for cart-id))
+    [["the cart does not exist" (call missing :post path (body-for cart-id))]
+     ["the cart is open"        (call opened :post path (body-for cart-id))]
+     ["the cart is closed"      (call closed :post path (body-for cart-id))]
+     ["the expected version is stale"
+      (call opened :post path (assoc (body-for cart-id) "expected-version" 0))]
+     ["the expected version is any"
+      (call opened :post path (assoc (body-for cart-id) "expected-version" "any"))]
+     ["the body is not a valid task" (call missing :post path {})]]))
+
+(deftest every-status-the-handler-emits-is-declared-in-the-contract
+  (testing "SPEC R7.8 — walks handler -> contract. The example table above walks
+            contract -> handler, so it is blind to a status the adapter really
+            returns but the document never declared."
+    (doseq [[path body-for] (sort-by key command-endpoints)
+            :let [declared (declared-statuses path "post")]
+            [situation response] (command-situations path body-for)]
+      (testing (str "post " path " when " situation)
+        (is (contains? declared (str (:status response)))
+            (str "the handler returned " (:status response)
+                 " but the OpenAPI document only declares "
+                 (pr-str (sort declared))))
+        (assert-response-contract path "post" response)))))
+
+(deftest cancelling-a-cart-that-does-not-exist-creates-its-stream
+  (testing "a legal decision against an :empty cart creates the stream, so this
+            command is a 201 exactly like add-product-item"
+    (let [response (cancel-cart! (new-handler)
+                                 (cart-only-task-for (str "cancel-" (random-uuid))))
+          body     (response-body response)]
+      (is (= 201 (:status response)))
+      (is (true? (get body "created-new-stream?")))
+      (is (= 1 (get body "version")))
+      (is (= ["cart.event/cancelled"]
+             (mapv #(get % "type") (get body "events")))))))
+
+(deftest port-failures-become-a-declared-500
+  (testing "an unhandled failure below the adapter must not leak a stack trace
+            or an undeclared status"
+    (doseq [[path body] [["/commands/add-product-item" (add-item-task-for "boom")]
+                         ["/commands/remove-product-item" (add-item-task-for "boom")]
+                         ["/commands/confirm-cart" (cart-only-task-for "boom")]
+                         ["/commands/cancel-cart" (cart-only-task-for "boom")]
+                         ["/queries/get-cart" cart-query-request]
+                         ["/queries/get-cart-events" cart-query-request]]]
+      (testing path
+        (let [response (call (failing-handler) :post path body)]
+          (is (= 500 (:status response)))
+          (is (= "internal-server-error" (get (response-body response) "error")))
+          (is (contains? (declared-statuses path "post") "500"))
+          (assert-response-contract path "post" response))))))
 
 (deftest commands-go-through-the-command-port
   (let [called       (atom nil)

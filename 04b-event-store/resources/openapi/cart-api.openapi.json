@@ -101,6 +101,9 @@
           },
           "422": {
             "$ref": "#/components/responses/CommandRejected"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -132,6 +135,9 @@
           },
           "422": {
             "$ref": "#/components/responses/CommandRejected"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -163,6 +169,9 @@
           },
           "422": {
             "$ref": "#/components/responses/CommandRejected"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -183,6 +192,9 @@
           }
         },
         "responses": {
+          "201": {
+            "$ref": "#/components/responses/CommandAcceptedCreated"
+          },
           "200": {
             "$ref": "#/components/responses/CommandAccepted"
           },
@@ -194,6 +206,9 @@
           },
           "422": {
             "$ref": "#/components/responses/CommandRejected"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -226,6 +241,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -258,6 +276,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -311,6 +332,16 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/CommandRejected"
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "description": "An unhandled failure below the HTTP adapter.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
             }
           }
         }
@@ -575,7 +606,15 @@
             "type": "string"
           },
           "reason": {
-            "type": "string"
+            "description": "The business rule that rejected the command. See SPEC.md section 2.",
+            "type": "string",
+            "enum": [
+              "cart-closed",
+              "insufficient-quantity",
+              "not-opened",
+              "empty-cart",
+              "already-closed"
+            ]
           }
         }
       }

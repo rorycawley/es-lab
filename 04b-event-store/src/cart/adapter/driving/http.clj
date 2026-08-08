@@ -9,8 +9,7 @@
             [clojure.string :as str]
             [malli.core :as m]
             [malli.error :as me]
-            [reitit.ring :as ring]
-            [ring.middleware.params :refer [wrap-params]])
+            [reitit.ring :as ring])
   (:import [java.nio.charset StandardCharsets]))
 
 (def ^:private json-content-type "application/json; charset=utf-8")
@@ -207,8 +206,10 @@
   (when-not cart-query
     (throw (ex-info "HTTP handler requires :cart-query" {})))
   (let [deps (assoc deps :clock (or clock #(System/currentTimeMillis)))]
+    ;; No wrap-params: every input is a JSON body, and nothing reads :params or
+    ;; :query-params. Parsing them would be per-request work on the path that
+    ;; carries a latency budget.
     (-> (ring/ring-handler
          (ring/router (routes deps))
          (default-handler))
-        wrap-params
         wrap-unhandled)))
