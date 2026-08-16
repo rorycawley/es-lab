@@ -9,11 +9,10 @@
   {:event/type :flavour-sold
    :flavour    :chocolate})
 
-(def flavour-sold-strawberry
+(def flavour-sold-vanilla-envelope
   {:event/type :flavour-sold
-   :flavour    :strawberry})
+   :data       {:flavour :vanilla}})
 
 (def examples
   [flavour-sold-vanilla
-   flavour-sold-chocolate
-   flavour-sold-strawberry])
+   flavour-sold-chocolate])

@@ -17,6 +17,13 @@
           :flavour    :vanilla}
          event/flavour-sold-vanilla)))
 
+(deftest flavour-sold-vanilla-envelope-test
+  (testing "the envelope carries type, with the flavour in the data"
+    (is (= {:event/type :flavour-sold
+            :data       {:flavour :vanilla}}
+           event/flavour-sold-vanilla-envelope))
+    (is (keyword? (get-in event/flavour-sold-vanilla-envelope [:data :flavour])))))
+
 (deftest examples-are-distinct-test
   (is (= (count event/examples)
          (count (distinct event/examples)))))
