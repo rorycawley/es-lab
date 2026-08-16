@@ -1,0 +1,41 @@
+;; Application configuration. Read by cart.config, which passes the selected
+;; store as the aero profile, so #profile below picks the matching :db shape.
+;;
+;; Every value is overridable by an environment variable, and every default
+;; here is the same one the service used to hard-code. Nothing in this file is
+;; secret: passwords arrive through the environment, never through a literal.
+
+{;; Left as a string so cart.config validates it and names the legal values on
+ ;; a typo, rather than #keyword quietly producing :mysql. It also selects the
+ ;; #profile branch of :db below, which is why cart.config reads this file once
+ ;; to learn the store and again with that store as the aero profile.
+ :store #or [#env CART_STORE "postgres"]
+
+ :http {:port #long #or [#env PORT "8080"]}
+
+ ;; SPEC R4.8 — retry is opt-in at the call site; these are its parameters when
+ ;; the command port is built with it.
+ :retry {:retries     #long   #or [#env RETRY_ATTEMPTS "3"]
+         :min-timeout #long   #or [#env RETRY_MIN_TIMEOUT_MS "100"]
+         :factor      #double #or [#env RETRY_FACTOR "1.5"]}
+
+ :db #profile
+ {;; DATABASE_URL is the conventional name on hosted platforms; JDBC_URL wins
+  ;; when both are set. cart.config rejects a postgres run with neither.
+  :postgres {:jdbc-url  #or [#env JDBC_URL #env DATABASE_URL]
+             :username  #env DB_USERNAME
+             :password  #env DB_PASSWORD
+             :pool-size #long #or [#env DB_POOL_SIZE "10"]}
+
+  ;; SQLITE_PATH is a filesystem path; #sqlite-path turns it into a JDBC URL and
+  ;; yields nil when unset, so #or falls through to the default instead of
+  ;; stopping at a half-built "jdbc:sqlite:".
+  :sqlite {:jdbc-url        #or [#env SQLITE_JDBC_URL
+                                 #sqlite-path #env SQLITE_PATH
+                                 "jdbc:sqlite:target/cart-event-store.sqlite3"]
+           :pool-size       #long #or [#env SQLITE_POOL_SIZE "4"]
+           :busy-timeout-ms #long #or [#env SQLITE_BUSY_TIMEOUT_MS "5000"]
+           :migrate?        true}
+
+  ;; The in-memory store has nothing to connect to. cart.config drops the key.
+  :memory nil}}
