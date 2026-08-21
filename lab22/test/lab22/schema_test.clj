@@ -45,6 +45,19 @@
 ;; Closed on the way in
 ;; ---------------------------------------------------------------------------
 
+(deftest an-inbound-message-is-validated-before-it-becomes-a-command-test
+  (is (nil? (command/validate-message
+             {:type :load-truck
+              :data {:flavour "vanilla" :quantity 12}})))
+  (is (some? (command/validate-message
+              {:type :load-truck
+               :data {:flavour "vanilla" :quantity 12}
+               :admin? true}))
+      "the external shape is closed")
+  (is (some? (command/validate-message
+              {:type :steal-truck :data {}}))
+      "unknown intent is rejected at the boundary"))
+
 (deftest a-well-formed-command-passes-test
   (is (nil? (command/validate (buy "chocolate"))))
   (is (nil? (command/validate (load-truck "vanilla" 12)))))

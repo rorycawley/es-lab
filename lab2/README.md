@@ -27,7 +27,7 @@ may be rejected                 has already happened
 sent to one handler             published to anyone
 ```
 
-A command arrives from outside and is a claim about what someone *wants*. It can be refused — no chocolate left, the truck is closed, the customer has no money. An event arrives from inside, after the decision has been made, and is a claim about what *is*. Nothing downstream is entitled to argue with it.
+A command arrives at the domain from a caller and is a claim about what someone *wants*. The caller may be a person, another module, or the system's own policy; the command can still be refused — no chocolate left, the truck is closed, the customer has no money. An event leaves the decision as a claim about what *happened*. Nothing downstream is entitled to argue with it.
 
 Collapsing the two is the most common way an event-sourced design goes wrong. If a `:flavour-sold` event can be rejected, it wasn't an event; it was a command wearing the wrong name.
 
@@ -63,7 +63,7 @@ The accurate phrasing is **"not the source of truth"** rather than "discarded." 
 
 ### The address
 
-Commands are routed to something, so at least one **id** must exist on every state-changing command: the id of what it's addressed to.
+Commands are routed to something, so every state-changing command needs an **address**: the id of what it is asking to change. The id may be carried in the command data at this stage, in an envelope, or in the transport route; it must be unambiguous by the time the handler is selected.
 
 ```clojure
 {:command/type :buy-flavour
@@ -71,7 +71,7 @@ Commands are routed to something, so at least one **id** must exist on every sta
                 :flavour  "vanilla"}}
 ```
 
-Greg Young's further point is that the **client** should originate these ids, normally as UUIDs. That looks like a small detail and isn't: a client-generated id lets the caller name the aggregate *before it exists*, which is what makes retries safe. If the receiver mints the id, a retried "create" produces a second thing; if the client mints it, the retry addresses the same thing and can be recognised as a repeat.
+Greg Young's further point applies when the command creates a new aggregate: the **client** should originate that target id, normally as a UUID. That looks like a small detail and isn't: a client-generated id lets the caller name the aggregate *before it exists*, which is what makes retries safe. If the receiver mints the id, a retried "create" produces a second thing; if the client mints it, the retry addresses the same thing and can be recognised as a repeat. Commands for an existing truck reuse its already assigned id; the client does not invent a new target for every action.
 
 Two things the address is *not*:
 
@@ -111,32 +111,32 @@ Is this truck still on shift?         needs state        business rule
 Is :flavour one this truck sells?     needs state        business rule
 ```
 
-That last row is the instructive one, because it *looks* like validation. "Is this a real flavour?" feels like a fact about the message — but the set of flavours a truck sells is something you have to go and read. Anything you must look up is a business rule, however static it feels.
+That last row is the instructive one, because it *looks* like validation. "Is this a real flavour?" feels like a fact about the message — but the set of flavours a particular truck sells is part of current domain state. An answer whose truth can change while the command stays identical is a business rule, however static it feels.
 
-The first group can be checked at the adapter — HTTP handler, queue consumer — *before the command object is even constructed*, because nothing about the domain's current state can change the answer. The second group cannot be checked anywhere but against rehydrated state, which is `decide`'s job in [lab8](../lab8). [Lab22](../lab22) builds both edges and shows that a command can be perfectly valid and still correctly refused.
+The first group can be checked at the adapter — HTTP handler, queue consumer — before the value is accepted as a command and handed to the domain, because nothing about current state can change the answer. The second group cannot be checked anywhere but against rehydrated state, which is `decide`'s job in [lab8](../lab8). [Lab22](../lab22) builds both edges and shows that a command can be perfectly valid and still correctly refused.
 
 Getting this wrong in either direction hurts. Validating `:quantity` deep in the domain means the domain is full of checks that could never have failed if the edge had done its job. Checking the stock at the edge means checking it against state you haven't loaded, and being wrong.
 
-### Validity isn't settled by `decide` alone
+### A decision is not safe until the append succeeds
 
 *(This framing is this lab's, though the mechanism it rests on is straight out of Greg Young's event store design.)*
 
-Here's the trap. `decide` checks the business rules against rehydrated state and passes. That guarantees nothing under concurrency: two tills serving the last cone both fold the same history, both see one cone left, and both conclude the sale is fine. (The canonical version is two withdrawals against one balance — same shape.)
+Here's the trap. `decide` checks the business rules against rehydrated state and allows the command. That verdict is correct for the state it saw, but it cannot guarantee the state is still current: two tills serving the last cone both fold the same history, both see one cone left, and both conclude the sale is fine. (The canonical version is two withdrawals against one balance — same shape.)
 
-What closes the gap is the check at **write** time. The store compares the version the writer read against the version the stream is actually at, and refuses the append if they differ — before the events are inserted. That's [lab7](../lab7).
+What closes the gap is the check at **write** time. The store compares the version the writer read against the version the stream is actually at, and rejects the append if they differ — before the events are inserted. That's [lab7](../lab7).
 
-So a command's validity is decided in two places, not one:
+So safe command handling has two gates:
 
 ```text
-decide   "given what I read, this is allowed"
-append   "and nothing has happened since I read it"
+decide   "given what I read, the domain allows this"
+append   "nothing has happened since I read it"
 ```
 
-Neither half is sufficient. The second is what makes the first true.
+The append gate does not make a second business decision. A conflict means *the first decision used stale state*: read, fold, and decide again. [Lab23](../lab23#status-codes-are-lab-2s-two-columns) therefore reports it as **409**, distinct from the domain's **422** refusal.
 
 ### A refusal may itself be a fact
 
-Refusing a command usually records nothing — that's [lab5](../lab5)'s argument, and the default.
+Refusing a command usually records nothing — that's [lab5](../lab5)'s argument, and the default. [Lab14](../lab14#the-refusal-has-to-become-a-fact) implements the exception when a process manager needs to observe the refusal.
 
 But not always. `WithdrawalDeclined` is a legitimate event if overdraft attempts matter to the business, and they often do: fraud detection, dunning, "you were declined three times this week" support calls. Likewise a truck that keeps being asked for pistachio it doesn't stock — if the owner would restock on the strength of it, the refusals are worth recording.
 
@@ -203,7 +203,7 @@ Almost identical, and deliberately so. Strip the key naming the shape and the tw
 
 `:data` is the information that constitutes the request, or the fact — not a blob in transit, for the reason [lab1](../lab1#why-data-and-not-payload) gives.
 
-When either a command or an event crosses a module boundary as a transport message, *that* is where an outer message envelope appears, with `:message/id`, `:payload`, correlation ids, and so on ([lab3](../lab3)). Neither of those concerns belongs here.
+When either a command or an event crosses a module boundary as a transport message, *that* is where an outer message envelope appears with `:message/id` and `:payload` ([lab3](../lab3)). Correlation and causation are different: they may be propagated on transport messages and on the internal command/event envelopes that participate in one conversation ([lab11](../lab11)). They are metadata about the request or fact, never part of `:data`.
 
 ---
 

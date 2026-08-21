@@ -1,6 +1,6 @@
 # Lab 23: intentful endpoints
 
-[Lab 21](../lab21) built the driven side of the hexagon — a store, an outbox, a clock. [Lab 22](../lab22) added a driving edge, but one you had to call from Clojure. This lab gives it HTTP, and the thing to notice is how little changes below the adapter.
+[Lab 21](../lab21) made the use-case surface explicit: tests and the demo drove ordinary application functions, while store, outbox and clock sat behind driven ports. [Lab 22](../lab22) added an intake adapter for untrusted data, still called as a Clojure function. This lab adds HTTP as another delivery boundary, and the thing to notice is how little changes below the adapter.
 
 ```bash
 bb serve
@@ -32,7 +32,7 @@ HTTP request  ─────▶  driving adapter  ─────▶  applicati
 
 Which is why this lab renames `port.clj` to **`port/driven.clj`**, and why there is no `port/driving.clj`:
 
-> A protocol buys substitutability of the thing **behind** a port. On the driven side that is exactly what varies — lab 21 runs one suite against a map and against Postgres, so `EventStore` earns a protocol. On the driving side the thing behind the port is your application, and there is one of those. What varies is **who calls it**, and a caller needs no protocol to call a function.
+> A protocol buys substitutability of the thing **behind** a port. On the driven side that is exactly what varies—Lab 21 runs one neutral adapter contract against a map and Postgres, so `EventStore` earns a protocol. On the driving side the thing behind the port is your application, and there is one of those. What varies is **who calls it**, and a caller needs no protocol to call a function.
 
 |  | one | many |
 |---|---|---|
@@ -88,23 +88,21 @@ Most APIs collapse those into one number, and in doing so tell the client nothin
 
 Not the truck. Returning the mutated entity is a REST habit that pulls you straight back to resource thinking; what happened is the command's business, and current state is a **query's**. That's CQRS showing up in a response body, and there's a test asserting the command response carries no stock figure.
 
-## Tests are driving adapters
+## Tests drive the narrowest public boundary that answers the question
 
-Which is not a figure of speech. Count what actually drives this application:
+The architectural testing split is:
 
-| driving adapter | enters at | why there |
-|---|---|---|
-| `adapter/http.clj` | `intake/submit` | a socket |
-| `demo.clj` | both `intake/submit` and `app/handle` | telling a story |
-| `test/…/http_test.clj` | `http/handler` | status codes, routes, the wire |
-| `test/…/intake_test.clj` | `intake/submit` | malformed versus refused |
-| `test/…/app_test.clj` | `app/handle` | orchestration, against two stores |
+| Test Type | Target | Uses Fakes? | Speed & Scope |
+|---|---|---|---|
+| **Behavior / Use Case** | Primary ports—`app/handle`, `app/stock`, `app/react` | Yes, for secondary ports only | Fast. Covers all business logic and domain rules. |
+| **Adapter / Integration** | Secondary adapters—`EventStore`, `Outbox` | No | Slower. Proves infrastructure mapping works. |
+| **System / E2E** | Primary adapters—the HTTP API | No | Very slow. A few smoke tests prove the wiring. |
 
-Five drivers, three entry points. **Choosing where a test drives is choosing what it tests** — and that choice is only available because each level is an ordinary function rather than something you have to stand up.
+`app_test.clj` drives the use cases with in-memory driven fakes. Its assertions concern facts, state and messages, so a structural refactoring inside the hexagon does not rewrite the suite. `adapter_test.clj` separately runs the EventStore and Outbox contracts against memory and real Postgres. Infrastructure mapping no longer masquerades as a business test.
 
-`app_test.clj` drives beneath validation, so it can run the same suite against a map and against Postgres without a schema in the way. `intake_test.clj` drives at the validation edge, because that is where the two rejections live. `http_test.clj` drives the transport, because 400-versus-422 is a transport concern.
+The pure core is also tested directly in `core_test.clj`: important invariants, replay, policies and contract mappings are plain input → output. This is cheap, precise behaviour testing, not interaction testing.
 
-None of them mocks anything. A mock is what you reach for when a layer cannot be entered directly; here every layer can.
+`intake_test.clj` and most of `http_test.clj` are focused primary-adapter component tests with driven fakes. They answer boundary questions such as 400 versus 422 and route coverage without paying for a whole deployed system. The final smoke test crosses a real socket, Jetty, the application and real PostgreSQL with no driven fake. `architecture_test.clj` remains orthogonal to this split because it deliberately asserts source structure.
 
 ## A ring handler is a function from a map to a map
 
@@ -114,7 +112,7 @@ Which means the whole web layer is testable by calling it:
 (handler {:request-method :post :uri "/v1/sales" :body …})
 ```
 
-Every test in `http_test.clj` does that — no socket, no port, no HTTP client. **Exactly one** starts Jetty, on port 0, to prove the wiring exists. If testing your web layer needs a running server, the layer is doing too much.
+Every component test in `http_test.clj` does that—no socket, port or HTTP client. **Exactly one** starts Jetty on port 0 with real PostgreSQL and crosses the whole system. If every web-layer test needs a running server, the layer is doing too much.
 
 ## The checks
 
@@ -199,5 +197,5 @@ It also adds the pair of status codes this table is missing. 401 says *try again
 ```bash
 bb serve    # HTTP on :3000, in memory, no Docker
 bb demo     # the same system, printing rather than listening
-bb test     # 48 tests; the Postgres half needs Docker
+bb test     # 57 tests; adapter contracts and one E2E smoke need Docker
 ```

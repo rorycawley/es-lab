@@ -1,5 +1,5 @@
 (ns lab23.fixture
-  "Both systems, so one suite can run against both.
+  "Both systems for the driven-adapter contract suite.
 
   Postgres is started once for the whole run and its table truncated per
   system, because a container per test would make the suite unbearable and a
@@ -35,15 +35,19 @@
   (jdbc/execute! (jdbc/get-datasource (postgres-config))
                  ["TRUNCATE event, outbox RESTART IDENTITY"]))
 
-(defn systems
-  "Every adapter, as `[label thunk]` pairs.
+(defn postgres-system
+  "A fresh real-Postgres system for adapter and system/E2E tests."
+  [opts]
+  (let [config (postgres-config)]
+    (truncate!)
+    (system/with-postgres config opts)))
 
-  Set `ESLAB_SKIP_DOCKER=1` to run the in-memory half alone — the suite still
-  passes, which is itself worth knowing."
+(defn systems
+  "Every driven-adapter system, as `[label thunk]` pairs.
+
+  Business behaviour enters primary ports with fast in-memory fakes.
+  Set `ESLAB_SKIP_DOCKER=1` to run this contract against memory alone."
   [opts]
   (cond-> [["the in-memory adapter" #(system/in-memory opts)]]
     (not (System/getenv "ESLAB_SKIP_DOCKER"))
-    (conj ["Postgres" (fn []
-                        (let [config (postgres-config)]
-                          (truncate!)
-                          (system/with-postgres config opts)))])))
+    (conj ["Postgres" #(postgres-system opts)])))

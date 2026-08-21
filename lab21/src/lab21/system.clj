@@ -13,8 +13,10 @@
   swapping one a one-line change rather than an audit.
 
   **Nothing in `core` requires this namespace, or `component`, or a port.**
-  The dependency arrows all point inward: shell → ports → core, and never
-  back. A test asserts it rather than trusting it."
+  The core depends on nothing in this application. The application depends on
+  the core and output-port abstractions; adapters implement those abstractions;
+  this outermost namespace chooses and wires them. A test asserts that inward
+  dependency rule rather than trusting it."
   (:require [com.stuartsierra.component :as component]
             [lab21.adapter.clock :as clock]
             [lab21.adapter.memory :as memory]

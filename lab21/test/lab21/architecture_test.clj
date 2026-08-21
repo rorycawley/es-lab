@@ -3,7 +3,12 @@
 
   A diagram in a README is a wish. These are assertions: they read the source
   and fail the build if the dependency arrows ever turn round. Every lab in
-  this repository asserts its ideas in tests; this asserts its *structure*."
+  this repository asserts its ideas in tests; this asserts its *structure*.
+
+  These checks are intentionally coupled to an architectural policy. They are
+  not the business regression suite: `app-test` protects use-case behaviour
+  while internals change. If the policy itself changes, these checks should be
+  changed deliberately."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))

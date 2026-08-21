@@ -187,7 +187,7 @@ Each gate needs strictly more than the last. Putting roles first costs nothing, 
 
 ## The fourth time JSON ate a keyword, and the first time it got fixed
 
-Writing this, the Postgres half of the suite failed where the in-memory half passed:
+Writing this, the Postgres adapter contract failed where the in-memory adapter passed:
 
 ```clojure
 {:type :user}   ; in memory
@@ -246,6 +246,22 @@ Five minutes of validity, tested in no time at all. That is the invoice for lab 
 
 Exactly one test sleeps, for two and a half seconds, and the reason is worth stating: **the held clock proves our verifier honours `exp`; only real time proves the provider issues a token that actually stops working.** Then it refreshes and the call succeeds — the loop a client really runs.
 
+## Test behaviour without confusing the boundaries
+
+The architectural testing split remains:
+
+| Test Type | Target | Uses Fakes? | Speed & Scope |
+|---|---|---|---|
+| **Behavior / Use Case** | Primary ports—command handlers and queries | Yes, for secondary ports only | Fast. Covers all business logic and domain rules. |
+| **Adapter / Integration** | Secondary adapters—repositories, outbox and verification-key provider | No | Slower. Proves infrastructure mapping works. |
+| **System / E2E** | Primary adapters—the authenticated HTTP API | No | Very slow. A few smoke tests prove the wiring. |
+
+`app_test.clj` enters the use cases with in-memory store and outbox fakes. Authentication is not involved because the actor is already a plain verified value at this boundary. The test observes facts, state, messages and audit metadata—not internal calls. `adapter_test.clj` runs a neutral persistence contract against memory and real Postgres, including the actor's JSON round trip.
+
+The security-sensitive invariants still benefit from a pure core. `core_test.clj` calls `truck/decide`, replay, the policy and contract mapping directly with values. Ownership and authority propagation therefore get fast, precise tests without a system, token, fake or mock.
+
+`intake_test.clj`, `authz_test.clj` and most of `http_test.clj` are focused primary-boundary component tests. `auth_test.clj` is a security-adapter contract against a real mock-provider process; as the next section explains, it does not prove compatibility with a production identity provider. The single System/E2E smoke test crosses the test OIDC server, a real socket, Jetty, the application and real PostgreSQL—no in-memory driven fake. Architecture fitness checks are orthogonal to product behaviour.
+
 ## The checks
 
 `architecture_test.clj` gains five rules, and the two that took a second attempt are the interesting ones:
@@ -264,16 +280,16 @@ The **authorization-code redirect with PKCE** driven from a browser, and the **B
 
 ## What's next
 
-The counterweight, which the sequence has been missing since lab 1 and which is now overdue.
+Lab 21 warned that ports and adapters protect a capability but do not discover the capabilities in a larger system. Labs 22 to 24 stayed inside one truck-shaped hexagon, organised mostly by technical role: `adapter`, `core`, `schema`, `port`.
 
-Everything in labs 21 to 24 — the ubiquitous language, the intentful endpoints, `decide`, the ports, all four layers of authorisation above — is **independent of event sourcing**. A lab that keeps every one of them and swaps the store for one holding current state would change `app.clj` by about three lines, and nothing else. Two suites: behavioural, which passes against both, and historical, which does not — and the failing suite is the entire value proposition, stated as tests rather than claims.
+[Lab25](../lab25) zooms out. It adds Catalog and Ordering as modules, organises each around vertical use-case slices, gives each its own Postgres schema and database identity, and permits communication only through a public contract. One deployment remains; the technical rings stop being the system's top-level decomposition.
 
-Twenty-four labs of *how*, and no plain statement yet that most systems should keep the model and skip the store.
+The event-sourcing counterweight is still worth building. It is deferred because functional decomposition has to come first: choosing how a capability stores state is a smaller decision than choosing which capability owns it.
 
 ## Running it
 
 ```bash
 bb demo     # the whole thing, including a login and an expiry, no Docker
 bb serve    # two servers: the truck on :3000, the provider on its own port
-bb test     # 86 tests; the Postgres half needs Docker
+bb test     # 92 tests; adapter contracts and one E2E smoke need Docker
 ```

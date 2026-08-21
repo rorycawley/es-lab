@@ -1,14 +1,19 @@
 (ns lab23.http-test
-  "The web layer, tested as what it is: a function from a map to a map.
+  "Focused tests of the primary HTTP adapter as a map-to-map function.
 
   Not one test in this namespace needs a socket, a port or an HTTP client —
-  except the last, which starts Jetty once to prove the wiring."
+  except the last, a deliberately small System/E2E smoke test using real
+  Jetty and real Postgres. The map-to-map component tests use driven fakes."
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [lab23.adapter.http :as http]
+            [lab23.fixture :as fixture]
             [lab23.schema.command :as command]
-            [lab23.system :as system]))
+            [lab23.system :as system])
+  (:import (java.net URI)
+           (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
+                          HttpResponse$BodyHandlers)))
 
 (defn- with-handler [f]
   (let [sys (system/start (system/in-memory))]
@@ -22,6 +27,13 @@
 (defn- GET [handler uri]
   (let [response (handler {:request-method :get :uri uri})]
     (assoc response :parsed (json/read-str (:body response) :key-fn keyword))))
+
+(defn- post-over-http [url body]
+  (let [request (-> (HttpRequest/newBuilder (URI/create url))
+                    (.header "content-type" "application/json")
+                    (.POST (HttpRequest$BodyPublishers/ofString (json/write-str body)))
+                    (.build))]
+    (.send (HttpClient/newHttpClient) request (HttpResponse$BodyHandlers/ofString))))
 
 ;; ---------------------------------------------------------------------------
 ;; The happy path
@@ -158,11 +170,16 @@
 ;; One test, one socket
 ;; ---------------------------------------------------------------------------
 
-(deftest the-wiring-actually-serves-test
-  (testing "everything above ran without a server; this proves there is one"
-    (let [sys (system/start (system/serving (system/in-memory) 0))]
+(deftest the-system-serves-a-use-case-through-real-infrastructure-test
+  (testing "one smoke test crosses HTTP, the application and real Postgres"
+    (let [sys (system/start (system/serving (fixture/postgres-system {}) 0))]
       (try
         (let [port (.getLocalPort (aget (.getConnectors (:server (:http sys))) 0))
-              body (slurp (str "http://localhost:" port "/health"))]
-          (is (= {:status "ok"} (json/read-str body :key-fn keyword))))
+              response (post-over-http (str "http://localhost:" port "/v1/restocks")
+                                       {:flavour "vanilla" :quantity 2})]
+          (is (= 200 (.statusCode response)))
+          (is (= {"vanilla" 2}
+                 (get (json/read-str
+                       (slurp (str "http://localhost:" port "/v1/stock")))
+                      "stock"))))
         (finally (system/stop sys))))))

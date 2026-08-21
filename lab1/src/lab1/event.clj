@@ -88,12 +88,12 @@
    :data              {:flavour  "vanilla"
                        :truck-id #uuid "0f1c2b3a-0000-4000-8000-000000000001"}
    :metadata          {:recorded-at #inst "2026-08-16T14:33:01.000-00:00"
-                       :actor       {:type :user :id "till-2"}}})
+                       :actor       {:type "user" :id "till-2"}}})
 
 ;; ---------------------------------------------------------------------------
 ;; Two identities, both real.
 ;;
-;;   :event/id                     the handle you minted for this message
+;;   :event/id                     the handle you minted for this fact
 ;;   (:stream/id, :stream/version) the natural key the store already contains
 ;;
 ;; The version is assigned rather than observed, which is why it identifies
@@ -120,10 +120,10 @@
   {:event/type :truck-restocked
    :data       {:flavour "vanilla" :quantity 20}
    :metadata   {:recorded-at #inst "2026-08-16T06:02:00.000-00:00"
-                :actor       {:type :user :id "USR-83721"}}})
+                :actor       {:type "user" :id "USR-83721"}}})
 
 (def restocked-by-a-process
   {:event/type :truck-restocked
    :data       {:flavour "vanilla" :quantity 20}
    :metadata   {:recorded-at #inst "2026-08-16T06:02:00.000-00:00"
-                :actor       {:type :system :id :overnight-restock-process}}})
+                :actor       {:type "system" :id "overnight-restock-process"}}})

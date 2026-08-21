@@ -31,8 +31,9 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Addressed. A state-changing command is routed to something, so it has to
-;; name what it is routed to. The client picks the truck id, which means it
-;; can name the truck before the truck exists.
+;; name what it is routed to. This command reuses an existing truck id; for a
+;; command that creates an aggregate, the client originates the id so a retry
+;; still addresses the same new thing.
 ;; ---------------------------------------------------------------------------
 
 (def buy-flavour-addressed

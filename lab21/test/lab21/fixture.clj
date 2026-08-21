@@ -1,5 +1,5 @@
 (ns lab21.fixture
-  "Both systems, so one suite can run against both.
+  "Both systems for the driven-adapter contract suite.
 
   Postgres is started once for the whole run and its table truncated per
   system, because a container per test would make the suite unbearable and a
@@ -36,10 +36,11 @@
                  ["TRUNCATE event, outbox RESTART IDENTITY"]))
 
 (defn systems
-  "Every adapter, as `[label thunk]` pairs.
+  "Every driven-adapter system, as `[label thunk]` pairs.
 
-  Set `ESLAB_SKIP_DOCKER=1` to run the in-memory half alone — the suite still
-  passes, which is itself worth knowing."
+  The business behaviour suite does not use this fixture: it always enters the
+  primary ports with fast in-memory fakes. Set `ESLAB_SKIP_DOCKER=1` to run
+  this contract against memory alone."
   [opts]
   (cond-> [["the in-memory adapter" #(system/in-memory opts)]]
     (not (System/getenv "ESLAB_SKIP_DOCKER"))

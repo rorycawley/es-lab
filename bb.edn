@@ -13,7 +13,10 @@
             (->> (fs/list-dir ".")
                  (filter fs/directory?)
                  (map (fn [p] (str (fs/file-name p))))
-                 (filter (fn [d] (and (str/starts-with? d "lab") (lab-n d))))
+                 (filter (fn [d]
+                           (and (str/starts-with? d "lab")
+                                (some? (lab-n d))
+                                (pos? (lab-n d)))))
                  (sort-by lab-n))))
 
   help

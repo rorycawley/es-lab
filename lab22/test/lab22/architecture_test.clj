@@ -3,7 +3,8 @@
 
   A diagram in a README is a wish. These are assertions: they read the source
   and fail the build if the dependency arrows ever turn round. Every lab in
-  this repository asserts its ideas in tests; this asserts its *structure*."
+  this repository asserts its ideas in tests; this asserts its *structure*.
+  It is intentionally orthogonal to behaviour, adapter and E2E tests."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
@@ -55,10 +56,10 @@
     (is (contains? (requires (source "adapter/intake.clj")) "lab22.schema.command"))
     (is (contains? (requires (source "adapter/postgres.clj")) "lab22.schema.event"))))
 
-(deftest validation-happens-before-the-application-layer-test
-  (testing "lab 2: at the adapter, before the command object is constructed"
+(deftest validation-stays-at-the-driving-adapter-test
+  (testing "lab 2: the application receives a command, not untrusted input"
     (is (empty? (filter #(str/includes? % "schema") (requires (source "app.clj"))))
-        "app.clj validates — that belongs at the driving edge")))
+        "app.clj validates untrusted input — that belongs at its driving adapter")))
 
 (deftest the-application-layer-depends-on-ports-not-adapters-test
   (let [app (source "app.clj")]

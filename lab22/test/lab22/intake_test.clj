@@ -64,3 +64,19 @@
   (with-app
     (fn [app]
       (is (= :malformed (:rejected (intake/submit app truck-1 {:type :steal-truck :data {}})))))))
+
+(deftest malformed-input-is-rejected-before-a-command-is-constructed-test
+  (with-app
+    (fn [app]
+      (let [id-calls (atom 0)
+            ids      (reify port/Ids
+                       (new-id [_]
+                         (swap! id-calls inc)
+                         (random-uuid)))
+            result   (intake/submit (assoc app :ids ids)
+                                    truck-1
+                                    {:type :load-truck
+                                     :data {:flavour "tarmac" :quantity 3}})]
+        (is (= :malformed (:rejected result)))
+        (is (zero? @id-calls)
+            "validation happens before command/id allocation")))))

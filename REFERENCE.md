@@ -36,7 +36,7 @@ Every key this document discusses, in one map:
 
 ```clojure
 {;; envelope — the frame, the same shape on every event
- :event/id          #uuid "018f7a3e-…"              ; which message        (lab4)
+ :event/id          #uuid "018f7a3e-…"              ; which fact           (lab4)
  :event/type        :flavour-sold                   ; what kind of fact    (lab1)
  :event/occurred-at #inst "2026-08-16T14:32:07"     ; when, in the domain  (lab1)
  :stream/id         #uuid "0f1c2b3a-…"              ; whose history        (lab7)
@@ -44,11 +44,11 @@ Every key this document discusses, in one map:
  :event/position    4102                            ; where in the log     (lab9)
 
  ;; data — the fact itself, in the language of the domain
- :data     {:flavour :vanilla}
+ :data     {:flavour "vanilla"}
 
  ;; metadata — about the message, not about the fact
  :metadata {:recorded-at    #inst "2026-08-16T14:33:01"
-            :actor          {:type :user :id "till-2"}
+            :actor          {:type "user" :id "till-2"}
             :correlation-id #uuid "cc79c083-…"
             :causation-id   #uuid "31dd15c7-…"
             :schema-version 2}}
@@ -60,13 +60,15 @@ No lab builds this whole map, and you shouldn't start from it either. Each key i
 
 | Question | Why it belongs to the fact | How |
 |---|---|---|
-| **What happened** | It *is* the fact. Wrong granularity, and no metadata rescues you. | Past-tense verb in domain language |
+| **The details of what happened** | They are the fact-specific values. Wrong granularity, and no metadata rescues you. | Domain names and JSON-safe values; the past-tense name itself is `:event/type` |
 | **When it took legal effect** | Statutory dates are set by law and routinely back-dated. Not "when the handler ran". | `{:effective-date #inst "…"}` — a business fact, not plumbing |
-| **Why — the business reason** | The genuinely unrecoverable one. Microsoft lists capturing intent, purpose or reason as a primary reason to adopt the pattern. | `{:reason-code :rung-up-twice}` — codes query, prose doesn't |
-| **Under what authority** | Where authority is itself legally meaningful, this is the whole point in twenty years | `{:basis {:type :statutory-power :authority "LEG-CA-1001-S123"}}` |
+| **Why — the business reason** | The genuinely unrecoverable one. Microsoft lists capturing intent, purpose or reason as a primary reason to adopt the pattern. | `{:reason-code "rung-up-twice"}` — codes query, prose doesn't |
+| **Under what authority** | Where authority is itself legally meaningful, this is the whole point in twenty years | `{:basis {:type "statutory-power" :authority "LEG-CA-1001-S123"}}` |
 | **On whose behalf** | An agent filing for a company is a domain fact | Only if legally significant — the logged-in user is not this |
 
 The last two rows are registry examples rather than truck ones, deliberately: an ice cream truck has no statutory basis for selling a cone, and pretending otherwise would teach the wrong instinct. The questions only bite in a regulated domain, and there they bite hard.
+
+**Stored values are data, not program symbols.** Use `"vanilla"`, not `:vanilla`, inside `:data` or `:metadata`. JSON and JSONB turn a keyword value into a string and cannot know to turn it back; `:key-fn keyword` only restores map keys. [Lab19](lab19) demonstrates the loss, and [lab24](lab24#the-fourth-time-json-ate-a-keyword-and-the-first-time-it-got-fixed) applies the resulting rule to current writers across the sequence. [Lab13](lab13#the-rung-that-was-not-hypothetical) deliberately preserves historic keyword-valued specimens and upcasts them on read: changing the rule does not authorise rewriting old facts. The deliberate exception is a discriminator such as `:event/type`: store it in its own `TEXT` column and coerce it once where code dispatches on it.
 
 **Three different times, and they are not interchangeable.** The second row is the one people collapse:
 
@@ -84,15 +86,16 @@ These are questions about the *message*, and most of them get a lab of their own
 
 | Question | Key | Where it's covered |
 |---|---|---|
-| **Which message is this** | `:event/id` | [lab4](lab4) — identity, and idempotency under at-least-once delivery |
+| **Which fact is this** | `:event/id` | [lab4](lab4) — the fact's identifier, distinct from an envelope's `:message/id` |
+| **What kind of fact is it** | `:event/type` | [lab1](lab1#past-tense-and-its-load-bearing) — a past-tense discriminator; [lab19](lab19) stores it in its own column |
 | **To what** | `:stream/id` | [lab7](lab7) — Young requires at least one id on every state-changing message, because all are routed to an object |
 | **Where in that history** | `:stream/version` | [lab7](lab7) — orders the fold *and* is the concurrency token |
 | **Where in the whole log** | `:event/position` | [lab9](lab9) — projection checkpoints |
-| **When ×2** | `:event/occurred-at`, `[:metadata :recorded-at]` | below |
-| **Who acted** | `[:metadata :actor]` | below |
-| **What caused this** | `[:metadata :causation-id]` | below |
-| **What larger process** | `[:metadata :correlation-id]` | [lab3](lab3) sketches it; below |
-| **Which schema version** | `[:metadata :schema-version]`, or the type name | below |
+| **When ×2** | `:event/occurred-at`, `[:metadata :recorded-at]` | [lab18](lab18) asks both questions; below |
+| **Who acted** | `[:metadata :actor]` | [lab24](lab24) — an opaque user or system identity, never a credential |
+| **What caused this** | `[:metadata :causation-id]` | [lab10](lab10), with the idempotency limit closed by [lab20](lab20) |
+| **What larger process** | `[:metadata :correlation-id]` | [lab11](lab11) folds a process across streams; below |
+| **Which schema version** | `[:metadata :schema-version]`, or the type name | [lab13](lab13); below |
 
 **Where in that history** deserves its dual role spelled out, because the second half matters more: `:stream/version` orders the fold, *and* it is your concurrency token. Microsoft: event stores use optimistic concurrency control and reject an append if the stream changed since it was read. Without it, two withdrawals against one balance both pass `decide` and both commit. Enforce it with a `(stream_id, version)` unique constraint.
 
@@ -108,19 +111,23 @@ This lets you separate *what we believed on 5 August* from *what we now know was
 **Who acted** is a kind as well as an id:
 
 ```clojure
-{:actor {:type :user   :id "USR-83721"}}
-{:actor {:type :system :id :overnight-restock-process}}
+{:actor {:type "user"   :id "USR-83721"}}
+{:actor {:type "system" :id "overnight-restock-process"}}
 ```
 
-The `:type` matters as much as the id. A process manager is not a person, and recording the examiner as having incorporated the company when one did is a false record. Young also suggests capturing IP address and permission level *at the time* — permission as it was then is unrecoverable later.
+The `:type` matters as much as the id. A process manager is not a person, and recording the examiner as having incorporated the company when one did is a false record. This repository stores the opaque type and subject id only. If a regulated audit genuinely requires the IP address or permission level *at the time*, model those fields deliberately and account for their retention and personal-data cost; do not copy them wholesale from a token.
 
 > ⚠️ **Store an opaque actor id. Never JWTs, tokens, or credentials.** A bearer credential in append-only storage can never be revoked from the record; it drags personal data into the one store designed to resist deletion; and it doesn't prove authorisation anyway — only that a token was pasted in.
 
+Actor and correlation are deliberately separate. Correlation can be propagated through a conversation; authority must not be. When a sale triggers an automated restock, the restock's actor is a newly stamped system identity, not the customer who caused the policy to run. [Lab24](lab24#authority-does-not-propagate) makes that stamping rule executable.
+
 **What caused this — causation id.** Young's scheme is three ids per message: its own, correlation, causation. Responding to a message, you copy its correlation id and take its message id as your causation id. That gives you both the whole conversation and what-caused-what.
 
-Most of its value needs no lookup at all. Every event emitted from one command shares a causation id, so the id alone says *these three facts came from a single decision* — grouping, with nothing to dereference. It is also the standard idempotency key: before processing, check whether events with this causation id already exist, and skip if they do. Both work with no command store whatsoever.
+Most of its value needs no lookup at all. Every event emitted from one command shares a causation id, so the id alone says *these three facts came from a single decision* — grouping, with nothing to dereference.
 
-So treat it as an opaque grouping token that happens to have been minted by the command. If you additionally want to look up the originating command itself, you need to have stored it — but that's a footnote, not a decision to make up front. And the event usually reconstructs what was asked anyway: `WithdrawMoney{account, amount}` → `MoneyWithdrawn{account, amount}`.
+[Lab10](lab10#idempotency-using-the-causation-id) also uses it as an idempotency shortcut: before processing, check whether events with this causation id already exist, and skip if they do. That is sound only when the command is guaranteed to produce at least one event. [Lab5](lab5) permits a legitimate zero-event result, which leaves no causation id to find; [lab20](lab20#the-hole-in-lab-10) therefore uses a command ledger keyed by `:command/id`, written in the same transaction whether the result contains zero, one, or many events. Causation is traceability metadata, not the general command-idempotency constraint.
+
+So treat it as an opaque grouping token that happens to have been minted by the command. If you additionally want to look up the originating command itself, you need to have stored it; a command ledger proves that an id was handled but need not preserve the request body. A successful event often suggests what was asked — `WithdrawMoney{account, amount}` → `MoneyWithdrawn{account, amount}` — but that is not a lossless reconstruction contract.
 
 There *is* a real argument for keeping a command log, and it isn't this one. See [What it won't answer](#what-it-wont-answer) below.
 
@@ -145,9 +152,11 @@ The correlation id is the **bridge** between the two worlds. Don't merge them �
 
 ## Identity
 
+Rich Hickey defines identity as the stable logical entity associated with different immutable state values over time ([Values and Change](https://clojure.org/about/state)). An identifier is the value used to refer to that identity. A truck has identity across changing stock states; `:stream/id` is its identifier. An event is different: it is one immutable historical value, so `:event/id` names the fact rather than a changing entity. This section uses “event identity” only in that broader *which fact* sense.
+
 Two things get called "the event's id", and they behave differently. Worth separating before choosing.
 
-### The identity that already exists: `(stream-id, version)`
+### The identifier that already exists: `(stream-id, version)`
 
 Evans notes that an event typically carries a description, a timestamp, and the identity of the entities involved — and then:
 
@@ -171,11 +180,11 @@ Compare it with the naive form of the same idea — type, occurrence time, and t
 
 This also works, and has a sharp edge: two genuinely different sales in the same millisecond from the same truck become indistinguishable, and adding a field later can silently change what counts as "the same event." Widening the key doesn't rescue it either — two identical cones sold in the same millisecond are the *same value*, so no function of their properties can separate them. `(stream-id, version)` has neither problem, because the version is assigned rather than observed. ([lab1's tests](lab1/test/lab1/event_test.clj) assert both the working case and the collision.)
 
-### The identity you generate: a UUIDv7
+### The identifier you generate: a UUIDv7
 
-The globally unique handle on *this particular message*.
+The globally unique handle on *this particular fact*. It is distinct from the `:message/id` minted for each new envelope carrying that fact across a boundary ([lab4](lab4#but-lab3-said-ids-belong-on-the-message)).
 
-**Why v7 rather than v4:** it's time-ordered, so it indexes well. Random v4 keys scatter across the B-tree and cause page splits on every insert; v7 keys append to the right-hand edge — exactly the access pattern of an append-only store. Same 128 bits, same collision safety, better locality. [Lab4](lab4) implements it.
+**Why v7 rather than v4:** its timestamp prefix gives successively generated values much better index locality. Random v4 keys scatter throughout a B-tree; v7 keys normally cluster near the current-time edge. That is locality, not ordering: random suffixes do not order ids within one millisecond, and clocks across writers can disagree. [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html#section-5.7) defines the layout; [lab4](lab4) implements the deliberately simple random-suffix form.
 
 **Why not a database sequence:** you want the id assignable *before* the append succeeds — for retries, for setting the causation id on downstream messages, for client-originated ids. Young's point about client-originated UUIDs being valuable in distributed systems applies here too.
 
@@ -187,13 +196,15 @@ They answer different questions, and none substitutes for another:
 
 | | Answers | Used by |
 |---|---|---|
-| `event_id` (UUIDv7) | *which message is this* | idempotency, causation, cross-system references |
+| `event_id` (UUIDv7) | *which fact is this* | idempotent append retries, causation, cross-system references |
 | `(stream_id, version)` | *which event in this history* | optimistic concurrency, replay, ordering ([lab7](lab7)) |
 | `global_position` (bigserial) | *where in the whole log* | projection checkpoints, catch-up subscriptions ([lab9](lab9)) |
 
+Do not collapse the other retry boundaries into `event_id`. A repeated **command** is recognised by `:command/id` and, generally, a command ledger; a repeated **integration delivery** is handled by an inbox keyed by recipient and the fact's `event_id`. A new `message_id` identifies a newly published envelope and therefore cannot deduplicate a republish; broker redelivery of an existing envelope retains its id. [Lab4](lab4#three-shapes-three-ids), [lab12](lab12#at-least-once-and-who-pays-for-it), and [lab20](lab20#the-inbox-and-what-lab-12s-consumer-could-not-do) exercise the three scopes.
+
 You'll want the global position the moment you write a projection reading across streams, because a projector checkpoints on it. It needs to be monotonic *as the reader sees it* — which a naive `bigserial` does not actually guarantee; see [the visibility gap](#the-visibility-gap-in-global_position). A per-stream version cannot do this job at all.
 
-> ⚠️ **Don't make the UUID your clustered primary key *and* rely on it for ordering.** Ordering is `(stream_id, version)` within a stream and `global_position` across streams. The UUID is for identity, not sequence — even a v7, whose ordering is only as good as the clock that made it.
+> ⚠️ **Don't make the UUID your clustered primary key *and* rely on it for ordering.** Ordering is `(stream_id, version)` within a stream and `global_position` across streams. The UUID is an identifier, not a sequence — even a v7, whose ordering is only as good as the clock and monotonicity method that made it.
 
 ### Who generates it — the application or Postgres?
 
@@ -203,7 +214,7 @@ Not "application good, database bad". The rule underneath is:
 
 For an event store reached over a network by an application that retries — which is the normal case, and gets *more* decisive in a globally distributed system, not less — that writer is the application. Here is the argument, and then the conditions that would flip it.
 
-**The argument that settles it: retry idempotency.** An append can fail ambiguously — connection drops, timeout, the write may or may not have landed. If Postgres mints the id via `DEFAULT uuidv7()`, your retry produces a *different* id for the same logical event, and nothing can tell the two apart. If the application minted it before the first attempt, the retry carries the same id and a unique constraint makes the insert idempotent. Duplicate suppression becomes a database guarantee rather than a hope.
+**The argument that settles it: append-retry idempotency.** An append can fail ambiguously — connection drops, timeout, the write may or may not have landed. If Postgres mints the id via `DEFAULT uuidv7()`, your retry produces a *different* id for the same logical event, and nothing can tell the two apart. If the application minted it before the first attempt, the retry carries the same id and a unique constraint makes the insert idempotent. Duplicate suppression for that append becomes a database guarantee rather than a hope. This is separate from command idempotency, whose zero-event case needs [lab20's command ledger](lab20#the-hole-in-lab-10).
 
 This is Young's client-originated-id argument one level down. Across unreliable links, ambiguous failures aren't an edge case — they're a Tuesday.
 
@@ -302,11 +313,11 @@ Because that's the only job, the question under sharding isn't "how do I preserv
 
 **What was true at a point in time.** Replay to position N — or to a moment, on either of two axes, which are not the same question ([lab18](lab18)). Young permits a date-limited query but notes a production system generally should not be doing this — an investigative tool, not a runtime feature.
 
-**How the decision was made.** Distinct from the above, and stronger: fold to position N−1, feed the command back into `decide`, and observe the outcome. Because `decide` is pure ([lab8](lab8)), the reconstruction is exact. The caveat is real, though — this only holds if you version the decider alongside the schema. Proving "correct under the rules as they stood" requires the rules as they stood, which [lab18](lab18) demonstrates by changing a rule and re-running an old decision.
+**The state a decision saw.** Fold to position N−1 and the stream reconstructs that input exactly. Reproducing the decision also needs the original command and the rules version; neither is automatically recoverable from the event stream. Given all three inputs, `decide` is pure ([lab8](lab8)) and the outcome is exact. Proving "correct under the rules as they stood" requires keeping the rules as they stood, which [lab18](lab18#re-running-a-decision-and-what-that-requires) demonstrates by changing a rule and re-running an old decision.
 
 **How we got here.** Evans's actual motivation: without events, the causes of state changes typically aren't explicit, and it's hard to explain how the system got the way it is.
 
-**Questions nobody has asked yet.** Because events represent every action the system has undertaken, any model describing the system can be built from them. Ship a projection ([lab9](lab9)), replay from 2019, and have years of history on day one.
+**Questions nobody has asked yet.** Any model derivable from the business facts you chose to record can be built later. Ship a projection ([lab9](lab9)), replay from 2019, and have years of history on day one.
 
 This last one is the property that separates events from an audit log.
 
@@ -314,17 +325,19 @@ This last one is the property that separates events from an audit log.
 
 ## What it won't answer
 
-**Refusals.** Twelve rejected filings leave no trace if `decide` returns `[]` on failure. Fraud patterns, applicant friction, and examiner consistency all live in the rejections. If they matter, model `ApplicationRejected` with its reason code **deliberately** — [lab5](lab5) and [lab8](lab8) both come back to this.
+**Refusals.** Twelve rejected filings leave no trace if `decide` returns `[]` on failure. Fraud patterns, applicant friction, and examiner consistency all live in the rejections. If they matter, model `ApplicationRejected` with its reason code **deliberately** — [lab5](lab5) and [lab8](lab8) establish the choice, and [lab14](lab14#the-refusal-has-to-become-a-fact) records a refusal because a process manager needs to observe it.
 
 This is the real argument for a command log, and it's worth being precise about why it's weak. A command that produces no events is invisible in the event stream — no causation id helps, because there is no event carrying one. So if you want the rejected attempts, storing raw commands would give them to you. But it gives them to you as *requests nobody acted on*, in a store you cannot fold, mixed in with every command that succeeded. Modelling the rejection as an event gives you the same information as a first-class fact, in the language of the domain, in the store you already replay. Reach for the event first.
 
+**The original request or rules.** A causation id is a pointer, not a copy, and a command ledger may store only the id, type, and event count. Likewise, event schema versions do not version the decision logic. Exact decision reconstruction needs the original command and the old decider as additional retained inputs ([lab18](lab18#re-running-a-decision-and-what-that-requires)).
+
 **Anything you didn't choose to record.** Event sourcing does not give you an audit trail. It gives you a history of the facts you chose to preserve. If you only ever wrote `:application-approved`, then in fifteen years nobody recovers who approved it, why, or under what authority.
 
-**It isn't "legal-grade" by default.** Only for facts recorded, and only if schema evolution is solved: an event you can no longer deserialise is not evidence.
+**Personal detail you deliberately made erasable.** [Lab15](lab15) keeps identifying data out of events where possible and crypto-shreds the residue. The business fact survives; after the subject key is destroyed, the stream intentionally cannot recover the person's plaintext identity. Projections and published copies still have to be rebuilt or handled separately.
+
+**It isn't "legal-grade" by default.** Only for facts recorded, and only if schema evolution is solved: an event you can no longer deserialise is not evidence. [Lab13](lab13) keeps a corpus and an upcast ladder specifically to make old facts readable.
 
 And the usual framing — "the database permanently erases previous states" — is a bit of a strawman. Postgres has temporal tables, and a registry almost certainly has statutory retention already. What CRUD actually loses is the **meaning** of changes. That is Evans's point, and a sharper one than "it erases data".
-
----
 
 ---
 
@@ -360,11 +373,12 @@ The axes are orthogonal. A coordinator can be stateless *and* cross-context *and
 
 They kept "saga" for the compensation mechanism, which is the 1987 meaning, and used "process manager" for the coordinator. Their remark that a process manager typically routes within a bounded context while a saga typically manages something spanning several is an observation about where each *tends* to show up — compensation is needed precisely where a transaction isn't available — not a definition of two rival kinds of coordinator.
 
-So: **there is no coherent third thing.** There is a coordinator, which either holds state or doesn't, and there is compensation, which you need when you can't have a transaction. Those are the two ideas. `Policy` and `process manager` name the first pair with stable definitions; `compensating transaction` names the second without ambiguity. Reach for those three, and if someone says "saga", ask which axis they mean.
+So: **there is no coherent third thing.** There is a coordinator, which either holds state or doesn't, and there is compensation, which you need when you can't have a transaction. Those are the two ideas. `Policy` and `process manager` name the first pair with stable definitions; `compensating transaction` names the second without ambiguity. [Lab14](lab14) implements the compensating action and shows that compensation can itself fail. Reach for those three, and if someone says "saga", ask which axis they mean.
 
 ## Sources
 
 - **Eric Evans**, *Domain-Driven Design Reference* (2015) — the Domain Event pattern: full-fledged part of the domain model, the selection filter, distinctness from system events, derived identity.
+- **Rich Hickey**, [*Values and Change: Clojure's approach to Identity and State*](https://clojure.org/about/state) — identity as logical continuity across immutable state values, distinct from both state and the identifier used to name it.
 - **Greg Young** — CQRS documents and writing on event and command naming, ids on state-changing messages, client-originated UUIDs, per-aggregate version numbers, and event store design.
 - **Udi Dahan** — commands are sent, events are published; validation versus business rules.
 - **Microsoft**, [Event Sourcing pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/event-sourcing), Azure Architecture Center — intent over state delta, bugs producing events that persist, optimistic concurrency, at-least-once delivery and idempotent consumers, the schema-versioning ladder, partitioning by entity id.
@@ -375,10 +389,20 @@ So: **there is no coherent third thing.** There is a coordinator, which either h
 - **Alberto Brandolini**, Event Storming — the Policy, the *"whenever…"* sticky between an event and a command.
 - **Microsoft**, [*A Saga on Sagas*](https://learn.microsoft.com/en-us/previous-versions/msp-n-p/jj591569(v=pandp.10)) (CQRS Journey) — why they refused the word for coordinators.
 - **Oskar Dudycz**, [*Saga and Process Manager*](https://event-driven.io/en/saga_process_manager_distributed_transactions/) — the stateless/stateful split, opposite to the NServiceBus usage.
+- **Jimmy Bogard**, [*Modularizing the Monolith*](https://www.youtube.com/watch?v=fc6_NtD9soI) — vertical slices, strict module contracts, database ownership, and refactoring towards extractable boundaries.
 
 ## Where to go next
 
 - [lab1](lab1) — what an event is, and the envelope/data split this document builds on
-- [lab4](lab4) — identity in code: UUIDv7, and why generating one is an effect
+- [lab4](lab4) — identity versus identifiers in code: UUIDv7, and why allocating one is an effect
 - [lab7](lab7) — `:stream/id` and `:stream/version`, with optimistic concurrency
 - [lab9](lab9) — projections, checkpointing, and rebuilds
+- [lab10](lab10) and [lab11](lab11) — causation, correlation, policies, and process managers
+- [lab13](lab13) — tolerant reads, schema versions, and upcasters
+- [lab14](lab14) — compensating actions and observable refusals
+- [lab15](lab15) — personal data and erasure in an append-only history
+- [lab18](lab18) — the two time axes and the rules required to reconstruct a decision
+- [lab19](lab19) — the Postgres schema and a demonstrated `global_position` visibility gap
+- [lab20](lab20) — command ledgers, outboxes, and inboxes where metadata alone is insufficient
+- [lab24](lab24) — actor metadata, authentication, and why authority does not propagate
+- [lab25](lab25) — vertical slices, module-owned schemas, and contracts between capabilities

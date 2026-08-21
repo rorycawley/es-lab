@@ -43,7 +43,7 @@
       (is (uuid? (get-in e [:data :truck-id]))))
     (testing "and, separately, the circumstances of writing it down"
       (is (inst? (get-in e [:metadata :recorded-at])))
-      (is (= {:type :user :id "till-2"} (get-in e [:metadata :actor]))))))
+      (is (= {:type "user" :id "till-2"} (get-in e [:metadata :actor]))))))
 
 (deftest occurring-and-recording-are-different-moments-test
   (testing "the till reported the sale a minute after the cone was handed over"
@@ -94,8 +94,8 @@
 
 (deftest an-actor-is-a-kind-as-well-as-an-id-test
   (testing "a process manager is not a person"
-    (is (= :user (get-in event/restocked-by-a-person [:metadata :actor :type])))
-    (is (= :system (get-in event/restocked-by-a-process [:metadata :actor :type])))
+    (is (= "user" (get-in event/restocked-by-a-person [:metadata :actor :type])))
+    (is (= "system" (get-in event/restocked-by-a-process [:metadata :actor :type])))
     (testing "same fact, different actor kinds — recording one as the other is false"
       (is (= (:data event/restocked-by-a-person)
              (:data event/restocked-by-a-process)))
@@ -109,6 +109,8 @@
                event/flavour-sold-vanilla-recorded]]
       (let [actor (get-in e [:metadata :actor])]
         (is (= #{:type :id} (set (keys actor))))
+        (is (every? string? (vals actor))
+            "opaque stored actor values are data, not program symbols")
         (is (not-any? #{:token :jwt :credential :password :bearer}
                       (keys actor)))))))
 
@@ -157,7 +159,7 @@
   (testing "a duplicate arrival is recognisable without a minted id"
     (let [e         event/flavour-sold-vanilla-recorded
           duplicate (assoc e :metadata {:recorded-at #inst "2026-08-16T14:35:00.000-00:00"
-                                        :actor       {:type :user :id "till-2"}})]
+                                        :actor       {:type "user" :id "till-2"}})]
       (is (not= e duplicate) "arrived twice, written down at different moments")
       (is (= (data-derived-key e) (data-derived-key duplicate))
           "and the derived key sees one event, which is the point"))))

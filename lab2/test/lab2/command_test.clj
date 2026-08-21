@@ -45,10 +45,12 @@
   (testing "commands are routed, so something must say where"
     (is (uuid? (get-in command/buy-flavour-addressed [:data :truck-id]))))
   (testing "a receiver-minted address would be new on every arrival"
-    (let [minted-on-arrival #(assoc-in command/buy-flavour-addressed
-                                       [:data :truck-id] (random-uuid))]
-      (is (not= (get-in (minted-on-arrival) [:data :truck-id])
-                (get-in (minted-on-arrival) [:data :truck-id]))
+    (let [first-arrival  (assoc-in command/buy-flavour-addressed [:data :truck-id]
+                                   #uuid "0f1c2b3a-0000-4000-8000-000000000002")
+          second-arrival (assoc-in command/buy-flavour-addressed [:data :truck-id]
+                                   #uuid "0f1c2b3a-0000-4000-8000-000000000003")]
+      (is (not= (get-in first-arrival [:data :truck-id])
+                (get-in second-arrival [:data :truck-id]))
           "so a retry could never be recognised as addressing the same truck"))))
 
 (deftest a-command-carries-only-what-the-behaviour-needs-test

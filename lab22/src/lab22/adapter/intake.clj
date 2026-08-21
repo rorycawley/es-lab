@@ -1,17 +1,17 @@
 (ns lab22.adapter.intake
-  "The **driving** adapter — the edge lab 21 did not have.
+  "A **driving** adapter for untrusted input.
 
-  Lab 21 built driven adapters: a store, an outbox, a clock. Things the
-  application reaches out to. Nothing reached *in*, so commands arrived in
-  tests as literal maps and were trusted.
+  Lab 21 already had driving adapters: tests and the demo called the
+  application's use-case functions. Their command maps were trusted, however;
+  there was no adapter translating input from outside the process.
 
   This is the other side of the hexagon: where a message from outside becomes
   a command, or is refused. [Lab 2](../lab2) said exactly where that belongs —
   at the adapter, *before the command object is even constructed*.
 
   Which is also why `app.clj` still contains no `if`. Rejecting a malformed
-  message happens out here, and the application layer only ever sees commands
-  that are already well-formed."
+  message happens out here, before an id is allocated or an internal command
+  is constructed. The application layer only sees well-formed commands."
   (:require [lab22.app :as app]
             [lab22.port :as port]
             [lab22.schema.command :as schema]))
@@ -35,9 +35,9 @@
 
   Lab 2's two columns, and the whole reason they are two."
   [{:keys [ids] :as deps} truck-id message]
-  (let [command (->command ids message)]
-    (if-let [problems (schema/validate command)]
-      {:rejected :malformed :because problems}
+  (if-let [problems (schema/validate-message message)]
+    {:rejected :malformed :because problems}
+    (let [command (->command ids message)]
       (try
         {:accepted (app/handle deps truck-id command)}
         (catch clojure.lang.ExceptionInfo e

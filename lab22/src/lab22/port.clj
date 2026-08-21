@@ -1,15 +1,19 @@
 (ns lab22.port
-  "The ports: what the application layer is allowed to ask the world for.
+  "The driven/output ports: what the use cases ask the world for.
 
-  Four protocols, and every one of them names something the *core* must never
-  do — read, write, look at a clock, invent a number. Twenty labs argued those
-  belong at the edge one at a time; this is where they become a boundary you
-  can point at.
+  Four protocols name capabilities needed by the application but supplied at
+  its edge: event storage, an outbox, time and identifier allocation. The core
+  remains plain functions and values; the application coordinates these
+  effects around it.
 
-  Note what is not here. There is no `TruckRepository`, no `save-truck`, no
-  `find-by-id`. A port describes what the outside world can *do for you*, not
-  a shape borrowed from the domain — an event store appends and reads streams,
-  and that is the whole of its vocabulary.")
+  The driving/input ports are the callable use-case functions in `app.clj`.
+  Tests and the demo drive them directly; `adapter/intake.clj` drives them
+  after translating and validating an untrusted message.
+
+  Output ports name required capabilities, not current vendors: `EventStore`,
+  not `PostgresClient`. A domain-shaped repository could still be appropriate
+  where the use case genuinely reasons in aggregates; the diagram alone does
+  not require one protocol per entity.")
 
 (defprotocol EventStore
   "Somewhere durable to put facts and get them back."
@@ -35,5 +39,5 @@
   (now [this]))
 
 (defprotocol Ids
-  "Fresh identity, as an input rather than an ambient fact (lab 4)."
+  "A fresh identifier, as an input rather than an ambient fact (lab 4)."
   (new-id [this]))

@@ -1,6 +1,6 @@
 # Lab 1: an event
 
-This lab explores what an event is, and how it's represented in Clojure.
+[Lab0](../lab0) built a model of the truck: what is true about it now. This lab records what *happened* to it — a different kind of thing, and the one everything else in the sequence is built from.
 
 > **A domain event is a business fact that has already happened, published to nobody in particular, which cannot be refused.**
 
@@ -22,14 +22,14 @@ Does your domain have a time machine?
 
 ### Immutable, at a real cost
 
-There are no deletes. A delete is modelled as a **reversal** — a new event that undoes the effect of the first, while leaving a trail that the truck was once in the other state.
+There are no deletes of recorded business facts. A mistaken fact is corrected with a **reversal** — a new event whose business effect undoes the first while leaving a trail that the truck was once in the other state. Personal-data erasure is a separate concern: [lab15](../lab15) keeps identifying data out of events where possible and crypto-shreds the residue without deleting the fact.
 
 ```clojure
 {:event/type :sale-reversed
  :data       {:flavour "vanilla" :reason-code "rung-up-twice"}}
 ```
 
-The cost enthusiasts skip: Microsoft is blunt that if a bug produces incorrect events, **those events persist in the store**, and fixing the bug in application code doesn't fix the historical events. You need compensating events or upcasters, and you need them for as long as the store exists.
+The cost enthusiasts skip: Microsoft is blunt that if a bug produces incorrect events, **those events persist in the store**, and fixing the bug in application code doesn't fix the historical events. A semantically wrong fact needs a correction or compensating event ([lab14](../lab14)); an upcaster is appropriate only when the problem is how an old fact was represented, not what it meant ([lab13](../lab13)). Both kinds of repair live for as long as the affected history does.
 
 Note what immutability does *not* do. It records rather than guarantees truth: an event can be wrong, and correcting a wrong fact means appending a correction, not editing the original. *(This distinction is the lab's.)*
 
@@ -198,7 +198,7 @@ Beyond a description, an event typically carries **when it occurred** and **the 
 
 **The actor is a kind as well as an id.** A process manager is not a person, and recording one as the other is a false record. Store an **opaque** id — never a JWT, token, or credential: append-only storage cannot revoke one, it drags personal data into the store designed to resist deletion, and it proves only that a token was pasted in.
 
-**A value in a fact is a string, not a keyword.** `"vanilla"`, not `:vanilla`. A keyword is a *program symbol* — it means something to the code that wrote it and nothing to anything else — and a recorded fact has to outlive that code, cross a wire, and sit in a database column. JSON, JSONB and every other common encoding turn a keyword into a string on the way out and cannot turn it back: `:key-fn keyword` restores *keys*, because their names are known in advance, and there is no equivalent for values.
+**Domain values are data, not program symbols.** A symbolic label is `"vanilla"`, not `:vanilla`; quantities remain numbers, ids remain UUIDs, and instants remain instants. A keyword means something to the Clojure code that wrote it and nothing to anything else, while a recorded fact has to outlive that code, cross a wire, and sit in a database column. JSON and JSONB turn a keyword value into a string and cannot know to turn it back: `:key-fn keyword` restores *keys*, because their names are known in advance, and there is no equivalent for values. Clojure-specific encodings such as EDN and Transit can preserve keywords, but choosing one makes every reader pay for a program-level distinction the domain does not need.
 
 [Lab19](../lab19) discovered that the expensive way, and this repository patched it three times before adopting the rule. The one keyword worth persisting is a **discriminator** the code branches on — `:event/type` — and that belongs in a column of its own, coerced once at the point of dispatch. Inside `:data`, use strings. [Lab13](../lab13) shows what it costs to change your mind later.
 

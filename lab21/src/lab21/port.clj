@@ -1,15 +1,18 @@
 (ns lab21.port
-  "The ports: what the application layer is allowed to ask the world for.
+  "The driven/output ports: what the application asks the world for.
 
   Four protocols, and every one of them names something the *core* must never
   do — read, write, look at a clock, invent a number. Twenty labs argued those
   belong at the edge one at a time; this is where they become a boundary you
   can point at.
 
-  Note what is not here. There is no `TruckRepository`, no `save-truck`, no
-  `find-by-id`. A port describes what the outside world can *do for you*, not
-  a shape borrowed from the domain — an event store appends and reads streams,
-  and that is the whole of its vocabulary.")
+  The driving/input ports are the application's ordinary use-case functions:
+  `app/handle`, `app/stock` and `app/react`. The demo and tests call those
+  directly; lab 22 adds an intake adapter in front of them.
+
+  These names describe capabilities the application needs, not the vendors
+  supplying them. The event store appends and reads streams; Postgres is only
+  one adapter that can do so.")
 
 (defprotocol EventStore
   "Somewhere durable to put facts and get them back."
@@ -35,5 +38,5 @@
   (now [this]))
 
 (defprotocol Ids
-  "Fresh identity, as an input rather than an ambient fact (lab 4)."
+  "A fresh identifier, as an input rather than an ambient fact (lab 4)."
   (new-id [this]))

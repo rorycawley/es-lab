@@ -1,8 +1,9 @@
 (ns lab24.http-test
-  "The web layer, tested as what it is: a function from a map to a map.
+  "Focused tests of the primary HTTP adapter as a map-to-map function.
 
   Not one test in this namespace needs a socket for *our* server — except the
-  last, which starts Jetty once to prove the wiring. The identity provider is
+  last, a deliberately small System/E2E smoke test with real Postgres. The
+  map-to-map component tests use driven fakes. The identity provider is
   a different matter: it is a real server on a real port, because a token you
   minted yourself proves nothing about a token you were given."
   (:require [clojure.data.json :as json]
@@ -10,10 +11,14 @@
             [clojure.test :refer [deftest is testing]]
             [lab24.adapter.auth :as auth]
             [lab24.adapter.http :as http]
+            [lab24.fixture :as fixture]
             [lab24.mock-idp :as mock-idp]
             [lab24.port.driven :as driven]
             [lab24.schema.command :as command]
-            [lab24.system :as system]))
+            [lab24.system :as system])
+  (:import (java.net URI)
+           (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
+                          HttpResponse$BodyHandlers)))
 
 (defn- with-handler
   "A provider, a system, a handler, and a way to log in as anybody."
@@ -40,6 +45,14 @@
 
 (defn- post [handler uri tokens body] (call handler :post uri tokens body))
 (defn- GET  [handler uri tokens]      (call handler :get uri tokens nil))
+
+(defn- post-over-http [url tokens body]
+  (let [request (-> (HttpRequest/newBuilder (URI/create url))
+                    (.header "content-type" "application/json")
+                    (.header "authorization" (mock-idp/bearer tokens))
+                    (.POST (HttpRequest$BodyPublishers/ofString (json/write-str body)))
+                    (.build))]
+    (.send (HttpClient/newHttpClient) request (HttpResponse$BodyHandlers/ofString))))
 
 (defn- ready
   "Roster Dana and put vanilla on the truck, as the depot would."
@@ -289,13 +302,16 @@
 ;; One test, one socket
 ;; ---------------------------------------------------------------------------
 
-(deftest the-wiring-actually-serves-test
-  (testing "everything above ran without a server; this proves there is one"
+(deftest the-authenticated-system-serves-through-real-infrastructure-test
+  (testing "one smoke test crosses OIDC, HTTP, the application and real Postgres"
     (let [idp (mock-idp/start!)
           sys (system/start (system/serving
-                             (system/in-memory {:oidc (mock-idp/oidc-config idp)}) 0))]
+                             (fixture/postgres-system
+                              {:oidc (mock-idp/oidc-config idp)}) 0))]
       (try
         (let [port (.getLocalPort (aget (.getConnectors (:server (:http sys))) 0))
-              body (slurp (str "http://localhost:" port "/health"))]
-          (is (= {:status "ok"} (json/read-str body :key-fn keyword))))
+              response (post-over-http (str "http://localhost:" port "/v1/restocks")
+                                       (mock-idp/login idp :rudi)
+                                       {:flavour "vanilla" :quantity 2})]
+          (is (= 200 (.statusCode response))))
         (finally (system/stop sys) (mock-idp/stop! idp))))))

@@ -1,10 +1,13 @@
 (ns lab22.adapter.memory
   "The in-memory adapter — labs 1 to 18's store, wearing a protocol.
 
-  Its purpose is not speed. It is the *second* implementation, and a port with
-  one implementation is not a boundary, it is a layer of indirection with
-  optimism attached. Two implementations, one application layer, one test
-  suite: that is what makes the boundary real.
+  Its purpose is not speed. As a second implementation it makes the promised
+  testability and technology isolation visible: one application layer and one
+  behaviour suite can run with either memory or Postgres.
+
+  Two implementations are strong evidence for a useful boundary, not a rule
+  that every port needs two production adapters. A single slow, volatile or
+  awkward dependency may justify isolation; trivial stable CRUD may not.
 
   It is also what lets `bb demo` run with nothing installed."
   (:require [com.stuartsierra.component :as component]

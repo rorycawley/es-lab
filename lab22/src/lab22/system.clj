@@ -13,8 +13,11 @@
   swapping one a one-line change rather than an audit.
 
   **Nothing in `core` requires this namespace, or `component`, or a port.**
-  The dependency arrows all point inward: shell → ports → core, and never
-  back. A test asserts it rather than trusting it."
+  The core depends on nothing in this application. `app.clj` depends on the
+  core and output-port abstractions; concrete adapters implement those
+  abstractions; this outer composition root wires the choices together. A test
+  asserts those inward-pointing source dependencies rather than trusting a
+  diagram."
   (:require [com.stuartsierra.component :as component]
             [lab22.adapter.clock :as clock]
             [lab22.adapter.memory :as memory]

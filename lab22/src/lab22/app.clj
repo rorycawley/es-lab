@@ -1,5 +1,5 @@
 (ns lab22.app
-  "The application layer — the **imperative shell**.
+  "The application layer — the **imperative shell** and use-case surface.
 
   Read this looking for business logic. There is none. Every function here has
   the same shape:
@@ -14,7 +14,9 @@
 
   Ports-and-adapters calls this the application or service layer. It is the
   only code that knows both worlds: it depends on `port`, never on any
-  `adapter`, and it hands the core plain values."
+  `adapter`, and it hands the core plain values. `handle`, `stock` and `react`
+  are ordinary Clojure functions and also the driving/input ports: tests, the
+  demo and intake adapters call them without needing a protocol."
   (:require [lab22.core.contract :as contract]
             [lab22.core.policy :as policy]
             [lab22.core.truck :as truck]
