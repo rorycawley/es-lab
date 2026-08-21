@@ -1,0 +1,16 @@
+{:paths ["src" "resources"]
+ :deps  {org.clojure/clojure               {:mvn/version "1.12.5"}
+         ;; Schemas — used by the shell and tests only, never by lab22.core
+         metosin/malli                     {:mvn/version "0.16.4"}
+         com.stuartsierra/component        {:mvn/version "1.1.0"}
+         com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
+         org.postgresql/postgresql         {:mvn/version "42.7.3"}
+         org.clojure/data.json             {:mvn/version "2.5.0"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps  {lambdaisland/kaocha               {:mvn/version "1.91.1392"}
+                       org.testcontainers/postgresql     {:mvn/version "1.20.4"}
+                       org.testcontainers/testcontainers {:mvn/version "1.20.4"}
+                       org.slf4j/slf4j-simple            {:mvn/version "2.0.16"}}
+         :main-opts   ["-m" "kaocha.runner"]}
+  :demo {:main-opts ["-m" "lab22.demo"]}}}

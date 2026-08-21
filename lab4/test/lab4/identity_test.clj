@@ -8,14 +8,14 @@
     (doseq [event id/events]
       (is (uuid? (:event/id event)))
       (is (= :flavour-sold (:event/type event)))
-      (is (keyword? (get-in event [:data :flavour]))))))
+      (is (string? (get-in event [:data :flavour]))))))
 
 (deftest command-shape-test
   (testing "each command carries an identity alongside its type and data"
     (doseq [command id/commands]
       (is (uuid? (:command/id command)))
       (is (= :buy-flavour (:command/type command)))
-      (is (keyword? (get-in command [:data :flavour]))))))
+      (is (string? (get-in command [:data :flavour]))))))
 
 (deftest message-shape-test
   (testing "each message carries a delivery identity, and the fact's id in its payload"
@@ -23,7 +23,7 @@
       (is (uuid? (:message/id message)))
       (is (= :flavour-sold (:message/type message)))
       (is (uuid? (get-in message [:payload :event/id])))
-      (is (keyword? (get-in message [:payload :flavour]))))))
+      (is (string? (get-in message [:payload :flavour]))))))
 
 (deftest event-identities-are-unique-test
   (testing "no two facts share an identity"
@@ -104,19 +104,19 @@
           command-id #uuid "018f7a3d-0000-7000-8000-00000000cafe"]
       (is (= {:event/id   event-id
               :event/type :flavour-sold
-              :data       {:flavour :vanilla}}
-             (id/flavour-sold (constantly event-id) :vanilla)))
+              :data       {:flavour "vanilla"}}
+             (id/flavour-sold (constantly event-id) "vanilla")))
       (is (= {:command/id   command-id
               :command/type :buy-flavour
-              :data         {:flavour :vanilla}}
-             (id/buy-flavour (constantly command-id) :vanilla))))))
+              :data         {:flavour "vanilla"}}
+             (id/buy-flavour (constantly command-id) "vanilla"))))))
 
 (deftest flavour-sold-message-lifts-the-event-id-into-the-payload-test
   (let [message-id #uuid "018f7a3f-0000-7000-8000-00000000face"]
     (is (= {:message/id   message-id
             :message/type :flavour-sold
             :payload      {:event/id (:event/id id/flavour-sold-vanilla)
-                           :flavour  :vanilla}}
+                           :flavour  "vanilla"}}
            (id/flavour-sold-message (constantly message-id)
                                     id/flavour-sold-vanilla)))))
 
@@ -125,9 +125,9 @@
     (let [tick   (atom 1700000000000)
           clock  #(swap! tick inc)
           gen-id (id/uuid-v7-generator clock (Random. 7))
-          events [(id/flavour-sold gen-id :vanilla)
-                  (id/flavour-sold gen-id :chocolate)
-                  (id/flavour-sold gen-id :vanilla)]
+          events [(id/flavour-sold gen-id "vanilla")
+                  (id/flavour-sold gen-id "chocolate")
+                  (id/flavour-sold gen-id "vanilla")]
           ids    (mapv (comp str :event/id) events)]
       (is (= ids (sort ids)))
       (is (= (count ids) (count (distinct ids)))))))

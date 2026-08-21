@@ -16,9 +16,9 @@ Everything since has been assembling the pieces it needs. This lab writes it, an
 
 ```clojure
 ;; decide : command -> state -> [event]
-(decide {:command/type :buy-flavour :data {:flavour :vanilla}}
-        {:vanilla 3})
-;; => [{:event/type :flavour-sold :data {:flavour :vanilla}}]
+(decide {:command/type :buy-flavour :data {:flavour "vanilla"}}
+        {"vanilla" 3})
+;; => [{:event/type :flavour-sold :data {:flavour "vanilla"}}]
 ```
 
 Three things about that signature, each settled by an earlier lab.
@@ -35,7 +35,7 @@ Look closely at the event above. No `:event/id`, no `:stream/id`, no `:stream/ve
 
 ```clojure
 {:event/type :flavour-sold
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 ```
 
 `decide` produces *what happened*. Where it gets recorded is not its business — the store stamps the identity, the stream, and the version when the event is appended. That's also where minting an id lives, which keeps `decide` pure exactly as [lab4](../lab4) argued: an id generator is an effect, so it belongs at the edge, and `decide` stays a function you can test by comparing two values.
@@ -55,10 +55,10 @@ lab8.handler   the loop       the only namespace that knows both
 Lab5's counting, now produced rather than asserted:
 
 ```clojure
-(decide (load-truck :vanilla 0) {})     ;; => []            nothing happened
-(decide (buy :vanilla) {:vanilla 3})    ;; => [sold]        one fact
-(decide (buy :vanilla) {:vanilla 1})    ;; => [sold depleted]  two, in order
-(decide (buy :vanilla) {:vanilla 0})    ;; => throws        refused
+(decide (load-truck "vanilla" 0) {})     ;; => []            nothing happened
+(decide (buy "vanilla") {"vanilla" 3})    ;; => [sold]        one fact
+(decide (buy "vanilla") {"vanilla" 1})    ;; => [sold depleted]  two, in order
+(decide (buy "vanilla") {"vanilla" 0})    ;; => throws        refused
 ```
 
 The first and last both put nothing in the log, and they are **not the same thing**.
@@ -68,7 +68,7 @@ Loading zero cones onto the truck is a request that legitimately did nothing. No
 So `decide` throws, and the exception carries the reason:
 
 ```clojure
-{:command/type :buy-flavour :flavour :pistachio :remaining 0}
+{:command/type :buy-flavour :flavour "pistachio" :remaining 0}
 ```
 
 This is a design choice with a real alternative: return a result value — `[:ok events]` / `[:refused reason]` — rather than throwing. That composes better and makes refusal impossible to ignore, at the cost of every caller unwrapping it. Throwing is used here because it keeps the signature to one shape while the point being made is about `decide` itself. What matters is not which you pick but that **refusal is distinguishable from a no-op**.
@@ -94,8 +94,8 @@ The version is read *before* deciding and offered back *at* the append. That gap
 
 ```clojure
 (-> log
-    (handle gen-id truck-1 (buy :vanilla))   ; till A: 2 left → sold
-    (handle gen-id truck-1 (buy :vanilla)))  ; till B: 1 left → sold + depleted
+    (handle gen-id truck-1 (buy "vanilla"))   ; till A: 2 left → sold
+    (handle gen-id truck-1 (buy "vanilla")))  ; till B: 1 left → sold + depleted
 ```
 
 Note the second sale correctly emits `stock-depleted`, which the stale decision would have missed entirely. Retrying is not a formality — the answer genuinely changed.

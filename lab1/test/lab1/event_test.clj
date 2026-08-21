@@ -9,21 +9,24 @@
       (is (= :flavour-sold (:event/type example))))))
 
 (deftest flavour-sold-flavour-test
-  (testing "each example names a flavour"
+  (testing "each example names a flavour, as a string"
+    ;; A string, not a keyword — see the README. A keyword is a program
+    ;; symbol; a recorded fact is data, and this one has to survive JSON,
+    ;; JSONB and a wire without anything in between to put it right.
     (doseq [example event/examples]
-      (is (keyword? (:flavour example))))))
+      (is (string? (:flavour example))))))
 
 (deftest flavour-sold-vanilla-test
   (is (= {:event/type :flavour-sold
-          :flavour    :vanilla}
+          :flavour    "vanilla"}
          event/flavour-sold-vanilla)))
 
 (deftest flavour-sold-vanilla-envelope-test
   (testing "the envelope carries type, with the flavour in the data"
     (is (= {:event/type :flavour-sold
-            :data       {:flavour :vanilla}}
+            :data       {:flavour "vanilla"}}
            event/flavour-sold-vanilla-envelope))
-    (is (keyword? (get-in event/flavour-sold-vanilla-envelope [:data :flavour])))))
+    (is (string? (get-in event/flavour-sold-vanilla-envelope [:data :flavour])))))
 
 (deftest examples-are-distinct-test
   (is (= (count event/examples)
@@ -33,7 +36,7 @@
   (let [e event/flavour-sold-vanilla-recorded]
     (testing "a description of what happened"
       (is (= :flavour-sold (:event/type e)))
-      (is (= :vanilla (get-in e [:data :flavour]))))
+      (is (= "vanilla" (get-in e [:data :flavour]))))
     (testing "when it happened in the domain"
       (is (inst? (:event/occurred-at e))))
     (testing "the identity of the entity involved"
@@ -51,8 +54,8 @@
 (deftest an-event-is-immutable-test
   (testing "correcting an event produces a new value; the fact is unchanged"
     (let [original event/flavour-sold-vanilla
-          amended  (assoc original :flavour :strawberry)]
-      (is (= {:event/type :flavour-sold :flavour :vanilla} original))
+          amended  (assoc original :flavour "strawberry")]
+      (is (= {:event/type :flavour-sold :flavour "vanilla"} original))
       (is (not= original amended)))))
 
 (deftest new-information-does-not-replace-old-test
@@ -87,7 +90,7 @@
 (deftest a-mistake-is-undone-by-a-reversal-test
   (testing "not by deleting the sale — the trail that it happened survives"
     (is (= :sale-reversed (:event/type event/sale-reversed)))
-    (is (keyword? (get-in event/sale-reversed [:data :reason-code])))))
+    (is (string? (get-in event/sale-reversed [:data :reason-code])))))
 
 (deftest an-actor-is-a-kind-as-well-as-an-id-test
   (testing "a process manager is not a person"
@@ -162,7 +165,7 @@
 (deftest but-a-data-derived-key-collides-test
   (testing "two different sales, same truck, same millisecond"
     (let [vanilla   event/flavour-sold-vanilla-recorded
-          chocolate (assoc-in vanilla [:data :flavour] :chocolate)]
+          chocolate (assoc-in vanilla [:data :flavour] "chocolate")]
       (is (not= vanilla chocolate) "genuinely different facts")
       (is (= (data-derived-key vanilla) (data-derived-key chocolate))
           "yet the derived key cannot tell them apart")))

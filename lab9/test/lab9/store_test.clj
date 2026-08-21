@@ -27,7 +27,7 @@
     (is (= 2 (count (distinct (map :stream/id (store/since store/log 3))))))))
 
 (deftest append-continues-both-numberings-test
-  (let [sale {:event/type :flavour-sold :data {:flavour :chocolate}}
+  (let [sale {:event/type :flavour-sold :data {:flavour "chocolate"}}
         log  (store/append store/log store/truck-2 3 gen-id [sale])
         last-event (last log)]
     (is (= 7 (:event/position last-event)) "next in the whole log")

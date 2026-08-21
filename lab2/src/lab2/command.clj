@@ -7,11 +7,11 @@
 
 (def buy-flavour-vanilla-command
   {:command/type :buy-flavour
-   :data         {:flavour :vanilla}})
+   :data         {:flavour "vanilla"}})
 
 (def buy-flavour-chocolate-command
   {:command/type :buy-flavour
-   :data         {:flavour :chocolate}})
+   :data         {:flavour "chocolate"}})
 
 (def examples
   [buy-flavour-vanilla-command
@@ -27,7 +27,7 @@
 
 (def flavour-sold-vanilla-event
   {:event/type :flavour-sold
-   :data       {:flavour :vanilla}})
+   :data       {:flavour "vanilla"}})
 
 ;; ---------------------------------------------------------------------------
 ;; Addressed. A state-changing command is routed to something, so it has to
@@ -38,7 +38,7 @@
 (def buy-flavour-addressed
   {:command/type :buy-flavour
    :data         {:truck-id #uuid "0f1c2b3a-0000-4000-8000-000000000001"
-                  :flavour  :vanilla}})
+                  :flavour  "vanilla"}})
 
 ;; ---------------------------------------------------------------------------
 ;; Carry only what the behaviour needs. Sending the whole truck along means
@@ -49,8 +49,8 @@
 (def buy-flavour-carrying-the-whole-truck
   {:command/type :buy-flavour
    :data         {:truck   {:truck-id #uuid "0f1c2b3a-0000-4000-8000-000000000001"
-                            :stock    {:vanilla 3 :chocolate 1}
+                            :stock    {"vanilla" 3 "chocolate" 1}
                             :location "Sandymount Strand"
                             :driver   "Aoife"
                             :takings  137.50M}
-                  :flavour :vanilla}})
+                  :flavour "vanilla"}})

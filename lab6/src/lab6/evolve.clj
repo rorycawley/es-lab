@@ -75,14 +75,14 @@
 ;; ---------------------------------------------------------------------------
 
 (def morning
-  [(truck-loaded :vanilla 3)
-   (truck-loaded :chocolate 1)])
+  [(truck-loaded "vanilla" 3)
+   (truck-loaded "chocolate" 1)])
 
 (def afternoon
-  [(flavour-sold :vanilla)
-   (flavour-sold :vanilla)
-   (flavour-sold :chocolate)
-   (stock-depleted :chocolate)])
+  [(flavour-sold "vanilla")
+   (flavour-sold "vanilla")
+   (flavour-sold "chocolate")
+   (stock-depleted "chocolate")])
 
 (def full-day
   (into morning afternoon))

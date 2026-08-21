@@ -16,6 +16,7 @@ Claims are attributed to Evans, Young, Dahan, Microsoft or Fowler where they are
 - [Identity](#identity) — which id, and who generates it
 - [What the stream answers that no single event does](#what-the-stream-answers-that-no-single-event-does)
 - [What it won't answer](#what-it-wont-answer)
+- [Coordinators: policy, process manager, and "saga"](#coordinators-policy-process-manager-and-saga) — and why one of those words is best avoided
 
 ---
 
@@ -123,7 +124,7 @@ So treat it as an opaque grouping token that happens to have been minted by the 
 
 There *is* a real argument for keeping a command log, and it isn't this one. See [What it won't answer](#what-it-wont-answer) below.
 
-**What larger process — correlation id.** The case that earns it: a transfer debits A, the credit to B fails, and a compensating step refunds A. (This is *saga* in its original 1987 sense — a long-lived transaction whose steps each have a compensating transaction. [Lab2](lab2#two-scoping-notes) covers why the word is best avoided in its other senses.) Months later — *why did A receive this deposit?* The refund sits in A's stream looking unexplained; only the correlation id ties it to a failure in a different stream. Set it once at the boundary and propagate everywhere. Seed it from your trace id, so you can pivot to telemetry without merging the two worlds.
+**What larger process — correlation id.** The case that earns it: a transfer debits A, the credit to B fails, and a compensating step refunds A. (This is *saga* in its original 1987 sense — a long-lived transaction whose steps each have a compensating transaction. [Below](#is-saga-a-third-thing) covers why the word is best avoided in its other senses.) Months later — *why did A receive this deposit?* The refund sits in A's stream looking unexplained; only the correlation id ties it to a failure in a different stream. Set it once at the boundary and propagate everywhere. Seed it from your trace id, so you can pivot to telemetry without merging the two worlds.
 
 **Which schema version — the year-three problem.** Your deserialiser must handle every schema you have ever written. Microsoft gives two places to put the version: **as metadata in the envelope**, or **as part of the event type name** (`:flavour-sold-v2`). The envelope is usually the better of the two, because it leaves the type name meaning one thing forever — but the type-name form has the advantage of being impossible to ignore.
 
@@ -259,7 +260,7 @@ This bites every hand-rolled Postgres event store eventually, and gets worse the
 - track in-flight transaction ids (`pg_snapshot_xmin`) and refuse to advance the checkpoint past them;
 - poll with a lag window and tolerate re-delivery — which you need anyway, since consumers must be idempotent.
 
-Decide before you write your first projection ([lab9](lab9)), because the failure is silent: the projection is simply, quietly missing an event, and nothing reports it.
+Decide before you write your first projection ([lab9](lab9)), because the failure is silent: the projection is simply, quietly missing an event, and nothing reports it. [Lab19](lab19) reproduces it against Postgres 18 and implements the second fix.
 
 ### The split, stated plainly
 
@@ -299,9 +300,9 @@ Because that's the only job, the question under sharding isn't "how do I preserv
 
 ## What the stream answers that no single event does
 
-**What was true at a point in time.** Replay to position N. Young permits a date-limited query but notes a production system generally should not be doing this — an investigative tool, not a runtime feature.
+**What was true at a point in time.** Replay to position N — or to a moment, on either of two axes, which are not the same question ([lab18](lab18)). Young permits a date-limited query but notes a production system generally should not be doing this — an investigative tool, not a runtime feature.
 
-**How the decision was made.** Distinct from the above, and stronger: fold to position N−1, feed the command back into `decide`, and observe the outcome. Because `decide` is pure ([lab8](lab8)), the reconstruction is exact. The caveat is real, though — this only holds if you version the decider alongside the schema. Proving "correct under the rules as they stood" requires the rules as they stood.
+**How the decision was made.** Distinct from the above, and stronger: fold to position N−1, feed the command back into `decide`, and observe the outcome. Because `decide` is pure ([lab8](lab8)), the reconstruction is exact. The caveat is real, though — this only holds if you version the decider alongside the schema. Proving "correct under the rules as they stood" requires the rules as they stood, which [lab18](lab18) demonstrates by changing a rule and re-running an old decision.
 
 **How we got here.** Evans's actual motivation: without events, the causes of state changes typically aren't explicit, and it's hard to explain how the system got the way it is.
 
@@ -325,6 +326,42 @@ And the usual framing — "the database permanently erases previous states" — 
 
 ---
 
+---
+
+## Coordinators: policy, process manager, and "saga"
+
+[Lab2](lab2#two-scoping-notes) names the first two and defers the third here.
+
+A **policy** ([lab10](lab10)) is the reactive rule between a fact and a request — Event Storming's *"whenever…"* sticky between an event and a command. A **process manager** ([lab11](lab11)) is a policy that holds state: *Enterprise Integration Patterns*' central unit that maintains state and determines the next step from intermediate results.
+
+Both have stable definitions. The third word does not.
+
+### Is "saga" a third thing?
+
+Not really — and the disagreement about it turns out not to be about sagas.
+
+Three **independent** questions get asked of any coordinator, and different camps have each named one end of one of them "saga":
+
+| Axis | One end | Other end |
+|---|---|---|
+| Does it hold state? | stateless reactor — a **policy** | stateful — a **process manager** |
+| Does it cross a consistency boundary? | within one context, one transaction available | across several, no shared transaction |
+| Does it need compensation? | no, roll back | yes, undo already-committed steps |
+
+The axes are orthogonal. A coordinator can be stateless *and* cross-context *and* compensating; or stateful, intra-context, and never needing compensation. That is precisely why the definitions collide — each bundles a different axis into one word:
+
+- **Garcia-Molina & Salem (1987)**, the origin, named the *third* axis. A saga is a long-lived transaction split into sub-transactions, each with a compensating transaction. It says nothing about messaging, state, or bounded contexts.
+- **NServiceBus and much of the .NET world** named the stateful end of the *first* axis — which is where "saga = process manager" comes from.
+- **Oskar Dudycz** names the *stateless* end of that same axis, with the process manager as the state machine. Directly opposed to the row above, on the one property that would tell them apart.
+
+**Microsoft's CQRS Journey refused the word for coordinators entirely**, and their reasoning is the most useful thing written on it:
+
+> The term *saga* is commonly used in discussions of CQRS to refer to a piece of code that coordinates and routes messages between bounded contexts and aggregates. However, for the purposes of this guidance we prefer to use the term *process manager*… There is a well-known, pre-existing definition of the term saga that has a different meaning from the one generally understood in relation to CQRS. The term *process manager* is a better description of the role performed by this type of code artifact.
+
+They kept "saga" for the compensation mechanism, which is the 1987 meaning, and used "process manager" for the coordinator. Their remark that a process manager typically routes within a bounded context while a saga typically manages something spanning several is an observation about where each *tends* to show up — compensation is needed precisely where a transaction isn't available — not a definition of two rival kinds of coordinator.
+
+So: **there is no coherent third thing.** There is a coordinator, which either holds state or doesn't, and there is compensation, which you need when you can't have a transaction. Those are the two ideas. `Policy` and `process manager` name the first pair with stable definitions; `compensating transaction` names the second without ambiguity. Reach for those three, and if someone says "saga", ask which axis they mean.
+
 ## Sources
 
 - **Eric Evans**, *Domain-Driven Design Reference* (2015) — the Domain Event pattern: full-fledged part of the domain model, the selection filter, distinctness from system events, derived identity.
@@ -333,6 +370,11 @@ And the usual framing — "the database permanently erases previous states" — 
 - **Microsoft**, [Event Sourcing pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/event-sourcing), Azure Architecture Center — intent over state delta, bugs producing events that persist, optimistic concurrency, at-least-once delivery and idempotent consumers, the schema-versioning ladder, partitioning by entity id.
 - **Martin Fowler** — *Bitemporal History*, on occurred-versus-recorded time.
 - **Rich Hickey**, [*The Value of Values*](https://github.com/matthiasn/talk-transcripts/blob/master/Hickey_Rich/ValueOfValues.md) (2012) — place-oriented programming, and why a value has nothing to overwrite.
+- **Hector Garcia-Molina & Kenneth Salem**, *Sagas* (1987) — the original: a long-lived transaction whose steps each have a compensating transaction.
+- **Gregor Hohpe & Bobby Woolf**, *Enterprise Integration Patterns* — the Process Manager.
+- **Alberto Brandolini**, Event Storming — the Policy, the *"whenever…"* sticky between an event and a command.
+- **Microsoft**, [*A Saga on Sagas*](https://learn.microsoft.com/en-us/previous-versions/msp-n-p/jj591569(v=pandp.10)) (CQRS Journey) — why they refused the word for coordinators.
+- **Oskar Dudycz**, [*Saga and Process Manager*](https://event-driven.io/en/saga_process_manager_distributed_transactions/) — the stateless/stateful split, opposite to the NServiceBus usage.
 
 ## Where to go next
 

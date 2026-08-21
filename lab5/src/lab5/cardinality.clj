@@ -12,7 +12,7 @@
 (def buy-pistachio
   {:command/id   #uuid "018f7a3d-0000-7000-8000-0000000000b1"
    :command/type :buy-flavour
-   :data         {:flavour :pistachio}})
+   :data         {:flavour "pistachio"}})
 
 (def refused
   "Pistachio sold out this morning. The customer is told no."
@@ -27,13 +27,13 @@
 (def buy-vanilla
   {:command/id   #uuid "018f7a3d-0000-7000-8000-0000000000b2"
    :command/type :buy-flavour
-   :data         {:flavour :vanilla}})
+   :data         {:flavour "vanilla"}})
 
 (def ordinary-sale
   {:command buy-vanilla
    :events  [{:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e1"
               :event/type :flavour-sold
-              :data       {:flavour :vanilla}}]})
+              :data       {:flavour "vanilla"}}]})
 
 ;; ---------------------------------------------------------------------------
 ;; A command produces MANY events.
@@ -49,16 +49,16 @@
 (def buy-chocolate
   {:command/id   #uuid "018f7a3d-0000-7000-8000-0000000000b3"
    :command/type :buy-flavour
-   :data         {:flavour :chocolate}})
+   :data         {:flavour "chocolate"}})
 
 (def last-cone-sale
   {:command buy-chocolate
    :events  [{:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e2"
               :event/type :flavour-sold
-              :data       {:flavour :chocolate}}
+              :data       {:flavour "chocolate"}}
              {:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e3"
               :event/type :stock-depleted
-              :data       {:flavour :chocolate}}]})
+              :data       {:flavour "chocolate"}}]})
 
 (def decisions
   [refused
@@ -75,12 +75,12 @@
 (def flavour-sold-chocolate
   {:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e2"
    :event/type :flavour-sold
-   :data       {:flavour :chocolate}})
+   :data       {:flavour "chocolate"}})
 
 (def stock-depleted-chocolate
   {:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e3"
    :event/type :stock-depleted
-   :data       {:flavour :chocolate}})
+   :data       {:flavour "chocolate"}})
 
 (def kept-private
   "Sales are the truck's own business; no other module is told."
@@ -100,11 +100,11 @@
    :messages [{:message/id   #uuid "018f7a3f-0000-7000-8000-0000000000f1"
                :message/type :stock-depleted
                :payload      {:event/id (:event/id stock-depleted-chocolate)
-                              :flavour  :chocolate}}
+                              :flavour  "chocolate"}}
               {:message/id   #uuid "018f7a3f-0000-7000-8000-0000000000f2"
                :message/type :flavour-unavailable
                :payload      {:event/id (:event/id stock-depleted-chocolate)
-                              :flavour  :chocolate}}]})
+                              :flavour  "chocolate"}}]})
 
 (def publications
   [kept-private

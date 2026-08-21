@@ -3,9 +3,9 @@
 Every example across labs [1](../lab1)–[4](../lab4) has been one command, one event, one message:
 
 ```clojure
-{:command/type :buy-flavour   :data    {:flavour :vanilla}}
-{:event/type   :flavour-sold  :data    {:flavour :vanilla}}
-{:message/type :flavour-sold  :payload {:flavour :vanilla}}
+{:command/type :buy-flavour   :data    {:flavour "vanilla"}}
+{:event/type   :flavour-sold  :data    {:flavour "vanilla"}}
+{:message/type :flavour-sold  :payload {:flavour "vanilla"}}
 ```
 
 Three shapes in a neat column, and it is hard to read that column without concluding they come in matched sets. They don't. That tidy 1:1:1 is the easy case, not the rule, and designs that assume it break in specific ways.
@@ -35,7 +35,7 @@ The common case, and the only one the earlier labs showed.
 
 ```clojure
 {:command buy-vanilla
- :events  [{:event/type :flavour-sold :data {:flavour :vanilla}}]}
+ :events  [{:event/type :flavour-sold :data {:flavour "vanilla"}}]}
 ```
 
 ## A command produces many events
@@ -44,8 +44,8 @@ Selling the last chocolate cone is two facts, not one:
 
 ```clojure
 {:command buy-chocolate
- :events  [{:event/type :flavour-sold   :data {:flavour :chocolate}}
-           {:event/type :stock-depleted :data {:flavour :chocolate}}]}
+ :events  [{:event/type :flavour-sold   :data {:flavour "chocolate"}}
+           {:event/type :stock-depleted :data {:flavour "chocolate"}}]}
 ```
 
 Both are true. Both are worth recording. Both were caused by the same request. (Whether they *should* be two events rather than one is a genuine argument, and it gets its own section below.)

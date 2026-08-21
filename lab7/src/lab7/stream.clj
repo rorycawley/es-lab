@@ -30,10 +30,10 @@
   "Every event from both trucks, in the order they were appended.
 
   Truck 1 loaded one vanilla and sold it. Truck 2 loaded three and sold one."
-  [(event truck-1 1 :truck-loaded {:flavour :vanilla :quantity 1})
-   (event truck-2 1 :truck-loaded {:flavour :vanilla :quantity 3})
-   (event truck-1 2 :flavour-sold {:flavour :vanilla})
-   (event truck-2 2 :flavour-sold {:flavour :vanilla})])
+  [(event truck-1 1 :truck-loaded {:flavour "vanilla" :quantity 1})
+   (event truck-2 1 :truck-loaded {:flavour "vanilla" :quantity 3})
+   (event truck-1 2 :flavour-sold {:flavour "vanilla"})
+   (event truck-2 2 :flavour-sold {:flavour "vanilla"})])
 
 ;; ---------------------------------------------------------------------------
 ;; Lab 6's fold, trimmed to stock. It is unchanged by any of this: a fold

@@ -1,0 +1,37 @@
+{:paths ["."]
+ :tasks
+ {:requires ([babashka.fs :as fs]
+             [babashka.process :refer [shell]]
+             [clojure.string :as str])
+
+  :init (do
+          (defn sh [& args]
+            (binding [*out* *err*] (apply println "+" (remove map? args)))
+            (apply shell args))
+          (defn lab-n [d] (parse-long (subs d 3)))
+          (defn labs []
+            (->> (fs/list-dir ".")
+                 (filter fs/directory?)
+                 (map (fn [p] (str (fs/file-name p))))
+                 (filter (fn [d] (and (str/starts-with? d "lab") (lab-n d))))
+                 (sort-by lab-n))))
+
+  help
+  {:doc              "Repository-level tasks. Each lab has its own bb.edn too."
+   :override-builtin true
+   :task (do (println "")
+             (println "  bb audit      consistency checks across every lab and document")
+             (println "  bb test-all   run every lab's suite (labs 19-20 need Docker)")
+             (println "")
+             (println "Each lab is also self-contained: cd lab1 && bb all")
+             (println ""))}
+
+  audit
+  {:doc  "Mechanical consistency checks across the whole repository"
+   :task (exec 'audit/-main)}
+
+  test-all
+  {:doc  "Run every lab's suite in order"
+   :task (doseq [d (labs)]
+           (println (str "\n=== " d))
+           (sh {:dir d} "bb" "test"))}}}

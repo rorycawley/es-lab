@@ -16,15 +16,15 @@
               (count (s/stream s/log s/truck-2)))))))
 
 (deftest each-truck-folds-to-its-own-stock-test
-  (is (= {:vanilla 0} (s/state-of s/log s/truck-1)))
-  (is (= {:vanilla 2} (s/state-of s/log s/truck-2))))
+  (is (= {"vanilla" 0} (s/state-of s/log s/truck-1)))
+  (is (= {"vanilla" 2} (s/state-of s/log s/truck-2))))
 
 (deftest folding-the-whole-log-answers-a-different-question-test
   (testing "four cones loaded, two sold, across the fleet"
-    (is (= {:vanilla 2} (s/replay s/log))))
+    (is (= {"vanilla" 2} (s/replay s/log))))
   (testing "which is nobody's stock: truck 1 is empty, and the fleet total says otherwise"
-    (is (= 0 (:vanilla (s/state-of s/log s/truck-1))))
-    (is (pos? (:vanilla (s/replay s/log))))))
+    (is (= 0 (get (s/state-of s/log s/truck-1) "vanilla")))
+    (is (pos? (get (s/replay s/log) "vanilla")))))
 
 (deftest versions-are-contiguous-within-a-stream-test
   (testing "each truck's history is numbered 1..n with no gaps"
@@ -47,19 +47,19 @@
 (deftest append-continues-the-right-history-test
   (let [restock  {:event/id   (random-uuid)
                   :event/type :truck-loaded
-                  :data       {:flavour :vanilla :quantity 5}}
+                  :data       {:flavour "vanilla" :quantity 5}}
         appended (last (s/append s/log s/truck-1 2 restock))]
     (is (= s/truck-1 (:stream/id appended)))
     (is (= 3 (:stream/version appended)))
     (testing "and only that history changes"
-      (is (= {:vanilla 5} (s/state-of (s/append s/log s/truck-1 2 restock) s/truck-1)))
-      (is (= {:vanilla 2} (s/state-of (s/append s/log s/truck-1 2 restock) s/truck-2))))))
+      (is (= {"vanilla" 5} (s/state-of (s/append s/log s/truck-1 2 restock) s/truck-1)))
+      (is (= {"vanilla" 2} (s/state-of (s/append s/log s/truck-1 2 restock) s/truck-2))))))
 
 (deftest append-rejects-a-stale-expected-version-test
   (testing "two tills both read version 2; the second one loses"
     (let [sale   {:event/id   (random-uuid)
                   :event/type :flavour-sold
-                  :data       {:flavour :vanilla}}
+                  :data       {:flavour "vanilla"}}
           winner (s/append s/log s/truck-2 2 sale)]
       (is (= 3 (s/current-version winner s/truck-2)))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -69,7 +69,7 @@
 (deftest the-conflict-carries-what-the-writer-needs-to-retry-test
   (let [sale   {:event/id   (random-uuid)
                 :event/type :flavour-sold
-                :data       {:flavour :vanilla}}
+                :data       {:flavour "vanilla"}}
         winner (s/append s/log s/truck-2 2 sale)
         data   (try (s/append winner s/truck-2 2 sale)
                     (catch clojure.lang.ExceptionInfo e (ex-data e)))]
@@ -82,7 +82,7 @@
   (let [truck-3 (random-uuid)
         loaded  {:event/id   (random-uuid)
                  :event/type :truck-loaded
-                 :data       {:flavour :pistachio :quantity 4}}
+                 :data       {:flavour "pistachio" :quantity 4}}
         log     (s/append s/log truck-3 0 loaded)]
     (is (= 1 (s/current-version log truck-3)))
-    (is (= {:pistachio 4} (s/state-of log truck-3)))))
+    (is (= {"pistachio" 4} (s/state-of log truck-3)))))

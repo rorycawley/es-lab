@@ -8,11 +8,11 @@
 
 (def flavour-sold-vanilla
   {:event/type :flavour-sold
-   :flavour    :vanilla})
+   :flavour    "vanilla"})
 
 (def flavour-sold-chocolate
   {:event/type :flavour-sold
-   :flavour    :chocolate})
+   :flavour    "chocolate"})
 
 ;; ---------------------------------------------------------------------------
 ;; The same fact, with the frame separated from what it constitutes.
@@ -20,7 +20,7 @@
 
 (def flavour-sold-vanilla-envelope
   {:event/type :flavour-sold
-   :data       {:flavour :vanilla}})
+   :data       {:flavour "vanilla"}})
 
 (def examples
   [flavour-sold-vanilla
@@ -35,11 +35,11 @@
 
 (def intent
   {:event/type :flavour-sold
-   :data       {:flavour :vanilla}})
+   :data       {:flavour "vanilla"}})
 
 (def state-delta
   {:event/type :stock-level-changed
-   :data       {:flavour :vanilla :to 2}})
+   :data       {:flavour "vanilla" :to 2}})
 
 ;; ---------------------------------------------------------------------------
 ;; Granularity is irreversible.
@@ -50,17 +50,17 @@
 
 (def price-corrected
   {:event/type :price-corrected
-   :data       {:flavour :vanilla :price 3.00M}})
+   :data       {:flavour "vanilla" :price 3.00M}})
 
 (def price-increased
   {:event/type :price-increased
-   :data       {:flavour :vanilla :price 3.00M}})
+   :data       {:flavour "vanilla" :price 3.00M}})
 
 ;; The coarse name that covers both. Recording this instead loses the
 ;; distinction permanently: nothing here says which of the two it was.
 (def price-changed
   {:event/type :price-changed
-   :data       {:flavour :vanilla :price 3.00M}})
+   :data       {:flavour "vanilla" :price 3.00M}})
 
 ;; ---------------------------------------------------------------------------
 ;; No deletes. A mistaken sale is undone by a reversal, which leaves a trail
@@ -69,7 +69,7 @@
 
 (def sale-reversed
   {:event/type :sale-reversed
-   :data       {:flavour :vanilla :reason-code :rung-up-twice}})
+   :data       {:flavour "vanilla" :reason-code "rung-up-twice"}})
 
 ;; ---------------------------------------------------------------------------
 ;; A recorded fact, with each question answered where it belongs.
@@ -85,7 +85,7 @@
 (def flavour-sold-vanilla-recorded
   {:event/type        :flavour-sold
    :event/occurred-at #inst "2026-08-16T14:32:07.000-00:00"
-   :data              {:flavour  :vanilla
+   :data              {:flavour  "vanilla"
                        :truck-id #uuid "0f1c2b3a-0000-4000-8000-000000000001"}
    :metadata          {:recorded-at #inst "2026-08-16T14:33:01.000-00:00"
                        :actor       {:type :user :id "till-2"}}})
@@ -105,7 +105,7 @@
    :event/type     :flavour-sold
    :stream/id      #uuid "0f1c2b3a-0000-4000-8000-000000000001"
    :stream/version 17
-   :data           {:flavour :vanilla}})
+   :data           {:flavour "vanilla"}})
 
 ;; ---------------------------------------------------------------------------
 ;; An actor is a kind as well as an id. A process manager is not a person, and
@@ -118,12 +118,12 @@
 
 (def restocked-by-a-person
   {:event/type :truck-restocked
-   :data       {:flavour :vanilla :quantity 20}
+   :data       {:flavour "vanilla" :quantity 20}
    :metadata   {:recorded-at #inst "2026-08-16T06:02:00.000-00:00"
                 :actor       {:type :user :id "USR-83721"}}})
 
 (def restocked-by-a-process
   {:event/type :truck-restocked
-   :data       {:flavour :vanilla :quantity 20}
+   :data       {:flavour "vanilla" :quantity 20}
    :metadata   {:recorded-at #inst "2026-08-16T06:02:00.000-00:00"
                 :actor       {:type :system :id :overnight-restock-process}}})

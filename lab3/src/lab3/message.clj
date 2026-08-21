@@ -4,11 +4,11 @@
 
 (def flavour-sold-vanilla-integration-message
   {:message/type :flavour-sold
-   :payload      {:flavour :vanilla}})
+   :payload      {:flavour "vanilla"}})
 
 (def flavour-sold-chocolate-integration-message
   {:message/type :flavour-sold
-   :payload      {:flavour :chocolate}})
+   :payload      {:flavour "chocolate"}})
 
 (def examples
   [flavour-sold-vanilla-integration-message

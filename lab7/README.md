@@ -9,7 +9,7 @@ It got away with ignoring that because there was one truck and every event belon
 Truck 1 loaded one vanilla cone and sold it. Truck 2 loaded three and sold one.
 
 ```clojure
-(replay log)      ;; => {:vanilla 2}
+(replay log)      ;; => {"vanilla" 2}
 ```
 
 Four loaded, two sold, two left. The arithmetic is right and the answer is useless. It isn't truck 1's stock (that's 0) and it isn't truck 2's (that's 2). It's the fleet total, which nobody asked for.
@@ -24,7 +24,7 @@ A **stream** is the history of one thing: one truck, one order, one account. It'
 {:event/id   #uuid "…"
  :event/type :flavour-sold
  :stream/id  #uuid "0f1c2b3a-…-0001"   ; ← this truck
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 ```
 
 Selecting a history is now a filter, and folding one is unchanged from lab6:
@@ -33,8 +33,8 @@ Selecting a history is now a filter, and folding one is unchanged from lab6:
 (defn state-of [events stream-id]
   (replay (stream events stream-id)))
 
-(state-of log truck-1)   ;; => {:vanilla 0}
-(state-of log truck-2)   ;; => {:vanilla 2}
+(state-of log truck-1)   ;; => {"vanilla" 0}
+(state-of log truck-2)   ;; => {"vanilla" 2}
 ```
 
 Note what didn't change: `evolve` and `replay` are exactly lab6's. A fold still takes a plain sequence of events and knows nothing about streams. Stream id is about *selection*, and selection happens before folding — which is why it's a separate idea and not a change to the fold.

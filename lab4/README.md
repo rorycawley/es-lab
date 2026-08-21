@@ -8,10 +8,10 @@ Here are lab1's events. Two vanilla ice creams were sold:
 
 ```clojure
 {:event/type :flavour-sold
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 
 {:event/type :flavour-sold
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 ```
 
 These are two facts. Two customers, two cones, two sales. But they are the same value, so nothing in the program can tell them apart. `distinct` collapses them into one. A set holds one. A retry that delivers the second sale twice is indistinguishable from a genuine third sale.
@@ -21,7 +21,7 @@ An event is a historical fact, and historical facts are individual. Two sales ar
 ```clojure
 {:event/id   #uuid "018f7a3e-0000-7000-8000-000000000001"
  :event/type :flavour-sold
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 ```
 
 Now the two sales are different values, and the difference is exactly the thing that was previously missing.
@@ -46,18 +46,18 @@ The command and the integration message need identities too — but not for the 
 ;; Request: please do this
 {:command/id   #uuid "018f7a3d-…-a1"
  :command/type :buy-flavour
- :data         {:flavour :vanilla}}
+ :data         {:flavour "vanilla"}}
 
 ;; Fact: this happened
 {:event/id   #uuid "018f7a3e-…-01"
  :event/type :flavour-sold
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 
 ;; Delivery: telling another module
 {:message/id   #uuid "018f7a3f-…-f1"
  :message/type :flavour-sold
  :payload      {:event/id #uuid "018f7a3e-…-01"
-                :flavour  :vanilla}}
+                :flavour  "vanilla"}}
 ```
 
 Each id is minted by a different party, at a different moment, and answers a different question.
@@ -97,7 +97,7 @@ So the message carries both — its own delivery identity in the envelope, and t
 {:message/id   #uuid "…-f1"                      ; this delivery
  :message/type :flavour-sold
  :payload      {:event/id #uuid "…-01"           ; the fact
-                :flavour  :vanilla}}
+                :flavour  "vanilla"}}
 ```
 
 The event id crosses the boundary *inside* the payload rather than in the envelope, because from the receiving module's point of view it is data: an opaque, stable handle on someone else's fact. The envelope is about this hop.
@@ -145,7 +145,7 @@ This is the part that outlives the choice of UUID version.
 A function that calls `random-uuid` returns something different every time it is called with the same arguments. It is no longer a function of its inputs, and it cannot be asserted against:
 
 ```clojure
-(is (= {:event/id ??? …} (flavour-sold :vanilla)))
+(is (= {:event/id ??? …} (flavour-sold "vanilla")))
 ```
 
 The same is true of `(System/currentTimeMillis)`, which UUIDv7 also needs. Both are readings of the outside world, and both belong in arguments:
@@ -160,10 +160,10 @@ The same is true of `(System/currentTimeMillis)`, which UUIDv7 also needs. Both 
 Production passes a real generator. A test passes whatever makes the assertion readable:
 
 ```clojure
-(flavour-sold (constantly #uuid "018f7a3e-…-beef") :vanilla)
+(flavour-sold (constantly #uuid "018f7a3e-…-beef") "vanilla")
 ;; => {:event/id   #uuid "018f7a3e-…-beef"
 ;;     :event/type :flavour-sold
-;;     :data       {:flavour :vanilla}}
+;;     :data       {:flavour "vanilla"}}
 ```
 
 `buy-flavour` and `flavour-sold-message` take the same argument, for the same reason.

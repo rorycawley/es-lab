@@ -26,7 +26,7 @@ There are no deletes. A delete is modelled as a **reversal** — a new event tha
 
 ```clojure
 {:event/type :sale-reversed
- :data       {:flavour :vanilla :reason-code :rung-up-twice}}
+ :data       {:flavour "vanilla" :reason-code "rung-up-twice"}}
 ```
 
 The cost enthusiasts skip: Microsoft is blunt that if a bug produces incorrect events, **those events persist in the store**, and fixing the bug in application code doesn't fix the historical events. You need compensating events or upcasters, and you need them for as long as the store exists.
@@ -36,7 +36,7 @@ Note what immutability does *not* do. It records rather than guarantees truth: a
 In Clojure the mechanics come almost free, since maps are values:
 
 ```clojure
-(assoc flavour-sold-vanilla :flavour :strawberry)
+(assoc flavour-sold-vanilla :flavour "strawberry")
 ;; => a new map; flavour-sold-vanilla is untouched
 ```
 
@@ -70,10 +70,10 @@ Microsoft's example: an event recording that **two seats were reserved** is more
 
 ```clojure
 ;; Intent — what the business did
-{:event/type :flavour-sold       :data {:flavour :vanilla}}
+{:event/type :flavour-sold       :data {:flavour "vanilla"}}
 
 ;; Delta — where a number landed
-{:event/type :stock-level-changed :data {:flavour :vanilla :to 2}}
+{:event/type :stock-level-changed :data {:flavour "vanilla" :to 2}}
 ```
 
 The delta is recoverable from the intent: fold the history and the stock level falls out ([lab6](../lab6)). The intent is *not* recoverable from the delta — a level of 2 could equally mean a cone was sold, dropped, spoiled, or given away, and the event store no longer knows which.
@@ -84,11 +84,11 @@ The delta is recoverable from the intent: fold the history and the stock level f
 
 ```clojure
 ;; Two facts
-{:event/type :price-corrected :data {:flavour :vanilla :price 3.00M}}
-{:event/type :price-increased :data {:flavour :vanilla :price 3.00M}}
+{:event/type :price-corrected :data {:flavour "vanilla" :price 3.00M}}
+{:event/type :price-increased :data {:flavour "vanilla" :price 3.00M}}
 
 ;; One name that covers both — and now nothing tells you which it was
-{:event/type :price-changed   :data {:flavour :vanilla :price 3.00M}}
+{:event/type :price-changed   :data {:flavour "vanilla" :price 3.00M}}
 ```
 
 Choose the coarse name and the distinction is gone **permanently**, because the information to reconstruct it was never written down. Splitting a name later only affects events recorded after the split; the old ones stay ambiguous forever.
@@ -148,7 +148,7 @@ Sell a vanilla ice cream, and you have:
 
 ```clojure
 {:event/type :flavour-sold
- :flavour    :vanilla}
+ :flavour    "vanilla"}
 ```
 
 Two keys, two jobs. `:event/type` names *what kind of thing happened*, in the past tense. `:flavour` carries *what specifically happened*. The type is the part a reader dispatches on; the rest is the part they then interpret.
@@ -159,7 +159,7 @@ Those two jobs are different enough that events are divided into an **envelope**
 
 ```clojure
 {:event/type :flavour-sold
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 ```
 
 Nothing has been added — the same facts are present. What changed is that the boundary is explicit. Without it, envelope keys and domain keys sit in one flat map with no rule saying which is which, and a domain field named `:type` or `:id` collides with the frame. With it, the domain names its fields whatever the domain calls them, and the envelope stays free to grow: [lab4](../lab4) adds `:event/id` without touching `:data` at all.
@@ -186,17 +186,21 @@ Beyond a description, an event typically carries **when it occurred** and **the 
 ```clojure
 {:event/type        :flavour-sold                    ; what happened
  :event/occurred-at #inst "2026-08-16T14:32:07"      ; when, in the domain
- :data              {:flavour  :vanilla              ; what specifically
+ :data              {:flavour  "vanilla"              ; what specifically
                      :truck-id #uuid "0f1c2b3a-…"}   ; who was involved
  :metadata          {:recorded-at #inst "2026-08-16T14:33:01"
-                     :actor       {:type :user :id "till-2"}}}
+                     :actor       {:type "user" :id "till-2"}}}
 ```
 
-**Two timestamps, not one.** The truck sold the cone at 14:32; the till got around to saying so at 14:33. These come apart constantly — an offline till syncing an hour later, a batch import of yesterday's paper records — and conflating them silently corrupts every question about *when*. "How many cones did we sell before lunch?" is a question about occurrence. "What did we know at closing time?" is about recording. One timestamp can only answer one of them.
+**Two timestamps, not one.** The truck sold the cone at 14:32; the till got around to saying so at 14:33. These come apart constantly — an offline till syncing an hour later, a batch import of yesterday's paper records — and conflating them silently corrupts every question about *when*. "How many cones did we sell before lunch?" is a question about occurrence. "What did we know at closing time?" is about recording. One timestamp can only answer one of them — [lab18](../lab18) asks both and gets two different right answers.
 
 **The entities involved.** `:truck-id` names which truck sold the cone. With a single truck that looks redundant, and it is — until [lab7](../lab7) grows a fleet, at which point it becomes `:stream/id` and decides which events belong to which history.
 
 **The actor is a kind as well as an id.** A process manager is not a person, and recording one as the other is a false record. Store an **opaque** id — never a JWT, token, or credential: append-only storage cannot revoke one, it drags personal data into the store designed to resist deletion, and it proves only that a token was pasted in.
+
+**A value in a fact is a string, not a keyword.** `"vanilla"`, not `:vanilla`. A keyword is a *program symbol* — it means something to the code that wrote it and nothing to anything else — and a recorded fact has to outlive that code, cross a wire, and sit in a database column. JSON, JSONB and every other common encoding turn a keyword into a string on the way out and cannot turn it back: `:key-fn keyword` restores *keys*, because their names are known in advance, and there is no equivalent for values.
+
+[Lab19](../lab19) discovered that the expensive way, and this repository patched it three times before adopting the rule. The one keyword worth persisting is a **discriminator** the code branches on — `:event/type` — and that belongs in a column of its own, coerced once at the point of dispatch. Inside `:data`, use strings. [Lab13](../lab13) shows what it costs to change your mind later.
 
 **Why is `:recorded-at` nested and `:event/occurred-at` not?** The top level holds the small fixed set every event must have: what kind of fact it is, when it happened, and — from [lab4](../lab4) and [lab7](../lab7) — which fact it is and where it sits in a history. `:metadata` is the open map for everything else *about the message*: how it came to be written down, what it was part of, what caused it. A key graduates out of `:metadata` when it becomes mandatory, not when it becomes important.
 

@@ -22,12 +22,12 @@
 
   Read the columns: position runs 1..6 straight down; version is contiguous
   only once you filter to a single truck."
-  [(event 1 truck-1 1 :truck-loaded {:flavour :vanilla :quantity 2})
-   (event 2 truck-2 1 :truck-loaded {:flavour :chocolate :quantity 3})
-   (event 3 truck-1 2 :flavour-sold {:flavour :vanilla})
-   (event 4 truck-2 2 :flavour-sold {:flavour :chocolate})
-   (event 5 truck-2 3 :flavour-sold {:flavour :chocolate})
-   (event 6 truck-1 3 :flavour-sold {:flavour :vanilla})])
+  [(event 1 truck-1 1 :truck-loaded {:flavour "vanilla" :quantity 2})
+   (event 2 truck-2 1 :truck-loaded {:flavour "chocolate" :quantity 3})
+   (event 3 truck-1 2 :flavour-sold {:flavour "vanilla"})
+   (event 4 truck-2 2 :flavour-sold {:flavour "chocolate"})
+   (event 5 truck-2 3 :flavour-sold {:flavour "chocolate"})
+   (event 6 truck-1 3 :flavour-sold {:flavour "vanilla"})])
 
 (defn stream
   "The history of one truck (lab 7)."

@@ -1,0 +1,44 @@
+{:paths ["src" "resources"]
+ :deps  {org.clojure/clojure               {:mvn/version "1.12.5"}
+         ;; Schemas — shell and tests only, never lab24.core
+         metosin/malli                     {:mvn/version "0.16.4"}
+         ;; JOSE — signing and verifying tokens. Do not hand-roll this: JWT has
+         ;; a decade of CVEs in it (alg confusion, alg:none, unchecked `kid`),
+         ;; and a library that gets them right is the whole reason to use one.
+         ;; Required by adapter/idp.clj (signs) and adapter/auth.clj (verifies)
+         ;; and by nothing else.
+         buddy/buddy-sign                  {:mvn/version "3.6.1-359"}
+         buddy/buddy-core                  {:mvn/version "1.12.0-430"}
+         ;; HTTP — required by exactly one namespace, adapter/http.clj
+         metosin/reitit-ring               {:mvn/version "0.7.2"}
+         ring/ring-core                    {:mvn/version "1.12.2"}
+         ring/ring-jetty-adapter           {:mvn/version "1.12.2"}
+         com.stuartsierra/component        {:mvn/version "1.1.0"}
+         com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
+         org.postgresql/postgresql         {:mvn/version "42.7.3"}
+         org.clojure/data.json             {:mvn/version "2.5.0"}}
+ ;; ---------------------------------------------------------------------------
+ ;; Note what is NOT above: the identity provider.
+ ;;
+ ;; `mock-oauth2-server` is a real OIDC provider used as a test double, and it
+ ;; appears only in the aliases below, alongside `dev` on the classpath. An
+ ;; identity provider is a dependency of your tests, never of your application
+ ;; — and `architecture_test.clj` asserts that nothing under `src/` names it.
+ ;; ---------------------------------------------------------------------------
+ :aliases
+ {:test  {:extra-paths ["test" "dev"]
+          :extra-deps  {lambdaisland/kaocha                {:mvn/version "1.91.1392"}
+                        clj-http/clj-http                  {:mvn/version "3.13.0"}
+                        no.nav.security/mock-oauth2-server {:mvn/version "6.0.2"}
+                        org.testcontainers/postgresql      {:mvn/version "1.20.4"}
+                        org.testcontainers/testcontainers  {:mvn/version "1.20.4"}
+                        org.slf4j/slf4j-simple             {:mvn/version "2.0.16"}}
+          :main-opts   ["-m" "kaocha.runner"]}
+  :demo  {:extra-paths ["dev"]
+          :extra-deps  {no.nav.security/mock-oauth2-server {:mvn/version "6.0.2"}
+                        org.slf4j/slf4j-nop                {:mvn/version "2.0.16"}}
+          :main-opts   ["-m" "lab24.demo"]}
+  :serve {:extra-paths ["dev"]
+          :extra-deps  {no.nav.security/mock-oauth2-server {:mvn/version "6.0.2"}
+                        org.slf4j/slf4j-nop                {:mvn/version "2.0.16"}}
+          :main-opts   ["-m" "lab24.serve"]}}}

@@ -7,15 +7,15 @@ This lab explores the integration event message — the third and last member of
 ```clojure
 ;; Request: please do this
 {:command/type :buy-flavour
- :data         {:flavour :vanilla}}
+ :data         {:flavour "vanilla"}}
 
 ;; Domain fact: this happened inside the domain
 {:event/type :flavour-sold
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 
 ;; Integration message: tell another module/system this happened
 {:message/type :flavour-sold
- :payload      {:flavour :vanilla}}
+ :payload      {:flavour "vanilla"}}
 ```
 
 So the clean vocabulary is:
@@ -45,11 +45,11 @@ They may initially contain identical information:
 ```clojure
 ;; Domain event
 {:event/type :flavour-sold
- :data {:flavour :vanilla}}
+ :data {:flavour "vanilla"}}
 
 ;; Integration event
 {:message/type :flavour-sold
- :payload {:flavour :vanilla}}
+ :payload {:flavour "vanilla"}}
 ```
 
 but they should not be assumed to remain identical forever. The integration message is free to expose only what other modules need — it can drop fields the domain event carries, reshape others, or version independently as the domain model evolves underneath it.
@@ -64,7 +64,7 @@ Once you add the infrastructure envelope, it could become:
 (def flavour-sold-vanilla-message
   {:message/id   #uuid "7f2678a4-2bd3-4f8e-9a87-7ce7607b1d37"
    :message/type :flavour-sold
-   :payload      {:flavour :vanilla}
+   :payload      {:flavour "vanilla"}
    :metadata     {:correlation-id #uuid "cc79c083-c1d0-45a5-b18f-5079a3720901"
                   :causation-id   #uuid "31dd15c7-63e4-48ef-a751-12d971e95acc"}})
 ```
@@ -91,7 +91,7 @@ So a well-formed integration message carries both — its own delivery identity,
 {:message/id   #uuid "7f2678a4-2bd3-4f8e-9a87-7ce7607b1d37"   ; this delivery
  :message/type :flavour-sold
  :payload      {:event/id #uuid "018f7a3e-0000-7000-8000-000000000001"  ; the fact
-                :flavour  :vanilla}
+                :flavour  "vanilla"}
  :metadata     {:correlation-id #uuid "cc79c083-c1d0-45a5-b18f-5079a3720901"
                 :causation-id   #uuid "31dd15c7-63e4-48ef-a751-12d971e95acc"}}
 ```

@@ -9,13 +9,13 @@ Ask an ordinary program how many vanilla cones are left and it reads a number ou
 Event sourcing inverts it. The events are the truth. State is a *question you ask of them*:
 
 ```clojure
-(replay [(truck-loaded :vanilla 3)
-         (flavour-sold :vanilla)
-         (flavour-sold :vanilla)])
-;; => {:stock {:vanilla 1} :last-sold :vanilla}
+(replay [(truck-loaded "vanilla" 3)
+         (flavour-sold "vanilla")
+         (flavour-sold "vanilla")])
+;; => {:stock {"vanilla" 1} :last-sold "vanilla"}
 ```
 
-Nothing stores `{:vanilla 1}`. It is recomputed whenever it's needed, and it can be thrown away without losing anything, because the events that produced it are still there.
+Nothing stores `{"vanilla" 1}`. It is recomputed whenever it's needed, and it can be thrown away without losing anything, because the events that produced it are still there.
 
 ## The shape
 
@@ -40,8 +40,8 @@ Two definitions, and the second is three lines:
 Sell a flavour that was never loaded:
 
 ```clojure
-(replay [(flavour-sold :pistachio)])
-;; => {:stock {:pistachio -1} :last-sold :pistachio}
+(replay [(flavour-sold "pistachio")])
+;; => {:stock {"pistachio" -1} :last-sold "pistachio"}
 ```
 
 Minus one cone. That is nonsense, and `evolve` applies it without complaint.
@@ -85,8 +85,8 @@ Which is not a fact about event sourcing. It's a fact about *addition*: `+3, -1,
 Add one field that isn't a counter and it stops:
 
 ```clojure
-(:last-sold (replay full-day))            ;; => :chocolate
-(:last-sold (replay (reverse full-day)))  ;; => :vanilla
+(:last-sold (replay full-day))            ;; => "chocolate"
+(:last-sold (replay (reverse full-day)))  ;; => "vanilla"
 ```
 
 `:last-sold` overwrites rather than accumulates, so it remembers *which event came last*. The two histories are now different states.
@@ -105,7 +105,7 @@ The lesson isn't "folds are order-sensitive" — it's that **you cannot rely on 
 
 Fold the morning, keep the result, carry on with the afternoon. Same answer.
 
-That property is worth noticing early because it's what makes replay affordable at scale. A stream of a million events doesn't have to be folded from zero every time — a stored intermediate state plus the events since is equivalent. That's a **snapshot**, and it's an optimisation rather than a new idea: nothing about the model changes, because the snapshot is derived and can be deleted at any time.
+That property is worth noticing early because it's what makes replay affordable at scale. A stream of a million events doesn't have to be folded from zero every time — a stored intermediate state plus the events since is equivalent. That's a **snapshot** ([lab17](../lab17)), and it's an optimisation rather than a new idea: nothing about the model changes, because the snapshot is derived and can be deleted at any time.
 
 ## What's next
 

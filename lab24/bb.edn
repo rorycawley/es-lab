@@ -1,0 +1,68 @@
+{:paths ["src" "dev" "test"]
+ :tasks
+ {:requires ([babashka.process :refer [shell]]
+             [clojure.string :as str])
+
+  :init (defn sh [& args]
+          (binding [*out* *err*]
+            (apply println "+" (remove map? args)))
+          (apply shell args))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task             (do (println "")
+                         (println "Prerequisites:")
+                         (println "  1. Install mise: curl https://mise.run | sh")
+                         (println "  2. Run: mise install   (installs bb; only needed once to bootstrap)")
+                         (println "")
+                         (println "Then:")
+                         (println "  bb all             (trust config + install tools + run tests)")
+                         (println "  bb tasks           (list all available tasks)")
+                         (println ""))}
+
+  setup
+  {:doc  "Trust mise.toml and install all declared tools (run once after cloning)"
+   :task (do (sh "mise" "trust")
+             (sh "mise" "install"))}
+
+  lint
+  {:doc  "Lint with clj-kondo"
+   :task (sh "clj-kondo" "--parallel" "--lint" "src:dev:test")}
+
+  fmt:check
+  {:doc  "Check code format with cljfmt"
+   :task (sh "cljfmt" "check" "src" "dev" "test")}
+
+  fmt:fix
+  {:doc  "Reformat code with cljfmt"
+   :task (sh "cljfmt" "fix" "src" "dev" "test")}
+
+  check
+  {:doc     "Run static checks"
+   :depends [lint fmt:check]}
+
+  docker:env
+  {:doc  "Environment testcontainers needs on Rancher Desktop / colima"
+   :task (let [host (str/trim (:out (shell {:out :string :continue true}
+                                           "docker" "context" "inspect"
+                                           "--format" "{{.Endpoints.docker.Host}}")))]
+           (cond-> {"TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" "/var/run/docker.sock"}
+             (not (str/blank? host)) (assoc "DOCKER_HOST" host)))}
+
+  demo
+  {:doc  "Run the whole system and watch it work (no Docker needed)"
+   :task (sh "clojure" "-M:demo")}
+
+  serve
+  {:doc  "Start the system with HTTP on :3000 (no Docker needed)"
+   :task (sh "clojure" "-M:serve")}
+
+  test
+  {:doc     "Run the clojure.test suite via kaocha (needs Docker)"
+   :depends [docker:env]
+   :task    (sh {:extra-env docker:env} "clojure" "-M:test")}
+
+  all
+  {:doc     "Setup, check and run all tests end to end"
+   :depends [setup check test]}}}

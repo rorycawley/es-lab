@@ -53,6 +53,8 @@ Commands may well be persisted — durable queues, idempotency tables, audit tra
 
 But you cannot rebuild state from them. A command is a request that *might* have been refused, so replaying a log of commands re-runs every decision against whatever the rules say today, which is a different system from the one that ran yesterday. Events replay to the same state forever; commands replay to whatever today's rules decide.
 
+("Forever" holding the fold constant, at least. Change `evolve`'s shape and the same events fold to a different state — [lab17](../lab17) — which is why a *snapshot* has to record which fold produced it. The events themselves are still exactly what they were, which is the difference that matters here.)
+
 The accurate phrasing is **"not the source of truth"** rather than "discarded." ([REFERENCE.md](../REFERENCE.md#what-it-wont-answer) works through the one case where a command log is genuinely tempting, and why modelling the refusal as an event beats it.)
 
 ---
@@ -66,7 +68,7 @@ Commands are routed to something, so at least one **id** must exist on every sta
 ```clojure
 {:command/type :buy-flavour
  :data         {:truck-id #uuid "0f1c2b3a-…"    ; ← the address
-                :flavour  :vanilla}}
+                :flavour  "vanilla"}}
 ```
 
 Greg Young's further point is that the **client** should originate these ids, normally as UUIDs. That looks like a small detail and isn't: a client-generated id lets the caller name the aggregate *before it exists*, which is what makes retries safe. If the receiver mints the id, a retried "create" produces a second thing; if the client mints it, the retry addresses the same thing and can be recognised as a repeat.
@@ -111,7 +113,7 @@ Is :flavour one this truck sells?     needs state        business rule
 
 That last row is the instructive one, because it *looks* like validation. "Is this a real flavour?" feels like a fact about the message — but the set of flavours a truck sells is something you have to go and read. Anything you must look up is a business rule, however static it feels.
 
-The first group can be checked at the adapter — HTTP handler, queue consumer — *before the command object is even constructed*, because nothing about the domain's current state can change the answer. The second group cannot be checked anywhere but against rehydrated state, which is `decide`'s job in [lab8](../lab8).
+The first group can be checked at the adapter — HTTP handler, queue consumer — *before the command object is even constructed*, because nothing about the domain's current state can change the answer. The second group cannot be checked anywhere but against rehydrated state, which is `decide`'s job in [lab8](../lab8). [Lab22](../lab22) builds both edges and shows that a command can be perfectly valid and still correctly refused.
 
 Getting this wrong in either direction hurts. Validating `:quantity` deep in the domain means the domain is full of checks that could never have failed if the edge had done its job. Checking the stock at the edge means checking it against state you haven't loaded, and being wrong.
 
@@ -148,18 +150,9 @@ The test is the same one [lab1](../lab1#selection-is-a-filter) applies to every 
 
 Event Storming has the precise name for the thing that does this: a **policy**. It's the purple sticky between an event and a command, and it always reads *"whenever…"* — *whenever a customer places an order, check their credit limit*. A policy is exactly the reactive rule that turns a fact into a request, and it may be automated or a human following a documented procedure.
 
-When a policy has to remember where it has got to, it needs state, and *Enterprise Integration Patterns* calls that a **process manager**: a central unit that maintains state and determines the next step from intermediate results.
+When a policy has to remember where it has got to, it needs state, and *Enterprise Integration Patterns* calls that a **process manager**: a central unit that maintains state and determines the next step from intermediate results. Microsoft's CQRS Journey adds a constraint worth keeping: a process manager "does not perform any business logic. It only routes messages, and in some cases translates between message types." Decisions belong in aggregates; the process manager only says what happens next.
 
-> ⚠️ **"Saga" is contested — define it locally before using it.** Reputable sources disagree, and some disagree in opposite directions:
->
-> | Source | What "saga" means there |
-> |---|---|
-> | Garcia-Molina & Salem (1987), the origin | A long-lived transaction split into sub-transactions, each with a **compensating** transaction. Nothing about messaging. |
-> | NServiceBus / much of the .NET world | A **stateful** message-driven coordinator — effectively a process manager, which is where "saga = process manager" comes from. |
-> | Oskar Dudycz | A **stateless** coordinator that reacts to one event and dispatches one command; the process manager is the state machine. The exact opposite of the row above. |
-> | Microsoft's CQRS Journey | Distinguished by **scope**: a process manager routes within a bounded context, a saga spans several. |
->
-> So "saga" carries at least three incompatible readings, and two of them disagree about the one property — state — that would tell them apart. In a repository about naming precision it would be poor practice to lean on it. **Policy** and **process manager** both have stable definitions; prefer them, and if you must say "saga", say which one you mean.
+Those two words have stable definitions. **"Saga" does not** — it is used for the stateless coordinator, the stateful one, and the compensation mechanism, by sources that contradict each other. Prefer `policy`, `process manager` and `compensating transaction`, and if someone says "saga", ask which they mean. [REFERENCE.md](../REFERENCE.md#is-saga-a-third-thing) works through why the definitions collide.
 
 **"Command" isn't Evans's term.** In the DDD Reference, commands are *methods which result in modifications to observable state* — Bertrand Meyer's command-query separation applied at the method level, sitting opposite side-effect-free functions. The message-object sense used throughout these labs is Greg Young's. Both are current; they are not the same idea, and DDD-literate readers will have the other one in mind.
 
@@ -172,7 +165,7 @@ The name of an operation, and the data required to perform it.
 ```clojure
 (def buy-flavour-vanilla-command
   {:command/type :buy-flavour
-   :data         {:flavour :vanilla}})
+   :data         {:flavour "vanilla"}})
 ```
 
 A useful way to read it is as a **serializable method call** — the name of something to invoke, plus its arguments. But that's what a command *represents*, not what it *is*. Like the event in [lab1](../lab1#its-just-a-value), it is a value: no behaviour, no methods, nothing to invoke. The "call" happens somewhere else entirely, in a function that takes this map as an argument.
@@ -182,12 +175,12 @@ A useful way to read it is as a **serializable method call** — the name of som
 ```clojure
 ;; Do
 {:command/type :buy-flavour
- :data         {:truck-id #uuid "0f1c2b3a-…" :flavour :vanilla}}
+ :data         {:truck-id #uuid "0f1c2b3a-…" :flavour "vanilla"}}
 
 ;; Don't
 {:command/type :buy-flavour
  :data         {:truck {:truck-id … :stock {…} :location … :takings …}
-                :flavour :vanilla}}
+                :flavour "vanilla"}}
 ```
 
 The second ships a copy of state the handler is about to re-read anyway — state that was already stale when it left, and that the sender has no authority over. A command says *what to do*; it does not get to assert what is currently true.
@@ -199,11 +192,11 @@ Side by side, the request and the fact it produces:
 ```clojure
 ;; Request: please do this
 {:command/type :buy-flavour
- :data         {:flavour :vanilla}}
+ :data         {:flavour "vanilla"}}
 
 ;; Fact: this happened
 {:event/type :flavour-sold
- :data       {:flavour :vanilla}}
+ :data       {:flavour "vanilla"}}
 ```
 
 Almost identical, and deliberately so. Strip the key naming the shape and the two maps are *equal* — the tests assert exactly that. Which is [lab1](../lab1#two-scoping-notes)'s warning from the other side: the shape won't tell you which one you're holding, so the naming discipline above is carrying the whole load.
@@ -231,13 +224,13 @@ In Clojure:
 ```clojure
 (decide
   {:command/type :buy-flavour
-   :data {:flavour :vanilla}}
+   :data {:flavour "vanilla"}}
 
   current-state)
 
 ;; =>
 [{:event/type :flavour-sold
-  :data {:flavour :vanilla}}]
+  :data {:flavour "vanilla"}}]
 ```
 
 Two details in that signature are worth noticing now, even though `decide` isn't implemented until [lab8](../lab8).

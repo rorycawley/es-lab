@@ -7,12 +7,12 @@
 
 (deftest a-projection-answers-a-question-about-the-fleet-test
   (testing "two vanilla and two chocolate sold, across both trucks"
-    (is (= {:vanilla 2 :chocolate 2}
+    (is (= {"vanilla" 2 "chocolate" 2}
            (:state (p/rebuild p/popularity store/log))))))
 
 (deftest a-projection-can-still-report-per-truck-test
-  (is (= {store/truck-1 {:vanilla 0}
-          store/truck-2 {:chocolate 1}}
+  (is (= {store/truck-1 {"vanilla" 0}
+          store/truck-2 {"chocolate" 1}}
          (:state (p/rebuild p/fleet-stock store/log)))))
 
 (deftest projections-are-independent-test
@@ -23,7 +23,7 @@
 
 (deftest a-projection-ignores-what-it-has-no-opinion-about-test
   (testing "popularity counts sales, so restocking leaves it unchanged"
-    (let [restock {:event/type :truck-loaded :data {:flavour :vanilla :quantity 9}}
+    (let [restock {:event/type :truck-loaded :data {:flavour "vanilla" :quantity 9}}
           log     (store/append store/log store/truck-1 3 gen-id [restock])]
       (is (= (:state (p/rebuild p/popularity store/log))
              (:state (p/rebuild p/popularity log)))))))
@@ -43,22 +43,22 @@
 
 (deftest advancing-folds-only-the-new-events-test
   (let [model (p/rebuild p/popularity store/log)
-        sale  {:event/type :flavour-sold :data {:flavour :chocolate}}
+        sale  {:event/type :flavour-sold :data {:flavour "chocolate"}}
         log   (store/append store/log store/truck-2 3 gen-id [sale])
         moved (p/advance model log)]
-    (is (= {:vanilla 2 :chocolate 3} (:state moved)))
+    (is (= {"vanilla" 2 "chocolate" 3} (:state moved)))
     (is (= 7 (:checkpoint moved)))))
 
 (deftest incremental-equals-rebuilt-test
   (testing "catching up event by event lands where a full replay does"
-    (let [sale {:event/type :flavour-sold :data {:flavour :chocolate}}
+    (let [sale {:event/type :flavour-sold :data {:flavour "chocolate"}}
           log  (store/append store/log store/truck-2 3 gen-id [sale])]
       (is (= (:state (p/rebuild p/popularity log))
              (:state (p/advance (p/rebuild p/popularity store/log) log)))))))
 
 (deftest a-read-model-can-always-be-thrown-away-test
   (testing "a model caught up incrementally is indistinguishable from a fresh rebuild"
-    (let [sale  {:event/type :flavour-sold :data {:flavour :vanilla}}
+    (let [sale  {:event/type :flavour-sold :data {:flavour "vanilla"}}
           log   (store/append store/log store/truck-1 3 gen-id [sale])
           grown (p/advance (p/rebuild p/popularity store/log) log)]
       (is (= (p/rebuild p/popularity log) grown)))))

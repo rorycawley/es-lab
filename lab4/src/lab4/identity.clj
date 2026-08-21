@@ -15,17 +15,17 @@
 (def flavour-sold-vanilla
   {:event/id   #uuid "018f7a3e-0000-7000-8000-000000000001"
    :event/type :flavour-sold
-   :data       {:flavour :vanilla}})
+   :data       {:flavour "vanilla"}})
 
 (def flavour-sold-chocolate
   {:event/id   #uuid "018f7a3e-0000-7000-8000-000000000002"
    :event/type :flavour-sold
-   :data       {:flavour :chocolate}})
+   :data       {:flavour "chocolate"}})
 
 (def flavour-sold-vanilla-again
   {:event/id   #uuid "018f7a3e-0000-7000-8000-000000000003"
    :event/type :flavour-sold
-   :data       {:flavour :vanilla}})
+   :data       {:flavour "vanilla"}})
 
 (def events
   [flavour-sold-vanilla
@@ -43,7 +43,7 @@
 (def buy-flavour-vanilla-command
   {:command/id   #uuid "018f7a3d-0000-7000-8000-0000000000a1"
    :command/type :buy-flavour
-   :data         {:flavour :vanilla}})
+   :data         {:flavour "vanilla"}})
 
 (def buy-flavour-vanilla-retry
   "The same request, sent a second time after a stalled connection."
@@ -52,7 +52,7 @@
 (def buy-flavour-chocolate-command
   {:command/id   #uuid "018f7a3d-0000-7000-8000-0000000000a2"
    :command/type :buy-flavour
-   :data         {:flavour :chocolate}})
+   :data         {:flavour "chocolate"}})
 
 (def commands
   [buy-flavour-vanilla-command
@@ -70,20 +70,20 @@
   {:message/id   #uuid "018f7a3f-0000-7000-8000-0000000000f1"
    :message/type :flavour-sold
    :payload      {:event/id (:event/id flavour-sold-vanilla)
-                  :flavour  :vanilla}})
+                  :flavour  "vanilla"}})
 
 (def flavour-sold-vanilla-message-again
   "The same sale, delivered a second time. New envelope, same fact."
   {:message/id   #uuid "018f7a3f-0000-7000-8000-0000000000f2"
    :message/type :flavour-sold
    :payload      {:event/id (:event/id flavour-sold-vanilla)
-                  :flavour  :vanilla}})
+                  :flavour  "vanilla"}})
 
 (def flavour-sold-chocolate-message
   {:message/id   #uuid "018f7a3f-0000-7000-8000-0000000000f3"
    :message/type :flavour-sold
    :payload      {:event/id (:event/id flavour-sold-chocolate)
-                  :flavour  :chocolate}})
+                  :flavour  "chocolate"}})
 
 (def messages
   [flavour-sold-vanilla-message

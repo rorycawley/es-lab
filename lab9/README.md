@@ -16,7 +16,7 @@ There is no new machinery here. This is `reduce` over events, exactly as in [lab
   (update model (get-in event [:data :flavour]) (fnil inc 0)))
 
 (rebuild popularity log)
-;; => {:vanilla 2 :chocolate 2}
+;; => {"vanilla" 2 "chocolate" 2}
 ```
 
 Same operation, different question. What changed is who's asking:
@@ -81,7 +81,7 @@ And it has exactly one job — being this cursor. Position is **not** domain ord
 A read model is its data *plus* the position it has consumed:
 
 ```clojure
-{:state      {:vanilla 2 :chocolate 2}
+{:state      {"vanilla" 2 "chocolate" 2}
  :checkpoint 6}
 ```
 
@@ -118,13 +118,13 @@ Storing the checkpoint is right; assuming positions become *visible* in order is
 - track in-flight transaction ids (`pg_snapshot_xmin`) and refuse to advance the checkpoint past them;
 - poll with a lag window and tolerate re-delivery — which costs nothing here, because `advance` is already idempotent.
 
-Worth settling before the first projection reaches production. Note this is *not* what the transactional outbox solves: the outbox addresses writing to the store and a broker without a dual write, which is a different problem and comes later, alongside actually publishing [lab3](../lab3)'s integration messages.
+Worth settling before the first projection reaches production — [lab19](../lab19) demonstrates it against a real Postgres, and implements the second fix. Note this is *not* what the transactional outbox solves: the outbox addresses writing to the store and a broker without a dual write, which is a different problem — sketched in [lab12](../lab12) and built in [lab20](../lab20).
 
 ## What's next
 
-The log now has a read side. What it doesn't have is a way to tell anybody outside.
+A projection reads the log and folds it into something you *look at*. The same machinery — read since a checkpoint, act, checkpoint again — supports a consumer that instead turns events into *commands*. That's a **policy**, in [lab10](../lab10), and it makes the system able to react to itself.
 
-Lab3 defined the integration message and lab4 gave it an identity, but nothing has ever published one. That means the gap above, in earnest: getting a fact out of the log and into another module exactly once, when the log and the broker are two separate things that can fail independently.
+Still further out: publishing. Lab3 defined the integration message and lab4 gave it an identity, but nothing has ever published one — getting a fact out of the log and into another module exactly once, when the log and the broker are two separate things that can fail independently.
 
 ## Running it
 

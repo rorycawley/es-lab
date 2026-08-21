@@ -8,13 +8,13 @@
       (is (= :buy-flavour (:command/type example))))))
 
 (deftest buy-flavour-data-test
-  (testing "each example names a flavour in its data"
+  (testing "each example names a flavour in its data, as a string"
     (doseq [example command/examples]
-      (is (keyword? (get-in example [:data :flavour]))))))
+      (is (string? (get-in example [:data :flavour]))))))
 
 (deftest buy-flavour-vanilla-command-test
   (is (= {:command/type :buy-flavour
-          :data         {:flavour :vanilla}}
+          :data         {:flavour "vanilla"}}
          command/buy-flavour-vanilla-command)))
 
 (deftest examples-are-distinct-test
@@ -62,4 +62,4 @@
       (testing "and that copy can already be wrong by the time it arrives"
         (is (not= (get-in command/buy-flavour-carrying-the-whole-truck
                           [:data :truck :stock])
-                  {:vanilla 0 :chocolate 0}))))))
+                  {"vanilla" 0 "chocolate" 0}))))))
