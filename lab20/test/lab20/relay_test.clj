@@ -28,21 +28,14 @@
 ;; `:seen` set could not have protected.
 (defn- record-notification!
   [tx row]
-  (jdbc/execute-one! tx ["INSERT INTO event (event_id, event_type, stream_id,
-                                             stream_version, occurred_at, data, metadata)
-                          VALUES (?,?,?,
-                                  (SELECT coalesce(max(stream_version),0)+1 FROM event
-                                    WHERE stream_id = ?),
-                                  ?, ?::jsonb, '{}'::jsonb)"
-                         (random-uuid) "customer-notified"
-                         #uuid "0f1c2b3a-0000-4000-8000-0000000000aa"
-                         #uuid "0f1c2b3a-0000-4000-8000-0000000000aa"
-                         (java.sql.Timestamp. (.getTime t0))
-                         (str "{\"flavour\":\"" (get-in row [:payload :flavour]) "\"}")]))
+  (jdbc/execute-one! tx ["INSERT INTO customer_notification (fact_id, flavour)
+                          VALUES (?,?)"
+                         (parse-uuid (get-in row [:payload :fact-id]))
+                         (get-in row [:payload :flavour])]))
 
 (defn- notifications [ds]
-  (:count (jdbc/execute-one! ds ["SELECT count(*) AS count FROM event
-                                  WHERE event_type = 'customer-notified'"])))
+  (:count (jdbc/execute-one! ds ["SELECT count(*) AS count
+                                  FROM customer_notification"])))
 
 ;; ---------------------------------------------------------------------------
 ;; Across a boundary: at-least-once, unavoidably
@@ -73,7 +66,7 @@
         (is (= 1 (count (outbox/pending ds))))))))
 
 (deftest the-recipient-is-what-makes-it-safe-test
-  (testing "at-least-once delivery plus an inbox is exactly-once processing"
+  (testing "at-least-once delivery plus an inbox protects a local effect"
     (let [ds (fixture/datasource)]
       (sell-the-last-cone! ds)
       (let [row     (first (outbox/pending ds))
@@ -108,7 +101,7 @@
         (is (= :already-handled (inbox/handle-once! ds :customer-app fact-id (fn [_] nil))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Inside one database: exactly-once delivery, which the network case cannot do
+;; Inside one database: an atomic, exactly-once local database effect
 ;; ---------------------------------------------------------------------------
 
 (deftest one-database-means-one-transaction-test
@@ -116,7 +109,8 @@
     (sell-the-last-cone! ds)
     (testing "outbox row, inbox row and effect all commit together"
       (let [moved (relay/relay-within-one-database!
-                   ds {:customer-app record-notification!})]
+                   ds {:customer-app record-notification!
+                       :purchasing (fn [_ _])})]
         (is (= 2 (count moved)))
         (is (= [:handled :handled] (map second moved)))
         (is (empty? (outbox/pending ds)))
@@ -126,13 +120,15 @@
 (deftest running-the-in-database-relay-twice-changes-nothing-test
   (let [ds (fixture/datasource)]
     (sell-the-last-cone! ds)
-    (relay/relay-within-one-database! ds {:customer-app record-notification!})
-    (let [again (relay/relay-within-one-database! ds {:customer-app record-notification!})]
+    (relay/relay-within-one-database!
+     ds {:customer-app record-notification! :purchasing (fn [_ _])})
+    (let [again (relay/relay-within-one-database!
+                 ds {:customer-app record-notification! :purchasing (fn [_ _])})]
       (is (empty? again) "nothing is pending, so nothing is moved")
       (is (= 1 (notifications ds))))))
 
-(deftest there-is-no-window-to-crash-in-test
-  (testing "the claim lab 12 could not make: exactly-once *delivery*"
+(deftest there-is-no-local-transaction-window-to-crash-in-test
+  (testing "the local inbox claim, database effect and sent mark are atomic"
     (let [ds (fixture/datasource)]
       (sell-the-last-cone! ds)
       (testing "a failure inside the move rolls back the whole thing"
@@ -143,7 +139,18 @@
           (is (= 2 (count (outbox/pending ds))))
           (is (empty? (inbox/entries ds)))
           (is (zero? (notifications ds)))))
-      (testing "and a later successful run delivers exactly once"
-        (relay/relay-within-one-database! ds {:customer-app record-notification!})
+      (testing "and a later successful run applies each local effect once"
+        (relay/relay-within-one-database!
+         ds {:customer-app record-notification! :purchasing (fn [_ _])})
         (is (= 1 (notifications ds)))
         (is (empty? (outbox/pending ds)))))))
+
+(deftest a-missing-recipient-handler-does-not-drop-a-message-test
+  (let [ds (fixture/datasource)]
+    (sell-the-last-cone! ds)
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No handler"
+                          (relay/relay-within-one-database!
+                           ds {:customer-app record-notification!})))
+    (is (= 2 (count (outbox/pending ds))))
+    (is (empty? (inbox/entries ds)))
+    (is (zero? (notifications ds)))))

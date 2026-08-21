@@ -8,9 +8,16 @@
 (def truck-1 #uuid "0f1c2b3a-0000-4000-8000-000000000001")
 (def truck-2 #uuid "0f1c2b3a-0000-4000-8000-000000000002")
 
+(def load-vanilla-id #uuid "018f7a3e-0000-7000-8000-000000000901")
+(def load-chocolate-id #uuid "018f7a3e-0000-7000-8000-000000000902")
+(def sell-vanilla-1-id #uuid "018f7a3e-0000-7000-8000-000000000903")
+(def sell-chocolate-1-id #uuid "018f7a3e-0000-7000-8000-000000000904")
+(def sell-chocolate-2-id #uuid "018f7a3e-0000-7000-8000-000000000905")
+(def sell-vanilla-2-id #uuid "018f7a3e-0000-7000-8000-000000000906")
+
 (defn- event
-  [position stream-id version type data]
-  {:event/id       (random-uuid)
+  [event-id position stream-id version type data]
+  {:event/id       event-id
    :event/type     type
    :event/position position
    :stream/id      stream-id
@@ -22,12 +29,18 @@
 
   Read the columns: position runs 1..6 straight down; version is contiguous
   only once you filter to a single truck."
-  [(event 1 truck-1 1 :truck-loaded {:flavour "vanilla" :quantity 2})
-   (event 2 truck-2 1 :truck-loaded {:flavour "chocolate" :quantity 3})
-   (event 3 truck-1 2 :flavour-sold {:flavour "vanilla"})
-   (event 4 truck-2 2 :flavour-sold {:flavour "chocolate"})
-   (event 5 truck-2 3 :flavour-sold {:flavour "chocolate"})
-   (event 6 truck-1 3 :flavour-sold {:flavour "vanilla"})])
+  [(event load-vanilla-id 1 truck-1 1 :truck-loaded
+          {:flavour "vanilla" :quantity 2})
+   (event load-chocolate-id 2 truck-2 1 :truck-loaded
+          {:flavour "chocolate" :quantity 3})
+   (event sell-vanilla-1-id 3 truck-1 2 :flavour-sold
+          {:flavour "vanilla"})
+   (event sell-chocolate-1-id 4 truck-2 2 :flavour-sold
+          {:flavour "chocolate"})
+   (event sell-chocolate-2-id 5 truck-2 3 :flavour-sold
+          {:flavour "chocolate"})
+   (event sell-vanilla-2-id 6 truck-1 3 :flavour-sold
+          {:flavour "vanilla"})])
 
 (defn stream
   "The history of one truck (lab 7)."
@@ -60,9 +73,13 @@
        vec))
 
 (defn append
-  "Append `events` to `stream-id` if it is still at `expected-version`,
-  stamping identity, version, and the next global positions (lab 8)."
-  [log stream-id expected-version gen-id events]
+  "Model appending identified `events` to `stream-id` if the supplied log is
+  still at `expected-version`.
+
+  Event identity already exists and is preserved. This in-memory store assigns
+  stream versions and global positions. A production store must enforce both
+  number assignments and the batch write atomically."
+  [log stream-id expected-version events]
   (let [actual (current-version log stream-id)
         end    (last-position log)]
     (when-not (= expected-version actual)
@@ -73,7 +90,6 @@
     (into log
           (map-indexed (fn [i event]
                          (assoc event
-                                :event/id (gen-id)
                                 :event/position (+ end 1 i)
                                 :stream/id stream-id
                                 :stream/version (+ actual 1 i)))

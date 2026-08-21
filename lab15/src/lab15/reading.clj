@@ -18,18 +18,43 @@
 
 (defn erased? [x] (= erased x))
 
-(defn read-event
-  "Return `event` with its sealed field opened, or marked erased.
+(defmulti read-event
+  "Return a known event in its domain-facing shape.
 
-  The stored event is untouched. Erasure destroys a key; it never rewrites
-  history, which is what lets the log stay append-only."
-  [vault event]
-  (if-let [sealed (get-in event [:data :personal])]
-    (let [subject (get-in event [:data :customer-id])
-          key     (vault/key-for vault subject)]
-      (assoc-in event [:data :personal]
-                (if key (vault/unseal key sealed) erased)))
-    event))
+  Only absence of the subject key becomes `:personal/erased`. Authentication,
+  format and semantic failures remain visible rather than masquerading as a
+  successful erasure."
+  (fn [_vault event] (:event/type event)))
+
+(defmethod read-event :card-issued
+  [key-vault event]
+  (let [sealed  (get-in event [:data :personal])
+        subject (get-in event [:data :customer-id])
+        key     (vault/key-for key-vault subject)]
+    (vault/validate-sealed sealed)
+    (assoc-in event [:data :personal]
+              (if key
+                (vault/unseal key
+                              (vault/personal-context subject (:event/id event))
+                              sealed)
+                erased))))
+
+(defmethod read-event :card-cancelled
+  [_vault event]
+  event)
+
+(defmethod read-event :truck-loaded
+  [_vault event]
+  event)
+
+(defmethod read-event :flavour-sold
+  [_vault event]
+  event)
+
+(defmethod read-event :default
+  [_vault event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn read-all
   [vault events]

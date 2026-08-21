@@ -5,9 +5,11 @@
 (def truck-1 #uuid "0f1c2b3a-0000-4000-8000-000000000001")
 (def truck-2 #uuid "0f1c2b3a-0000-4000-8000-000000000002")
 (def conversation #uuid "cc79c083-0000-4000-8000-000000000001")
+(def conversation-2 #uuid "cc79c083-0000-4000-8000-000000000002")
 
 (def t0 #inst "2026-08-16T09:00:00.000-00:00")
 (def within #inst "2026-08-16T09:20:00.000-00:00")
+(def deadline #inst "2026-08-16T09:30:00.000-00:00")
 (def beyond #inst "2026-08-16T09:31:00.000-00:00")
 
 (defn- depleted []
@@ -41,6 +43,13 @@
   (is (= :complete (:status (process/replay [(depleted) (unloaded) (loaded)]))))
   (is (= :abandoned (:status (process/replay [(depleted) (abandoned)])))))
 
+(deftest the-fold-explicitly-ignores-known-context-and-rejects-unknown-semantics-test
+  (is (= :awaiting-unload
+         (:status (process/replay [{:event/type :flavour-sold}
+                                   (depleted)]))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                        (process/replay [{:event/type :freezer-failed}]))))
+
 (deftest the-fold-spans-two-trucks-test
   (testing "the unload happened on truck 2, the depletion on truck 1"
     (let [events [(depleted) (unloaded)]]
@@ -73,7 +82,9 @@
     (testing "past it, it gives up"
       (let [[c] (process/decide state conversation truck-2 beyond)]
         (is (= :abandon-transfer (:command/type c)))
-        (is (= "donor-did-not-respond" (get-in c [:data :reason])))))))
+        (is (= "donor-did-not-respond" (get-in c [:data :reason])))))
+    (testing "the deadline itself counts as timed out"
+      (is (process/timeout-reached? state deadline)))))
 
 (deftest time-is-the-only-thing-that-changed-test
   (testing "same state, same events, different answer — which is the point"
@@ -90,7 +101,19 @@
                                    [:unload :load :abandon]))))))
   (testing "and the same step of different conversations differs"
     (is (not= (process/derived-command-id conversation :unload)
-              (process/derived-command-id (random-uuid) :unload)))))
+              (process/derived-command-id conversation-2 :unload)))))
+
+(deftest command-identity-requires-a-valid-conversation-and-step-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid correlation id"
+                        (process/derived-command-id nil :unload)))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid process step"
+                        (process/derived-command-id conversation "unload"))))
+
+(deftest only-waiting-states-are-active-test
+  (is (process/active? (process/replay [(depleted)])))
+  (is (process/active? (process/replay [(depleted) (unloaded)])))
+  (is (not (process/active? (process/replay []))))
+  (is (not (process/active? (process/replay [(depleted) (abandoned)])))))
 
 (deftest every-command-carries-the-conversation-test
   (doseq [events [[(depleted)] [(depleted) (unloaded)]]]

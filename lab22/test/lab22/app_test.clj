@@ -13,7 +13,8 @@
 (def truck-1 #uuid "0f1c2b3a-0000-4000-8000-000000000001")
 (def t0 #inst "2026-09-01T09:00:00.000-00:00")
 (defn- command [type data]
-  {:command/id (random-uuid) :command/type type :data data})
+  {:command/id (random-uuid) :command/type type
+   :correlation-id (random-uuid) :data data})
 (defn- with-app [f]
   (let [sys (system/start (system/in-memory {:clock (clock/fixed-clock t0)}))]
     (try (f (system/app sys)) (finally (system/stop sys)))))
@@ -65,7 +66,7 @@
                   (command :load-truck {:flavour "vanilla" :quantity 1}))
       (app/handle application truck-1
                   (command :buy-flavour {:flavour "vanilla"}))
-      (let [{:keys [commands]} (app/react application 0 truck-1)]
+      (let [{:keys [commands]} (app/react application 0)]
         (is (= [:load-truck] (map :command/type commands)))
         (is (= {"vanilla" 20} (app/stock application truck-1)))))))
 
@@ -74,6 +75,30 @@
     (fn [application]
       (app/handle application truck-1
                   (command :load-truck {:flavour "vanilla" :quantity 2}))
-      (let [{:keys [checkpoint]} (app/react application 0 truck-1)
-            quiet (app/react application checkpoint truck-1)]
+      (let [{:keys [checkpoint]} (app/react application 0)
+            quiet (app/react application checkpoint)]
         (is (empty? (:commands quiet)))))))
+
+(deftest a-retried-sale-returns-its-original-outcome-test
+  (with-app
+    (fn [application]
+      (app/handle application truck-1
+                  (command :load-truck {:flavour "vanilla" :quantity 1}))
+      (let [sale (command :buy-flavour {:flavour "vanilla"})
+            first-result (app/handle application truck-1 sale)]
+        (is (= first-result (app/handle application truck-1 sale)))
+        (is (= {"vanilla" 0} (app/stock application truck-1)))
+        (is (= 2 (count (port/pending (:outbox application)))))))))
+
+(deftest the-reactor-routes-facts-to-their-own-streams-test
+  (with-app
+    (fn [application]
+      (let [truck-2 #uuid "0f1c2b3a-0000-4000-8000-000000000002"]
+        (doseq [truck [truck-1 truck-2]]
+          (app/handle application truck
+                      (command :load-truck {:flavour "vanilla" :quantity 1}))
+          (app/handle application truck
+                      (command :buy-flavour {:flavour "vanilla"})))
+        (app/react application 0)
+        (is (= {"vanilla" 20} (app/stock application truck-1)))
+        (is (= {"vanilla" 20} (app/stock application truck-2)))))))

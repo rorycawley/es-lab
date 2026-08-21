@@ -25,19 +25,26 @@
 
 (deftest many-events-from-one-command-are-distinct-facts-test
   (let [events (:events c/last-cone-sale)]
-    (is (= 2 (count (distinct (map :event/id events)))))
-    (is (= 2 (count (distinct (map :event/type events)))))))
+    (is (= 2 (count (distinct (map :event/type events)))))
+    (testing "decision outcomes are unstamped; recording supplies identity later"
+      (is (every? #(nil? (:event/id %)) events)))))
 
 (deftest an-event-produces-zero-one-or-many-messages-test
   (testing "publishing is a decision, and the default is not to"
     (is (= 0 (c/messages-produced c/kept-private))))
+  (testing "one fact may have one interested audience"
+    (is (= 1 (c/messages-produced c/announced-once)))
+    (is (= [:truck-opened]
+           (map :message/type (:messages c/announced-once)))))
   (testing "one fact, two contracts, two audiences"
     (is (= 2 (c/messages-produced c/fanned-out)))
-    (is (= [:stock-depleted :flavour-unavailable]
+    (is (= [:flavour-unavailable :restock-required]
            (map :message/type (:messages c/fanned-out))))))
 
 (deftest fan-out-shares-one-event-id-across-many-message-ids-test
-  (let [messages (:messages c/fanned-out)]
+  (testing "contract mapping has not invented delivery identity"
+    (is (every? #(nil? (:message/id %)) (:messages c/fanned-out))))
+  (let [messages c/fanned-out-envelopes]
     (is (= 2 (count (distinct (map :message/id messages))))
         "each delivery is its own envelope")
     (is (= 1 (count (distinct (map #(get-in % [:payload :event/id]) messages))))
@@ -47,24 +54,18 @@
   (testing "a command with two events need not produce any messages at all"
     (is (= 2 (c/events-produced c/last-cone-sale)))
     (is (= 0 (c/messages-produced c/kept-private)))
-    (is (= (:event/id (first (:events c/last-cone-sale)))
-           (:event/id (:event c/kept-private))))))
+    (testing "the recorded fact is the proposal plus its envelope identity"
+      (is (= (first (:events c/last-cone-sale))
+             (dissoc (:event c/kept-private) :event/id))))))
 
-(deftest an-event-has-exactly-one-cause-test
-  (testing "the fan is one-way: many events from one command, never the reverse"
-    (doseq [event (mapcat :events c/decisions)]
-      (is (= 1 (count (c/causes c/decisions (:event/id event)))))))
-  (testing "and both facts from the last sale name the same command"
-    (is (= 1 (->> (:events c/last-cone-sale)
-                  (mapcat #(c/causes c/decisions (:event/id %)))
-                  (map :command/id)
-                  distinct
-                  count)))))
-
-(deftest an-unknown-event-has-no-cause-test
-  (is (= [] (c/causes c/decisions (random-uuid)))))
+(deftest cardinality-does-not-pretend-to-be-causation-metadata-test
+  (testing "one decision groups outcomes without embedding a command in each fact"
+    (is (= c/buy-chocolate (:command c/last-cone-sale)))
+    (is (every? #(nil? (:command %)) (:events c/last-cone-sale))))
+  (testing "causation ids arrive later, at the recording boundary"
+    (is (every? #(nil? (:metadata %)) (:events c/last-cone-sale)))))
 
 (deftest every-count-in-the-lab-is-zero-one-or-many-test
   (testing "nothing here assumes a matched set"
     (is (= [0 1 2] (sort (map c/events-produced c/decisions))))
-    (is (= [0 2] (sort (map c/messages-produced c/publications))))))
+    (is (= [0 1 2] (sort (map c/messages-produced c/publications))))))

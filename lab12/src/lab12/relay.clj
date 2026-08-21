@@ -2,8 +2,9 @@
   "The relay: reads the log, translates, publishes, advances its cursor.
 
   It is lab 9's projection with a different destination. A projection folds
-  events into a read model; a relay folds them into messages someone else
-  receives. Same checkpoint, same catch-up, same idempotence requirement."
+  events into a read model; a relay turns them into messages someone else
+  receives. It has the same checkpoint and catch-up obligations, but publish
+  remains at-least-once and the recipient must make its effect idempotent."
   (:require [lab12.contract :as contract]
             [lab12.store :as store]))
 
@@ -28,9 +29,15 @@
 
 (defn- stamp
   [gen-id event message]
-  (assoc message
-         :message/id (gen-id)
-         :metadata   {:correlation-id (get-in event [:metadata :correlation-id])}))
+  (let [message-id (gen-id)]
+    (when-not (uuid? message-id)
+      (throw (ex-info "Invalid message id"
+                      {:message/id message-id})))
+    (-> message
+        (assoc :message/id message-id)
+        (update :metadata assoc
+                :causation-id (:event/id event)
+                :correlation-id (get-in event [:metadata :correlation-id])))))
 
 (defn run-once
   "Publish everything appended since `checkpoint`.

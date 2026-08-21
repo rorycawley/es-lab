@@ -5,6 +5,7 @@
   system, because a container per test would make the suite unbearable and a
   shared table would make it lie."
   (:require [clojure.java.io]
+            [clojure.string :as str]
             [lab22.system :as system]
             [next.jdbc :as jdbc])
   (:import (org.testcontainers.containers PostgreSQLContainer)
@@ -22,8 +23,9 @@
                                    :password (.getPassword c)})]
       ;; Migrate once, here — the tables must exist before a test can truncate
       ;; them, and the Database component migrates on start, which is later.
-      (doseq [statement (re-seq #"(?s)CREATE[^;]+;"
-                                (slurp (clojure.java.io/resource "schema.sql")))]
+      (doseq [statement (->> (slurp (clojure.java.io/resource "schema.sql"))
+                             (#(str/replace % #"(?m)--.*$" ""))
+                             (re-seq #"(?s)CREATE[^;]+;"))]
         (jdbc/execute! ds [statement]))
       c)))
 
@@ -33,7 +35,8 @@
 
 (defn- truncate! []
   (jdbc/execute! (jdbc/get-datasource (postgres-config))
-                 ["TRUNCATE event, outbox RESTART IDENTITY"]))
+                 ["TRUNCATE event, stream_head, outbox, command_ledger
+                   RESTART IDENTITY"]))
 
 (defn systems
   "Every driven-adapter system, as `[label thunk]` pairs.

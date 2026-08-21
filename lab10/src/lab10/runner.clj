@@ -5,6 +5,18 @@
             [lab10.store :as store]
             [lab10.truck :as truck]))
 
+(defn- identify-events
+  [gen-id command-id proposals]
+  (mapv (fn [proposal]
+          (let [event-id (gen-id)]
+            (when-not (uuid? event-id)
+              (throw (ex-info "Invalid event id"
+                              {:event/id event-id})))
+            (-> proposal
+                (assoc :event/id event-id)
+                (update :metadata assoc :causation-id command-id))))
+        proposals))
+
 (defn handle
   "Run one command against the truck it addresses (lab 8).
 
@@ -13,17 +25,18 @@
   [log gen-id command]
   (let [stream-id (get-in command [:data :truck-id])
         history   (store/stream log stream-id)
-        version   (store/current-version log stream-id)
+        version   (store/current-version history stream-id)
         state     (truck/replay history)
-        events    (truck/decide command state)]
-    (store/append log stream-id version gen-id (:command/id command) events)))
+        proposals (truck/decide command state)
+        events    (identify-events gen-id (:command/id command) proposals)]
+    (store/append log stream-id version events)))
 
 (defn dispatch
   "Run `command` unless the log shows it has already been run.
 
-  The check is the causation id: if events caused by this command are already
-  in the log, this is a redelivery and there is nothing to do. It works only
-  because the policy derived the id from the event rather than minting one."
+  For this policy, whose command always records an event, the causation id is
+  enough to recognise a redelivery. The general zero-event case needs the
+  command ledger introduced in lab 20."
   [log gen-id command]
   (if (store/caused-by? log (:command/id command))
     log
@@ -55,9 +68,11 @@
   ([log checkpoint gen-id] (run-until-quiet log checkpoint gen-id 100))
   ([log checkpoint gen-id max-passes]
    (loop [log log, checkpoint checkpoint, passes 0]
-     (let [{:keys [log commands] :as result} (run-once log checkpoint gen-id)]
+     (let [{:keys [log commands] :as result} (run-once log checkpoint gen-id)
+           next-passes (inc passes)]
        (cond
          (empty? commands) (assoc result :passes passes)
-         (>= passes max-passes) (throw (ex-info "Policy did not settle"
-                                                {:passes passes :log-size (count log)}))
-         :else (recur log (:checkpoint result) (inc passes)))))))
+         (> next-passes max-passes) (throw (ex-info "Policy did not settle"
+                                                    {:passes next-passes
+                                                     :log-size (count log)}))
+         :else (recur log (:checkpoint result) next-passes))))))

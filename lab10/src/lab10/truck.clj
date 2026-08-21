@@ -1,7 +1,8 @@
 (ns lab10.truck
-  "The domain, as of lab 8: fold a history into stock, decide what a command
-  produces. Unchanged by anything in this lab — a policy issues commands, and
-  the domain cannot tell where a command came from.")
+  "The technology-independent decision model introduced in lab 8.
+
+  A policy issues commands, and the domain cannot tell where a command came
+  from.")
 
 ;; ---------------------------------------------------------------------------
 ;; evolve : state -> event -> state          (lab 6)
@@ -20,9 +21,18 @@
   [state event]
   (update state (get-in event [:data :flavour]) (fnil dec 0)))
 
-(defmethod evolve :default
+(defmethod evolve :stock-depleted
   [state _event]
   state)
+
+(defmethod evolve :truck-repainted
+  [state _event]
+  state)
+
+(defmethod evolve :default
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]

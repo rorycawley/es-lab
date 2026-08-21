@@ -108,6 +108,16 @@
       (is (empty? (filter #(str/includes? % "adapter") (requires app)))
           "app.clj requires an adapter — the shell must be told, not choose"))))
 
+(deftest the-command-outcome-is-one-driven-operation-test
+  (testing "facts, ledger and messages cannot be split across adapter calls"
+    (let [application (source "app.clj")
+          composition (source "system.clj")]
+      (is (str/includes? application "driven/commit-command"))
+      (is (not (str/includes? application "driven/append")))
+      (is (not (str/includes? application "driven/enqueue")))
+      (is (not (str/includes? composition "memory/outbox")))
+      (is (not (str/includes? composition "postgres/outbox"))))))
+
 (deftest only-the-composition-root-constructs-adapters-test
   (testing "search the source for a concrete adapter and find one file"
     (let [files (->> (file-seq (io/file "src/lab23"))

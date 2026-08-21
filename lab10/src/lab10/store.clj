@@ -1,6 +1,6 @@
 (ns lab10.store
-  "The append-only log, as of lab 9, with one addition: an event records the
-  command that caused it, so a consumer can ask whether it has already acted.")
+  "The append-only log, as of lab 9. Identified events carry the command that
+  caused them, so a consumer can ask whether it has already acted.")
 
 (defn stream
   "The history of one truck (lab 7)."
@@ -31,18 +31,20 @@
 (defn caused-by?
   "Has any event in the log already been caused by this command?
 
-  This is the whole of idempotency for a reactor: the causation id is written
-  into the events a command produced, so the question can be answered from the
-  log itself, with no separate table of processed commands."
+  This is a deliberately narrow deduplication shortcut for commands known to
+  produce events. A general handler needs a command ledger because a
+  successful no-op leaves no causation id in the event log."
   [log command-id]
   (boolean (some #(= command-id (get-in % [:metadata :causation-id])) log)))
 
 (defn append
-  "Append `events` to `stream-id` if it is still at `expected-version`.
+  "Model appending identified `events` to `stream-id` if the supplied log is
+  still at `expected-version`.
 
-  The store stamps identity, stream, version, position — and the causation id,
-  which is the id of the command that produced these events (lab 4)."
-  [log stream-id expected-version gen-id command-id events]
+  Identity and causation already exist and are preserved. This in-memory store
+  assigns stream versions and global positions; a production store must make
+  those assignments and the batch write atomic."
+  [log stream-id expected-version events]
   (let [actual (current-version log stream-id)
         end    (last-position log)]
     (when-not (= expected-version actual)
@@ -53,9 +55,7 @@
     (into log
           (map-indexed (fn [i event]
                          (assoc event
-                                :event/id (gen-id)
                                 :event/position (+ end 1 i)
                                 :stream/id stream-id
-                                :stream/version (+ actual 1 i)
-                                :metadata {:causation-id command-id}))
+                                :stream/version (+ actual 1 i)))
                        events))))

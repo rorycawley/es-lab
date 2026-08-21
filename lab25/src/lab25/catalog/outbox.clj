@@ -9,11 +9,14 @@
 
 (defn pending
   [{:keys [datasource]}]
-  (mapv (fn [{:keys [message-id product-id product-name price-cents]}]
-          (contract/price-changed message-id product-id product-name price-cents))
+  (mapv (fn [{:keys [message-id fact-id causation-id correlation-id
+                     product-id product-name price-cents]}]
+          (contract/price-changed message-id fact-id causation-id correlation-id
+                                  product-id product-name price-cents))
         (jdbc/execute!
          datasource
-         ["SELECT message_id, product_id, product_name, price_cents
+         ["SELECT message_id, fact_id, causation_id, correlation_id,
+                  product_id, product_name, price_cents
              FROM catalog.outbox
             WHERE published = FALSE
             ORDER BY created_order"]

@@ -1,6 +1,7 @@
 (ns lab15.erasure-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [lab15.application :as application]
             [lab15.domain :as domain]
             [lab15.projection :as projection]
             [lab15.reading :as reading]
@@ -20,10 +21,6 @@
   {:command/id (random-uuid) :command/type type
    :correlation-id (random-uuid) :data data})
 
-(defn- append [log stream-id decide cmd]
-  (store/append log stream-id (store/current-version log stream-id)
-                gen-id t0 cmd (decide cmd nil)))
-
 (def subject-key (vault/generate-key))
 (def held (vault/hold vault/empty-vault customer subject-key))
 (def shredded (vault/destroy held customer))
@@ -32,18 +29,20 @@
 ;; Only the first event describes anybody.
 (def log
   (-> []
-      (append card  #(domain/decide-card %1 %2)
-              (command :issue-card {:customer-id customer
-                                    :key         subject-key
-                                    :personal    personal}))
-      (store/append truck (store/current-version [] truck) gen-id t0
-                    (command :load-truck {})
-                    [{:event/type :truck-loaded :data {:flavour "vanilla" :quantity 10}}])
+      (application/handle-card held gen-id t0
+                               (command :issue-card {:card-id     card
+                                                     :customer-id customer
+                                                     :personal    personal}))
+      (application/handle-truck gen-id t0
+                                (command :load-truck {:truck-id truck
+                                                      :flavour "vanilla"
+                                                      :quantity 10}))
       (as-> l (reduce (fn [acc _]
-                        (store/append acc truck (store/current-version acc truck)
-                                      gen-id t0 (command :buy-flavour {})
-                                      [{:event/type :flavour-sold
-                                        :data {:flavour "vanilla" :customer-id customer}}]))
+                        (application/handle-truck
+                         acc gen-id t0
+                         (command :buy-flavour {:truck-id    truck
+                                                :flavour     "vanilla"
+                                                :customer-id customer})))
                       l (range 3)))))
 
 ;; ---------------------------------------------------------------------------
@@ -56,7 +55,7 @@
     (doseq [sale sales]
       (is (= customer (get-in sale [:data :customer-id])))
       (is (= #{:flavour :customer-id} (set (keys (:data sale))))
-          "no name, no email, nothing to erase"))))
+          "no repeated name or email"))))
 
 (deftest only-one-event-in-the-whole-log-holds-personal-data-test
   (is (= 1 (count (filter #(get-in % [:data :personal]) log)))))
@@ -79,11 +78,20 @@
     (is (reading/erased? (get-in (reading/read-event shredded card-event)
                                  [:data :personal])))))
 
+(deftest missing-key-does-not-disguise-an-unsupported-envelope-test
+  (let [card-event (first (store/stream log card))]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported sealed-value version"
+                          (reading/read-event
+                           shredded
+                           (assoc-in card-event [:data :personal :crypto/version] 2))))))
+
 (deftest erasure-changes-the-vault-not-the-store-test
   (testing "the ciphertext is still there after erasure — just unopenable"
     (let [sealed (get-in (first (store/stream log card)) [:data :personal])]
       (is (contains? sealed :ciphertext))
       (is (contains? sealed :iv))
+      (is (= 1 (:crypto/version sealed)))
+      (is (= "AES-256-GCM" (:algorithm sealed)))
       (is (reading/erased? (get-in (reading/read-event shredded
                                                        (first (store/stream log card)))
                                    [:data :personal]))))))
@@ -141,10 +149,63 @@
   (let [other  "C-999"
         other-key (vault/generate-key)
         both   (-> held (vault/hold other other-key))
-        log'   (append log card #(domain/decide-card %1 %2)
-                       (command :issue-card {:customer-id other
-                                             :key         other-key
-                                             :personal    {:name "Cormac"}}))
+        other-card #uuid "0f1c2b3a-0000-4000-8000-0000000000c2"
+        log'   (application/handle-card
+                log both gen-id t0
+                (command :issue-card {:card-id     other-card
+                                      :customer-id other
+                                      :personal    {:name "Cormac"}}))
         after  (projection/rebuild (vault/destroy both customer) log')]
     (is (reading/erased? (projection/name-of after customer)))
     (is (= "Cormac" (projection/name-of after other)))))
+
+(deftest the-domain-proposes-plaintext-and-the-application-protects-it-test
+  (let [proposal (first (domain/decide-card
+                         (command :issue-card {:card-id     card
+                                               :customer-id customer
+                                               :personal    personal})
+                         domain/initial-card))
+        stored   (first (store/stream log card))]
+    (is (= personal (get-in proposal [:data :personal]))
+        "the pure domain knows no encryption technology")
+    (is (not= personal (get-in stored [:data :personal])))
+    (is (= personal (get-in (reading/read-event held stored) [:data :personal])))))
+
+(deftest unknown-semantics-fail-at-each-reader-test
+  (let [unknown {:event/type :customer-profile-exported :data {}}]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                          (reading/read-event held unknown)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                          (projection/apply-event projection/initial-model unknown)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown card event type"
+                          (domain/replay-card [unknown])))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown truck event type"
+                          (domain/replay-truck [unknown])))))
+
+(deftest the-application-identifies-before-persistence-test
+  (let [event-id #uuid "018f7a3e-0000-7000-8000-000000002001"
+        cmd       {:command/id     #uuid "0f1c2b3a-0000-4000-8000-000000001101"
+                   :command/type   :load-truck
+                   :correlation-id #uuid "cc79c083-0000-4000-8000-000000000011"
+                   :data           {:truck-id truck :flavour "vanilla" :quantity 2}}
+        event     (first (application/handle-truck [] (constantly event-id) t0 cmd))]
+    (is (= event-id (:event/id event)))
+    (is (= t0 (:event/occurred-at event)))
+    (is (= (:command/id cmd) (get-in event [:metadata :causation-id])))
+    (is (= (:correlation-id cmd) (get-in event [:metadata :correlation-id])))
+    (is (= 1 (:stream/version event)))
+    (is (= 1 (:event/position event)))))
+
+(deftest the-write-edge-refuses-plaintext-append-without-an-active-key-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No active key for subject"
+                        (application/handle-card
+                         [] shredded gen-id t0
+                         (command :issue-card {:card-id     card
+                                               :customer-id customer
+                                               :personal    personal}))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid event id"
+                        (application/handle-truck
+                         [] (constantly "not-a-uuid") t0
+                         (command :load-truck {:truck-id truck
+                                               :flavour "vanilla"
+                                               :quantity 1})))))

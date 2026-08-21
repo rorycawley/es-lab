@@ -52,8 +52,8 @@
   (say)
   (say "  2. Rudi signs in at the depot and gets on with it.")
   (let [rudi (mock-idp/login idp :rudi)]
-    (say "     access token  " (subs (:access_token rudi) 0 32) "…  (a JWT, unrevocable, short)")
-    (say "     refresh token " (subs (:refresh_token rudi) 0 32) "…  (opaque, revocable, long)")
+    (say "     access token  " (subs (:access_token rudi) 0 32) "…  (offline-verifiable, short)")
+    (say "     refresh token " (subs (:refresh_token rudi) 0 32) "…  (server-revocable, long)")
     (show "rosters Dana" (call handler :post "/v1/driver-assignments" rudi {:driver-id "USR-83721"}))
     (show "loads two vanilla" (call handler :post "/v1/restocks" rudi {:flavour "vanilla" :quantity 2}))
 
@@ -107,7 +107,7 @@
       (say)
       (say "  7. A policy notices the depletion and restocks (lab 10) — and the")
       (say "     restock is NOT authorised by whoever emptied the truck.")
-      (let [{:keys [commands]} (app/react app 0 truck-1)]
+      (let [{:keys [commands]} (app/react app 0)]
         (doseq [command commands]
           (say "     command  " (name (:command/type command))
                "  actor " (pr-str (:command/actor command)))))

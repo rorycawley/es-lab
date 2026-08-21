@@ -26,11 +26,9 @@
 ;;   409  conflict         the stream moved under you
 ;;   422  refused          well-formed, permitted, and the domain said no
 ;;
-;; 401 and 403 are the pair most often collapsed, and the difference is worth
-;; as much as 400-versus-422. **401 says try again with a better token; 403
-;; says a better token will not help.** A client that cannot tell them apart
-;; either retries what can never work, or gives up on what one refresh would
-;; have fixed.
+;; 401 and 403 are the pair most often collapsed. A refreshed credential may
+;; repair an expired-token 401. Replaying the same valid credential cannot
+;; repair a 403; a genuinely different principal or grant might.
 ;;
 ;; 401 does not appear in this table because it is never a domain outcome. It
 ;; is decided before any of this runs, by `require-authentication`.
@@ -39,7 +37,6 @@
 (def ^:private status-for
   {:malformed 400
    :forbidden 403
-   :conflict  409
    :refused   422})
 
 (defn- outcome->response
@@ -50,8 +47,10 @@
                                                 :version (:stream/version e)
                                                 :data    (:data e)})
                                        accepted)})
-    (wire/respond (status-for rejected 400)
-                  {:error rejected :detail (if (map? because) because (str because))})))
+    (if-let [status (status-for rejected)]
+      (wire/respond status
+                    {:error rejected :detail (if (map? because) because (str because))})
+      (throw (ex-info "Unknown intake outcome" {:rejected rejected :because because})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Routes.
@@ -66,9 +65,17 @@
 (defn- command-route
   [deps command-type]
   (fn [request]
-    (outcome->response
-     (intake/submit deps truck-id (auth/principal request)
-                    {:type command-type :data (wire/read-body request)}))))
+    (try
+      (outcome->response
+       (intake/submit deps truck-id (auth/principal request)
+                      {:type command-type :data (wire/read-body request)}))
+      (catch clojure.lang.ExceptionInfo failure
+        (case (:reason (ex-data failure))
+          :malformed-json (wire/respond 400 {:error :malformed
+                                             :detail "Request body is not valid JSON"})
+          :concurrent-modification (wire/respond 409 {:error :conflict
+                                                      :detail "Stream changed; read and retry"})
+          (throw failure))))))
 
 (defn- stock-route
   "ADR-0020's third layer: the same underlying data, projected differently per
@@ -104,6 +111,8 @@
                                    :handler (command-route deps :buy-flavour)}}]
     ["/restocks"           {:post {:command :load-truck
                                    :handler (command-route deps :load-truck)}}]
+    ["/replenishments"     {:post {:command :ensure-stock
+                                   :handler (command-route deps :ensure-stock)}}]
     ["/driver-assignments" {:post {:command :assign-driver
                                    :handler (command-route deps :assign-driver)}}]
     ["/stock"              {:get  {:handler (stock-route deps)}}]]])

@@ -1,20 +1,20 @@
 # Lab 7: streams and versions
 
-[Lab 6](../lab6) folded a vector of events into state and left one question hanging: fold **which** events?
+[Lab 6](../lab6) folded an ordered collection of events into state and left one question hanging: fold **which** events?
 
 It got away with ignoring that because there was one truck and every event belonged to it. The fleet has grown. Now the log holds both trucks' events, interleaved, and "the events" is no longer a well-defined thing.
 
 ## Folding everything gives you nobody's answer
 
-Truck 1 loaded one vanilla cone and sold it. Truck 2 loaded three and sold one.
+Truck 1 loaded three vanilla cones and sold one. Truck 2 loaded two and sold one.
 
 ```clojure
-(replay log)      ;; => {"vanilla" 2}
+(replay log)      ;; => {"vanilla" 3}
 ```
 
-Four loaded, two sold, two left. The arithmetic is right and the answer is useless. It isn't truck 1's stock (that's 0) and it isn't truck 2's (that's 2). It's the fleet total, which nobody asked for.
+Five loaded, two sold, three left across the fleet. The arithmetic is right and the answer is useless for deciding what either truck may do. It isn't truck 1's stock (that's 2) and it isn't truck 2's (that's 1). It is the fleet total, which is a different question.
 
-The damage shows up the moment you use it. *Can truck 1 sell a vanilla cone?* The fleet total says yes — there are two. Truck 1 is empty. A fold over the wrong events doesn't fail loudly; it returns a plausible number that answers a question you didn't ask.
+The damage shows up the moment you use it. *Can truck 2 fulfil an order for two vanilla cones?* The fleet total says yes — there are three. Truck 2 has one. A fold over the wrong events doesn't fail loudly; it returns a plausible number that answers a question you didn't ask.
 
 ## `:stream/id` — whose history
 
@@ -33,13 +33,17 @@ Selecting a history is now a filter, and folding one is unchanged from lab6:
 (defn state-of [events stream-id]
   (replay (stream events stream-id)))
 
-(state-of log truck-1)   ;; => {"vanilla" 0}
-(state-of log truck-2)   ;; => {"vanilla" 2}
+(state-of log truck-1)   ;; => {"vanilla" 2}
+(state-of log truck-2)   ;; => {"vanilla" 1}
 ```
 
-Note what didn't change: `evolve` and `replay` are exactly lab6's. A fold still takes a plain sequence of events and knows nothing about streams. Stream id is about *selection*, and selection happens before folding — which is why it's a separate idea and not a change to the fold.
+Note what didn't change: `evolve` and `replay` keep the shape introduced in lab6. This lab trims the example state to stock, but a fold still takes a plain sequence of events and knows nothing about streams. Stream id is about *selection*, and selection happens before folding — which is why it's a separate idea and not a change to the fold.
 
-Stream id is also the **consistency boundary**. When lab8 adds `decide`, the rule will be: read one stream, fold it, decide against that state, append back to that same stream. Nothing spans two. That constraint is what makes the next section possible.
+The Lab6 safety rule remains too: this fold has handlers for the event types it supports and fails on an unknown type. A known event that is irrelevant to this state could have an explicit no-op handler; unknown semantics must not be silently mistaken for irrelevance.
+
+Stream id is also the **consistency boundary for this aggregate and write loop**. When lab8 adds `decide`, the rule will be: read one stream, fold it, decide against that state, append back to that same stream. One such decision does not atomically span two streams. Later workflows can coordinate several aggregates through commands and events without pretending they form one consistency boundary.
+
+The sample history already consists of recorded facts, so every event has a fixed `:event/id`. Those identifiers are supplied as data and `append` preserves them; no event helper reaches out to randomness. That keeps the lesson aligned with [lab4](../lab4): identifier allocation is an effect owned by the event-recording application boundary, not by the pure event or fold code.
 
 ## `:stream/version` — where in that history
 
@@ -61,28 +65,35 @@ Three things it is *not*, each worth stating because each is a natural guess:
 
 Here's what version buys, and it's the reason it exists.
 
-Two tills serve the last cone at the same instant. Both read truck 2's history, both fold it, both see two cones, both conclude the sale is fine. Without version, both append and the truck has sold one cone more than it had.
+Two tills serve the last cone at the same instant. Both read truck 2's history, both fold it, both see one cone, and both conclude the sale is fine. Without version, both append and the truck has sold one cone more than it had.
 
 With version, a writer offers back the version it read, *as a condition*:
 
 ```clojure
-(append log truck-2 2 sale)   ;; => new log; the sale lands at version 3
-(append log truck-2 2 sale)   ;; => throws: the stream is at 3 now
+(def winner (append log truck-2 2 sale-a))
+;; => new log; sale-a lands at version 3
+
+(append winner truck-2 2 sale-b)
+;; => throws: the supplied log says the stream is at 3 now
 ```
 
 The second till is told the world moved. Its state is stale, so its decision is void — it has to read again, fold again, and decide again, this time against a truck with one fewer cone.
 
-Two details make this work:
+The in-memory function demonstrates the **compare-and-append contract**, not real concurrent storage. Logs here are immutable values: if both calls receive the original `log`, both can independently return a new value. The example detects the conflict because the second call receives `winner`, the value containing the first append.
 
-**Nothing is held between the read and the write.** No lock, no transaction spanning the decision. The check is just `expected = actual` at the moment of appending. That's what *optimistic* means: assume no conflict, detect it if you're wrong. It costs nothing when writers don't collide, which is almost always.
+A real event store must make the version condition and insert one atomic operation. In this repository Postgres eventually enforces `UNIQUE (stream_id, stream_version)` inside a transaction, so two writers cannot both claim version 3. That arrives in [lab19](../lab19); this lab establishes the condition it must enforce.
 
-**The conflict is informative, not just a failure.** The exception carries the expected and actual versions, so the caller knows the stream advanced and by how much — enough to retry deliberately rather than blindly.
+Two details define the production pattern:
+
+**Nothing is held while the decision runs.** No lock or transaction spans read, fold and decide. The append itself is atomic: it conditionally writes only when `expected = actual`. That's what *optimistic* means here — assume no conflict while doing the work, then let the store detect one at the write boundary.
+
+**The conflict is informative, not just a failure.** The exception carries the expected and actual versions, so the caller knows its state was stale. It must reread, refold and re-decide rather than blindly retrying the old decision.
 
 ```clojure
 {:stream/id truck-2 :expected-version 2 :actual-version 3}
 ```
 
-A stream that has never been written to is at version **0**, so creating one is just `expected-version = 0` — and two writers racing to create the *same* stream are handled by exactly the same rule, with no special case.
+A stream that has never been written to is at version **0**, so creating one is just `expected-version = 0`. In a real store, two writers racing to create the same stream are handled by the same atomic uniqueness rule, with no special case.
 
 ## What's next
 

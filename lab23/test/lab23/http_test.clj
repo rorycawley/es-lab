@@ -9,6 +9,7 @@
             [clojure.test :refer [deftest is testing]]
             [lab23.adapter.http :as http]
             [lab23.fixture :as fixture]
+            [lab23.port.driven :as driven]
             [lab23.schema.command :as command]
             [lab23.system :as system])
   (:import (java.net URI)
@@ -22,6 +23,11 @@
 (defn- post [handler uri body]
   (let [response (handler {:request-method :post :uri uri
                            :body (java.io.StringReader. (json/write-str body))})]
+    (assoc response :parsed (json/read-str (:body response) :key-fn keyword))))
+
+(defn- post-raw [handler uri body]
+  (let [response (handler {:request-method :post :uri uri
+                           :body (java.io.StringReader. body)})]
     (assoc response :parsed (json/read-str (:body response) :key-fn keyword))))
 
 (defn- GET [handler uri]
@@ -67,6 +73,16 @@
           (is (= {:vanilla 3}
                  (:stock (json/read-str body :key-fn keyword)))))))))
 
+(deftest ensuring-an-already-satisfied-stock-level-is-an-accepted-no-op-test
+  (with-handler
+    (fn [h]
+      (post h "/v1/restocks" {:flavour "vanilla" :quantity 3})
+      (let [response (post h "/v1/replenishments"
+                           {:flavour "vanilla" :quantity 2})]
+        (is (= 200 (:status response)))
+        (is (= [] (:recorded (:parsed response))))
+        (is (= {:vanilla 3} (:stock (:parsed (GET h "/v1/stock")))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Status codes are lab 2's two columns
 ;; ---------------------------------------------------------------------------
@@ -93,35 +109,55 @@
         (is (= 400 (:status (post h "/v1/sales" {:flavour "tarmac"})))
             "the 400 is still a 400, and always will be")))))
 
+(deftest malformed-json-is-400-test
+  (with-handler
+    (fn [h]
+      (let [response (post-raw h "/v1/restocks" "{not-json")]
+        (is (= 400 (:status response)))
+        (is (= "malformed" (:error (:parsed response))))))))
+
+(defn- faulting-deps [failure]
+  (let [store (reify driven/EventStore
+                (command-result [_ _ _] nil)
+                (commit-command [_ _ _ _ _ _] (throw failure))
+                (read-stream [_ _] [])
+                (stream-version [_ _] 0)
+                (read-since [_ _] []))]
+    {:store store
+     :clock (reify driven/Clock (now [_] #inst "2026-09-01T09:00:00.000-00:00"))
+     :ids (reify driven/Ids (new-id [_] (random-uuid)))}))
+
+(deftest concurrency-is-409-but-other-failures-remain-server-failures-test
+  (let [conflict (ex-info "moved" {:reason :concurrent-modification})
+        conflict-response (post (http/handler (faulting-deps conflict))
+                                "/v1/restocks"
+                                {:flavour "vanilla" :quantity 1})]
+    (is (= 409 (:status conflict-response)))
+    (is (= "conflict" (:error (:parsed conflict-response)))))
+  (testing "identity and infrastructure failures are not client mistakes"
+    (let [collision (ex-info "collision" {:reason :command-id-collision})]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"collision"
+           (post (http/handler (faulting-deps collision))
+                 "/v1/restocks"
+                 {:flavour "vanilla" :quantity 1}))))))
+
 (deftest an-unknown-endpoint-is-404-test
   (with-handler
     (fn [h]
       (is (= 404 (:status (post h "/v1/nonsense" {})))))))
 
 ;; ---------------------------------------------------------------------------
-;; The wire loses the same things the store loses
+;; The external message is validated before internal identity exists
 ;; ---------------------------------------------------------------------------
 
-(deftest the-wire-form-is-already-the-domain-form-test
-  (testing "the body a client sends needs no translating"
-    ;; This test used to assert the opposite: that a JSON body arrived as
-    ;; strings, the schema wanted keywords, and a decode step stood between
-    ;; them. The decode step is still here — see below — but it has nothing
-    ;; to do for these commands, because the domain no longer writes anything
-    ;; JSON cannot carry.
-    (let [wire {:command/id    (random-uuid)
-                :command/type  :buy-flavour
-                :data          {:flavour "vanilla"}}]
-      (is (nil? (command/validate wire))
-          "valid exactly as it arrived off the wire")
-      (is (= wire (command/decode wire))
-          "and decoding it is the identity")))
-
-  (testing "the decode step stays at the boundary anyway"
-    ;; It costs one line and it is where a coercion belongs the day a command
-    ;; grows a field JSON does damage — a uuid, an instant, a decimal. Lab 22
-    ;; still needs it on the way *out*, for :truck-id.
-    (is (some? (command/decode {:command/type :buy-flavour :data {:flavour "vanilla"}})))))
+(deftest the-http-body-is-the-closed-external-message-data-test
+  (is (nil? (command/validate-message
+             {:type :buy-flavour :data {:flavour "vanilla"}})))
+  (is (some? (command/validate-message
+              {:type :buy-flavour
+               :data {:flavour "vanilla" :command/id (random-uuid)}}))
+      "an HTTP client cannot inject internal identity into command data"))
 
 ;; ---------------------------------------------------------------------------
 ;; The API surface and the command vocabulary are one list
@@ -171,15 +207,17 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest the-system-serves-a-use-case-through-real-infrastructure-test
-  (testing "one smoke test crosses HTTP, the application and real Postgres"
-    (let [sys (system/start (system/serving (fixture/postgres-system {}) 0))]
-      (try
-        (let [port (.getLocalPort (aget (.getConnectors (:server (:http sys))) 0))
-              response (post-over-http (str "http://localhost:" port "/v1/restocks")
-                                       {:flavour "vanilla" :quantity 2})]
-          (is (= 200 (.statusCode response)))
-          (is (= {"vanilla" 2}
-                 (get (json/read-str
-                       (slurp (str "http://localhost:" port "/v1/stock")))
-                      "stock"))))
-        (finally (system/stop sys))))))
+  (if (System/getenv "ESLAB_SKIP_DOCKER")
+    (is true "real-infrastructure smoke test explicitly skipped")
+    (testing "one smoke test crosses HTTP, the application and real Postgres"
+      (let [sys (system/start (system/serving (fixture/postgres-system {}) 0))]
+        (try
+          (let [port (.getLocalPort (aget (.getConnectors (:server (:http sys))) 0))
+                response (post-over-http (str "http://localhost:" port "/v1/restocks")
+                                         {:flavour "vanilla" :quantity 2})]
+            (is (= 200 (.statusCode response)))
+            (is (= {"vanilla" 2}
+                   (get (json/read-str
+                         (slurp (str "http://localhost:" port "/v1/stock")))
+                        "stock"))))
+          (finally (system/stop sys)))))))

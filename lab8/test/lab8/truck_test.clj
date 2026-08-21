@@ -48,7 +48,7 @@
               (truck/decide (buy "vanilla") {"vanilla" 1})))))
 
 (deftest decide-returns-what-happened-not-where-it-goes-test
-  (testing "no identity, no stream, no version — the store stamps those"
+  (testing "proposals have no identity, stream, or version yet"
     (doseq [event (truck/decide (buy "vanilla") {"vanilla" 1})]
       (is (= #{:event/type :data} (set (keys event)))))))
 
@@ -57,3 +57,15 @@
     (let [state  {"vanilla" 3}
           events (truck/decide (buy "vanilla") state)]
       (is (= {"vanilla" 2} (reduce truck/evolve state events))))))
+
+(deftest known-events-irrelevant-to-stock-are-explicit-no-ops-test
+  (is (= {"vanilla" 0}
+         (truck/evolve {"vanilla" 0}
+                       {:event/type :stock-depleted
+                        :data       {:flavour "vanilla"}}))))
+
+(deftest unknown-event-semantics-are-rejected-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                        (truck/evolve truck/initial-state
+                                      {:event/type :freezer-failed
+                                       :data       {}}))))

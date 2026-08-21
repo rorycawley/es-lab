@@ -8,7 +8,7 @@
             [lab25.ordering.place-order :as place-order]
             [lab25.platform.behaviour :as behaviour]))
 
-(defrecord Ordering [datasource audit receive place-order get-order])
+(defrecord Ordering [receive place-order get-order audit-log])
 
 (defn new-module
   [datasource]
@@ -26,7 +26,7 @@
                     #(get-order/handle context %)
                     [(behaviour/observation audit :ordering/get-order)
                      (behaviour/validation get-order/Request)])]
-    (->Ordering datasource audit receive command query)))
+    (->Ordering receive command query #(deref audit))))
 
 (defn receive! [ordering message]
   ((:receive ordering) message))
@@ -38,4 +38,4 @@
   ((:get-order ordering) request))
 
 (defn audit-log [ordering]
-  @(:audit ordering))
+  ((:audit-log ordering)))

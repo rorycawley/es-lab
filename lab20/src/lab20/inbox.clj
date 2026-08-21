@@ -5,14 +5,16 @@
   it works for exactly one reason: the effect *was* the read model, so the
   dedupe record and the effect were the same write.
 
-  Move the effect anywhere else — another table, an email, a payment — and the
-  `:seen` set protects nothing. What is needed is a record written in the same
-  transaction as the effect, so 'I have handled this' and 'I did the thing'
-  commit together or not at all. That record is the inbox."
+  For an effect in the same database, the inbox record and effect can share a
+  transaction. An email, payment or other remote effect cannot join that
+  transaction and needs its own idempotency or outbox boundary."
   (:require [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]))
 
 (def ^:private opts {:builder-fn rs/as-unqualified-kebab-maps})
+
+(defn- recipient-name [recipient]
+  (if (keyword? recipient) (name recipient) recipient))
 
 (defn handled?
   "Has this recipient already dealt with this fact?
@@ -22,8 +24,20 @@
   (lab 4, and there is a test for the wrong version in lab 12)."
   [ds recipient fact-id]
   (some? (jdbc/execute-one! ds ["SELECT 1 FROM inbox WHERE recipient = ? AND fact_id = ?"
-                                (name recipient) fact-id]
+                                (recipient-name recipient) fact-id]
                             opts)))
+
+(defn handle-once-in-transaction!
+  "Claim a fact atomically and run a local database effect in the caller's
+  transaction. `ON CONFLICT` removes the check-then-insert race."
+  [tx recipient fact-id effect!]
+  (if (jdbc/execute-one!
+       tx ["INSERT INTO inbox (recipient, fact_id) VALUES (?,?)
+            ON CONFLICT DO NOTHING RETURNING recipient"
+           (recipient-name recipient) fact-id]
+       opts)
+    (do (effect! tx) :handled)
+    :already-handled))
 
 (defn handle-once!
   "Run `effect!` exactly once per fact, per recipient.
@@ -35,13 +49,7 @@
   Returns `:handled` or `:already-handled`."
   [ds recipient fact-id effect!]
   (jdbc/with-transaction [tx ds]
-    (if (handled? tx recipient fact-id)
-      :already-handled
-      (do
-        (jdbc/execute-one! tx ["INSERT INTO inbox (recipient, fact_id) VALUES (?,?)"
-                               (name recipient) fact-id])
-        (effect! tx)
-        :handled))))
+    (handle-once-in-transaction! tx recipient fact-id effect!)))
 
 (defn entries
   [ds]

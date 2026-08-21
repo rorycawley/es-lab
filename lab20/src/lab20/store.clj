@@ -1,13 +1,12 @@
 (ns lab20.store
-  "Lab 19's Postgres store, unchanged.
-
-  Nothing here knows about an outbox, an inbox or a ledger. Those are separate
-  tables written in the *same transaction* as an append — which is the whole
-  of this lab, and it needed no change to the store at all."
+  "Lab 19's Postgres adapter with a transaction-local append, so Lab20 can
+  commit events, command ledger and outbox as one unit."
   (:require [clojure.data.json :as json]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
-  (:import (org.postgresql.util PGobject)))
+  (:import (java.time Instant OffsetDateTime)
+           (java.util Date UUID)
+           (org.postgresql.util PGobject PSQLException)))
 
 (def ^:private opts {:builder-fn rs/as-unqualified-kebab-maps})
 
@@ -17,134 +16,195 @@
 (defn- <-jsonb [^PGobject o]
   (when o (json/read-str (.getValue o) :key-fn keyword)))
 
-;; ---------------------------------------------------------------------------
-;; There is no `restore-types`, and there was.
-;;
-;; It walked every decoded value looking for fields whose keywords JSON had
-;; flattened into strings, against a hand-maintained set of field names. Both
-;; are gone, because there are no such fields: what the domain writes into
-;; `:data` is already expressible in JSON.
-;;
-;; Note that `:key-fn keyword` above is a **keys-only** facility, and that
-;; asymmetry is the whole of the bug it used to paper over. Encoding a keyword
-;; to a string is automatic and silent; decoding cannot undo it, because by
-;; then a string is all there is. Keys come back because their names are known
-;; in advance. Values are not, so they cannot.
-;; ---------------------------------------------------------------------------
+(defn- ->date [value]
+  (cond
+    (instance? Date value) value
+    (instance? Instant value) (Date/from value)
+    (instance? OffsetDateTime value) (Date/from (.toInstant ^OffsetDateTime value))
+    :else value))
 
-(defn- ->timestamp
-  "Every lab so far has passed an `#inst`, and every lab so far kept it in a
-  vector. JDBC cannot infer a type for `java.util.Date`, so the conversion
-  happens here — impedance the adapter absorbs so the caller doesn't have to."
-  [^java.util.Date d]
+(def ^:private uuid-metadata-keys #{:causation-id :correlation-id})
+
+(defn- encode-metadata [metadata]
+  (reduce (fn [result k]
+            (cond-> result (uuid? (get result k)) (update k str)))
+          (or metadata {}) uuid-metadata-keys))
+
+(defn- decode-metadata [metadata]
+  (reduce (fn [result k]
+            (let [value (get result k)]
+              (cond-> result (string? value) (assoc k (UUID/fromString value)))))
+          (or metadata {}) uuid-metadata-keys))
+
+(defn- ->timestamp [^Date d]
   (java.sql.Timestamp. (.getTime d)))
 
-(defn- row->event
-  "Translate a row into the event shape the domain has always seen.
-
-  This is the adapter, and it is the only place that knows both vocabularies.
-  `truck.clj` is handed exactly what lab 8 handed it — which is why lab 8's
-  code runs here untouched."
-  [row]
+(defn- row->event [row]
   {:event/id          (:event-id row)
    :event/type        (keyword (:event-type row))
-   :event/occurred-at (:occurred-at row)
+   :event/occurred-at (->date (:occurred-at row))
    :event/position    (:global-position row)
    :stream/id         (:stream-id row)
    :stream/version    (:stream-version row)
    :data              (<-jsonb (:data row))
-   :metadata          (assoc (<-jsonb (:metadata row))
-                             :recorded-at (:recorded-at row))})
+   :metadata          (assoc (decode-metadata (<-jsonb (:metadata row)))
+                             :recorded-at (->date (:recorded-at row)))})
 
-;; ---------------------------------------------------------------------------
-;; Reads
-;; ---------------------------------------------------------------------------
-
-(defn stream
-  "One stream's history, in order (lab 7)."
-  [ds stream-id]
+(defn stream [ds stream-id]
   (mapv row->event
         (jdbc/execute! ds ["SELECT * FROM event WHERE stream_id = ?
-                            ORDER BY stream_version" stream-id]
-                       opts)))
+                            ORDER BY stream_version" stream-id] opts)))
 
-(defn current-version
-  [ds stream-id]
-  (or (:v (jdbc/execute-one! ds ["SELECT max(stream_version) AS v FROM event
-                                  WHERE stream_id = ?" stream-id] opts))
+(defn current-version [ds stream-id]
+  (or (:stream-version
+       (jdbc/execute-one! ds ["SELECT stream_version FROM stream_head
+                               WHERE stream_id = ?" stream-id] opts))
       0))
 
 (defn since
-  "Everything after `position`, the obvious way — and the wrong way.
-
-  A `BIGSERIAL` is assigned at INSERT and becomes visible at COMMIT, so a row
-  with a lower position can appear *after* one with a higher position. A
-  reader that checkpoints on what it can see will step over the gap and never
-  come back. `since-committed` is the fix."
+  "The tempting global-position query; it can skip a lower value allocated by
+  a transaction that commits after a higher one."
   [ds position]
   (mapv row->event
         (jdbc/execute! ds ["SELECT * FROM event WHERE global_position > ?
-                            ORDER BY global_position" position]
-                       opts)))
+                            ORDER BY global_position" position] opts)))
 
 (defn since-committed
-  "Everything after `position` that is definitely settled.
-
-  `pg_snapshot_xmin(pg_current_snapshot())` is the oldest transaction still in
-  flight. Rows written by anything at or above it may yet be joined by a
-  lower-positioned sibling, so they are held back until that cannot happen.
-
-  The cost is latency: an event is invisible to readers until every
-  transaction that started before it has finished. The benefit is that a
-  checkpoint can never step over a gap."
+  "Hold back positions at or above the oldest active transaction, preventing
+  a durable checkpoint from stepping over an in-flight gap."
   [ds position]
   (mapv row->event
         (jdbc/execute! ds ["SELECT * FROM event
                             WHERE global_position > ?
                               AND xid < pg_snapshot_xmin(pg_current_snapshot())
-                            ORDER BY global_position" position]
-                       opts)))
+                            ORDER BY global_position" position] opts)))
 
-;; ---------------------------------------------------------------------------
-;; Writes
-;; ---------------------------------------------------------------------------
+(defn- contains-keyword-value? [value]
+  (cond
+    (keyword? value) true
+    (map? value) (boolean (some contains-keyword-value? (vals value)))
+    (coll? value) (boolean (some contains-keyword-value? value))
+    :else false))
 
-(def ^:private unique-violation "23505")
+(defn- validate-events! [events]
+  (when-not (= (count events) (count (distinct (map :event/id events))))
+    (throw (ex-info "Duplicate event ids inside append batch"
+                    {:reason :duplicate-event-id})))
+  (doseq [event events]
+    (when-not (uuid? (:event/id event))
+      (throw (ex-info "Invalid event id" {:event/id (:event/id event)})))
+    (when-not (keyword? (:event/type event))
+      (throw (ex-info "Invalid event type" {:event/type (:event/type event)})))
+    (when-not (inst? (:event/occurred-at event))
+      (throw (ex-info "Invalid occurred-at instant"
+                      {:event/occurred-at (:event/occurred-at event)})))
+    (when-not (map? (:data event))
+      (throw (ex-info "Event data must be a map" {:data (:data event)})))
+    (when (contains-keyword-value? (:data event))
+      (throw (ex-info "Keyword values are not valid stored data"
+                      {:reason :lossy-json-value :data (:data event)})))
+    (when-not (or (nil? (:metadata event)) (map? (:metadata event)))
+      (throw (ex-info "Event metadata must be a map"
+                      {:metadata (:metadata event)})))
+    (when (contains-keyword-value? (:metadata event))
+      (throw (ex-info "Keyword values are not valid stored metadata"
+                      {:reason :lossy-json-value :metadata (:metadata event)})))))
 
-(defn- conflict? [^java.sql.SQLException e]
-  (= unique-violation (.getSQLState e)))
+(defn- claim-stream! [tx stream-id expected-version event-count]
+  (jdbc/execute-one!
+   tx
+   ["WITH updated AS (
+       UPDATE stream_head SET stream_version = stream_version + ?
+        WHERE stream_id = ? AND stream_version = ? RETURNING stream_version
+     ), inserted AS (
+       INSERT INTO stream_head (stream_id, stream_version)
+       SELECT ?, ? WHERE ? = 0 ON CONFLICT DO NOTHING RETURNING stream_version
+     )
+     SELECT stream_version FROM updated UNION ALL SELECT stream_version FROM inserted"
+    event-count stream-id expected-version stream-id event-count expected-version]
+   opts))
 
-(defn append
-  "Append `events` to `stream-id`, on the condition it is still at
-  `expected-version`.
+(defn- concurrent-modification [stream-id expected-version actual-version]
+  (ex-info "Concurrent modification of stream"
+           {:reason :concurrent-modification
+            :stream/id stream-id
+            :expected-version expected-version
+            :actual-version actual-version}))
 
-  The condition is not checked here. It is expressed as `UNIQUE (stream_id,
-  stream_version)` and enforced by the database — so it holds under real
-  concurrency, not merely under the deterministic simulation lab 16 had to
-  settle for."
-  [ds stream-id expected-version gen-id now command events]
-  (jdbc/with-transaction [tx ds]
-    (try
+(defn append-in-transaction!
+  "Append identified events inside the caller's transaction. Persistence adds
+  only stream coordinates and recorded time; it never mints fact identity."
+  [tx stream-id expected-version events]
+  (validate-events! events)
+  (if (empty? events)
+    []
+    (do
+      (when-not (claim-stream! tx stream-id expected-version (count events))
+        (throw (concurrent-modification
+                stream-id expected-version (current-version tx stream-id))))
       (mapv (fn [i event]
               (row->event
                (jdbc/execute-one!
                 tx
-                ["INSERT INTO event (event_id, event_type, stream_id, stream_version,
-                                     occurred_at, data, metadata)
+                ["INSERT INTO event (event_id, event_type, stream_id,
+                                     stream_version, occurred_at, data, metadata)
                   VALUES (?,?,?,?,?,?,?) RETURNING *"
-                 (gen-id)
-                 (name (:event/type event))
-                 stream-id
-                 (+ expected-version 1 i)
-                 (->timestamp now)
+                 (:event/id event) (name (:event/type event)) stream-id
+                 (+ expected-version 1 i) (->timestamp (:event/occurred-at event))
                  (->jsonb (:data event))
-                 (->jsonb {:causation-id   (str (:command/id command))
-                           :correlation-id (str (:correlation-id command))})]
-                opts)))
-            (range)
-            events)
-      (catch java.sql.SQLException e
-        (if (conflict? e)
-          (throw (ex-info "Concurrent modification of stream"
-                          {:stream/id stream-id :expected-version expected-version}))
-          (throw e))))))
+                 (->jsonb (encode-metadata (:metadata event)))] opts)))
+            (range) events))))
+
+(def ^:private unique-violation "23505")
+
+(defn- constraint-name [^java.sql.SQLException e]
+  (when (instance? PSQLException e)
+    (some-> ^PSQLException e .getServerErrorMessage .getConstraint)))
+
+(defn- find-event [connectable event-id]
+  (some-> (jdbc/execute-one! connectable
+                             ["SELECT * FROM event WHERE event_id = ?" event-id] opts)
+          row->event))
+
+(defn- matching-retry [connectable stream-id expected-version events]
+  (when (seq events)
+    (let [recorded (mapv #(find-event connectable (:event/id %)) events)
+          intended (fn [i event]
+                     {:event/id (:event/id event)
+                      :event/type (:event/type event)
+                      :event/occurred-at (:event/occurred-at event)
+                      :stream/id stream-id
+                      :stream/version (+ expected-version 1 i)
+                      :data (:data event)
+                      :metadata (or (:metadata event) {})})
+          actual (fn [event]
+                   (-> event
+                       (select-keys [:event/id :event/type :event/occurred-at
+                                     :stream/id :stream/version :data :metadata])
+                       (update :metadata dissoc :recorded-at)))]
+      (when (and (every? some? recorded)
+                 (every? true? (map-indexed #(= (intended %1 %2)
+                                                (actual (nth recorded %1)))
+                                            events)))
+        recorded))))
+
+(defn append
+  "Standalone adapter operation. Exact identified retries return their
+  recorded rows; stale and future expected versions are rejected."
+  [ds stream-id expected-version events]
+  (validate-events! events)
+  (if (empty? events)
+    []
+    (or (matching-retry ds stream-id expected-version events)
+        (try
+          (jdbc/with-transaction [tx ds]
+            (append-in-transaction! tx stream-id expected-version events))
+          (catch java.sql.SQLException e
+            (if (= unique-violation (.getSQLState e))
+              (or (matching-retry ds stream-id expected-version events)
+                  (if (= "event_id_unique" (constraint-name e))
+                    (throw (ex-info "Event id already identifies another fact"
+                                    {:reason :duplicate-event-id}))
+                    (throw (concurrent-modification
+                            stream-id expected-version (current-version ds stream-id)))))
+              (throw e)))))))

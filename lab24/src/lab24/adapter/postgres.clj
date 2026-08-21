@@ -1,125 +1,223 @@
 (ns lab24.adapter.postgres
-  "The Postgres adapter — lab 19's store behind the same protocol.
-
-  All the impedance lives here: JSONB losing keywords (lab 19), JSON losing
-  namespaces (lab 20), `java.util.Date` needing a conversion JDBC can infer.
-  None of it reaches the application layer, and none of it reaches the core.
-
-  That containment is the whole return on drawing the port."
+  "PostgreSQL adapter for the atomic command-outcome port. Malli decoding is
+  confined here, where JSON crosses back into application values."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [com.stuartsierra.component :as component]
             [lab24.port.driven :as driven]
             [lab24.schema.event :as event-schema]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
-  (:import (org.postgresql.util PGobject)))
+  (:import (java.time Instant OffsetDateTime)
+           (java.util Date)
+           (org.postgresql.util PGobject PSQLException)))
 
 (def ^:private opts {:builder-fn rs/as-unqualified-kebab-maps})
+(defn- ->jsonb [x] (doto (PGobject.) (.setType "jsonb") (.setValue (json/write-str x))))
+(defn- <-jsonb [^PGobject x] (when x (json/read-str (.getValue x) :key-fn keyword)))
+(defn- canonical [x] (json/read-str (json/write-str x) :key-fn keyword))
+(defn- ->timestamp [^Date d] (java.sql.Timestamp. (.getTime d)))
+(defn- ->date [x]
+  (cond (instance? Date x) x
+        (instance? Instant x) (Date/from x)
+        (instance? OffsetDateTime x) (Date/from (.toInstant ^OffsetDateTime x))
+        :else x))
 
-(defn- ->jsonb [x]
-  (doto (PGobject.) (.setType "jsonb") (.setValue (json/write-str x))))
+(defn- keyword-value? [x]
+  (cond (keyword? x) true
+        (map? x) (boolean (some keyword-value? (vals x)))
+        (coll? x) (boolean (some keyword-value? x))
+        :else false))
 
-(defn- <-jsonb [^PGobject o]
-  (when o (json/read-str (.getValue o) :key-fn keyword)))
+(defn- actor? [actor]
+  (and (map? actor)
+       (= #{:type :id} (set (keys actor)))
+       (#{"user" "system"} (:type actor))
+       (string? (:id actor))
+       (not-empty (:id actor))))
 
-(defn- ->timestamp [^java.util.Date d] (java.sql.Timestamp. (.getTime d)))
+(defn- encode-uuid-values [m]
+  (reduce-kv (fn [result k v] (assoc result k (if (uuid? v) (str v) v))) {} (or m {})))
 
 (defn- row->event [row]
-  {:event/id          (:event-id row)
-   :event/type        (keyword (:event-type row))
-   :event/occurred-at (:occurred-at row)
-   :event/position    (:global-position row)
-   :stream/id         (:stream-id row)
-   :stream/version    (:stream-version row)
-   ;; Lab 19 restored types from a hand-maintained set of field names.
-   ;; This is derived from the event's schema instead (lab 22).
-   :data              (event-schema/decode-data (keyword (:event-type row))
-                                                (<-jsonb (:data row)))
-   ;; No coercion, because nothing in here is keyword-shaped. The event *type*
-   ;; is the exception, and it is handled the way a discriminator should be:
-   ;; stored in its own TEXT column and turned back into a keyword on the line
-   ;; above, at the one place the code branches on it.
-   :metadata          (assoc (<-jsonb (:metadata row))
-                             :recorded-at (:recorded-at row))})
+  (let [event-type (keyword (:event-type row))]
+    {:event/id (:event-id row)
+     :event/type event-type
+     :event/occurred-at (->date (:occurred-at row))
+     :event/position (:global-position row)
+     :stream/id (:stream-id row)
+     :stream/version (:stream-version row)
+     :data (event-schema/decode-data event-type (<-jsonb (:data row)))
+     :metadata (assoc (event-schema/decode-metadata (<-jsonb (:metadata row)))
+                      :recorded-at (->date (:recorded-at row)))}))
+
+(defn- row->message [row]
+  {:message-id (:message-id row)
+   :message-type (keyword (:message-type row))
+   :recipient (keyword (:recipient row))
+   :causation-id (:causation-id row)
+   :correlation-id (:correlation-id row)
+   :payload (<-jsonb (:payload row))})
+
+(defn- validate! [command events messages]
+  (when-not (and (uuid? (:command/id command)) (uuid? (:correlation-id command))
+                 (actor? (:command/actor command))
+                 (map? (:data command)) (not (keyword-value? (:data command))))
+    (throw (ex-info "Invalid command" {:command command})))
+  (when-not (= (count events) (count (distinct (map :event/id events))))
+    (throw (ex-info "Duplicate event ids" {:reason :duplicate-event-id})))
+  (when-not (= (count messages) (count (distinct (map :message-id messages))))
+    (throw (ex-info "Duplicate message ids" {:reason :duplicate-message-id})))
+  (doseq [event events]
+    (when-not (and (uuid? (:event/id event)) (keyword? (:event/type event))
+                   (inst? (:event/occurred-at event)) (map? (:data event))
+                   (map? (:metadata event))
+                   (= (:command/id command) (get-in event [:metadata :causation-id]))
+                   (= (:correlation-id command) (get-in event [:metadata :correlation-id]))
+                   (= (:command/actor command) (get-in event [:metadata :actor]))
+                   (event-schema/valid-data? (:event/type event) (:data event))
+                   (not (keyword-value? (:data event)))
+                   (not (keyword-value? (:metadata event))))
+      (throw (ex-info "Invalid event proposal" {:event event}))))
+  (doseq [message messages]
+    (when-not (and (uuid? (:message-id message)) (uuid? (:causation-id message))
+                   (uuid? (:correlation-id message)) (keyword? (:message-type message))
+                   (keyword? (:recipient message)) (map? (:payload message))
+                   (not (keyword-value? (:payload message))))
+      (throw (ex-info "Invalid message proposal" {:message message})))))
+
+(defn- current-version [db stream-id]
+  (or (:stream-version (jdbc/execute-one!
+                        db ["SELECT stream_version FROM stream_head WHERE stream_id = ?"
+                            stream-id] opts)) 0))
+
+(defn- ledger-entry [db command-id]
+  (some-> (jdbc/execute-one! db ["SELECT * FROM command_ledger WHERE command_id = ?"
+                                 command-id] opts)
+          (update :command-data <-jsonb)
+          (update :command-actor <-jsonb)))
+
+(defn- assert-same! [entry stream-id command]
+  (when-not (= {:stream-id stream-id :command-type (name (:command/type command))
+                :actor (canonical (:command/actor command))
+                :data (canonical (:data command))}
+               {:stream-id (:stream-id entry) :command-type (:command-type entry)
+                :actor (:command-actor entry)
+                :data (:command-data entry)})
+    (throw (ex-info "Command id already identifies another request"
+                    {:reason :command-id-collision})))
+  entry)
+
+(defn- caused-events [db stream-id command-id]
+  (mapv row->event
+        (jdbc/execute! db ["SELECT * FROM event
+                            WHERE stream_id = ? AND metadata->>'causation-id' = ?
+                            ORDER BY stream_version" stream-id (str command-id)] opts)))
+
+(defn- prior-result [db stream-id command]
+  (when-let [entry (ledger-entry db (:command/id command))]
+    (assert-same! entry stream-id command)
+    (let [events (caused-events db stream-id (:command/id command))]
+      (when-not (= (:event-count entry) (count events))
+        (throw (ex-info "Command ledger does not match its events"
+                        {:reason :corrupt-command-ledger})))
+      events)))
+
+(defn- claim! [tx stream-id expected n]
+  (jdbc/execute-one!
+   tx ["WITH updated AS (
+          UPDATE stream_head SET stream_version = stream_version + ?
+           WHERE stream_id = ? AND stream_version = ? RETURNING stream_version
+        ), inserted AS (
+          INSERT INTO stream_head (stream_id, stream_version)
+          SELECT ?, ? WHERE ? = 0 ON CONFLICT DO NOTHING RETURNING stream_version)
+        SELECT stream_version FROM updated UNION ALL SELECT stream_version FROM inserted"
+       n stream-id expected stream-id n expected] opts))
+
+(defn- insert-outcome! [tx stream-id expected command events messages]
+  (when-not (claim! tx stream-id expected (count events))
+    (throw (ex-info "Concurrent modification of stream"
+                    {:reason :concurrent-modification :stream/id stream-id
+                     :expected-version expected :actual-version (current-version tx stream-id)})))
+  (let [recorded (mapv
+                  (fn [i event]
+                    (row->event
+                     (jdbc/execute-one!
+                      tx ["INSERT INTO event
+                            (event_id,event_type,stream_id,stream_version,occurred_at,data,metadata)
+                           VALUES (?,?,?,?,?,?,?) RETURNING *"
+                          (:event/id event) (name (:event/type event)) stream-id
+                          (+ expected 1 i) (->timestamp (:event/occurred-at event))
+                          (->jsonb (:data event))
+                          (->jsonb (encode-uuid-values (:metadata event)))] opts)))
+                  (range) events)]
+    (doseq [message messages]
+      (jdbc/execute-one!
+       tx ["INSERT INTO outbox
+             (message_id,message_type,recipient,causation_id,correlation_id,payload)
+            VALUES (?,?,?,?,?,?)"
+           (:message-id message) (name (:message-type message)) (name (:recipient message))
+           (:causation-id message) (:correlation-id message) (->jsonb (:payload message))] opts))
+    (jdbc/execute-one!
+     tx ["INSERT INTO command_ledger
+           (command_id,stream_id,command_type,correlation_id,command_actor,command_data,event_count)
+          VALUES (?,?,?,?,?,?,?)"
+         (:command/id command) stream-id (name (:command/type command))
+         (:correlation-id command) (->jsonb (:command/actor command))
+         (->jsonb (:data command)) (count recorded)] opts)
+    recorded))
+
+(defn- constraint [failure]
+  (when (instance? PSQLException failure)
+    (some-> ^PSQLException failure .getServerErrorMessage .getConstraint)))
 
 (defrecord PostgresStore [datasource]
   driven/EventStore
+  (command-result [_ stream-id command]
+    (validate! command [] [])
+    (prior-result datasource stream-id command))
   (read-stream [_ stream-id]
-    (mapv row->event
-          (jdbc/execute! datasource
-                         ["SELECT * FROM event WHERE stream_id = ? ORDER BY stream_version"
-                          stream-id] opts)))
-
-  (stream-version [_ stream-id]
-    (or (:v (jdbc/execute-one! datasource
-                               ["SELECT max(stream_version) AS v FROM event WHERE stream_id = ?"
-                                stream-id] opts))
-        0))
-
+    (mapv row->event (jdbc/execute! datasource
+                                    ["SELECT * FROM event WHERE stream_id = ?
+                                      ORDER BY stream_version" stream-id] opts)))
+  (stream-version [_ stream-id] (current-version datasource stream-id))
   (read-since [_ position]
-    (mapv row->event
-          (jdbc/execute! datasource
-                         ["SELECT * FROM event WHERE global_position > ?
-                             AND xid < pg_snapshot_xmin(pg_current_snapshot())
-                           ORDER BY global_position" position] opts)))
-
-  (append [_ stream-id expected-version command events]
-    (jdbc/with-transaction [tx datasource]
-      (try
-        (mapv (fn [i event]
-                (row->event
-                 (jdbc/execute-one!
-                  tx ["INSERT INTO event (event_id, event_type, stream_id, stream_version,
-                                          occurred_at, data, metadata)
-                       VALUES (?,?,?,?,?,?,?) RETURNING *"
-                      (:event/id event) (name (:event/type event))
-                      stream-id (+ expected-version 1 i)
-                      (->timestamp (:event/occurred-at event))
-                      (->jsonb (:data event))
-                      (->jsonb {:causation-id (str (:command/id command))
-                                ;; An opaque actor id, never a credential.
-                                :actor        (:command/actor command)})]
-                  opts)))
-              (range) events)
-        (catch java.sql.SQLException e
-          (if (= "23505" (.getSQLState e))
-            (throw (ex-info "Concurrent modification of stream"
-                            {:reason :concurrent-modification
-                             :stream/id stream-id :expected-version expected-version}))
-            (throw e)))))))
-
-(defrecord PostgresOutbox [datasource]
+    (mapv row->event (jdbc/execute! datasource
+                                    ["SELECT * FROM event WHERE global_position > ?
+                                        AND xid < pg_snapshot_xmin(pg_current_snapshot())
+                                      ORDER BY global_position" position] opts)))
+  (commit-command [_ stream-id expected command events messages]
+    (validate! command events messages)
+    (or (prior-result datasource stream-id command)
+        (try
+          (jdbc/with-transaction [tx datasource]
+            (or (prior-result tx stream-id command)
+                (insert-outcome! tx stream-id expected command events messages)))
+          (catch Exception failure
+            (or (prior-result datasource stream-id command)
+                (case (constraint failure)
+                  "event_id_unique" (throw (ex-info "Duplicate event id"
+                                                    {:reason :duplicate-event-id}))
+                  "outbox_message_id_unique" (throw (ex-info "Duplicate message id"
+                                                             {:reason :duplicate-message-id}))
+                  (throw failure)))))))
   driven/Outbox
-  (enqueue [_ messages]
-    (mapv (fn [m]
-            (jdbc/execute-one!
-             datasource
-             ["INSERT INTO outbox (message_id, message_type, recipient, payload)
-               VALUES (?,?,?,?) RETURNING *"
-              (:message-id m) (name (:message-type m)) (name (:recipient m))
-              (->jsonb (:payload m))] opts))
-          messages))
   (pending [_]
-    (mapv #(update % :payload <-jsonb)
-          (jdbc/execute! datasource ["SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY id"]
-                         opts))))
-
-;; ---------------------------------------------------------------------------
-;; The database itself is a component: it has a lifecycle, and the store and
-;; outbox depend on it. That dependency is declared in `system.clj` rather than
-;; reached for here.
-;; ---------------------------------------------------------------------------
+    (mapv row->message (jdbc/execute! datasource
+                                      ["SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY id"]
+                                      opts))))
 
 (defrecord Database [config datasource]
   component/Lifecycle
   (start [this]
     (let [ds (jdbc/get-datasource config)]
-      (doseq [statement (re-seq #"(?s)CREATE[^;]+;" (slurp (io/resource "schema.sql")))]
+      (doseq [statement (->> (slurp (io/resource "schema.sql"))
+                             (#(str/replace % #"(?m)--.*$" ""))
+                             (re-seq #"(?s)CREATE[^;]+;"))]
         (jdbc/execute! ds [statement]))
       (assoc this :datasource ds)))
   (stop [this] (assoc this :datasource nil)))
 
 (defn database [config] (map->Database {:config config}))
 (defn store [] (map->PostgresStore {}))
-(defn outbox [] (map->PostgresOutbox {}))

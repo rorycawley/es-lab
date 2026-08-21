@@ -13,8 +13,8 @@
   swapping one a one-line change rather than an audit.
 
   **Nothing in `core` requires this namespace, or `component`, or a port.**
-  The dependency arrows all point inward: shell → ports → core, and never
-  back. A test asserts it rather than trusting it."
+  The core depends on nothing in this application. The application depends on
+  the core and output ports; this outer root wires concrete choices."
   (:require [com.stuartsierra.component :as component]
             [lab24.adapter.clock :as clock]
             [lab24.adapter.http :as http]
@@ -67,11 +67,11 @@
   possible because the application layer cannot tell the difference."
   ([] (in-memory {}))
   ([{:keys [clock ids oidc]}]
-   (let [{:keys [verification-keys issuer audience]} (authentication oidc)]
+   (let [{:keys [verification-keys issuer audience]} (authentication oidc)
+         selected-clock (or clock (clock/system-clock))]
      (component/system-map
-      :store             (memory/store)
-      :outbox            (memory/outbox)
-      :clock             (or clock (clock/system-clock))
+      :store             (component/using (memory/store) {:clock :clock})
+      :clock             selected-clock
       :ids               (or ids (clock/random-ids))
       ;; `DiscoveredKeys` has a lifecycle (it caches), so Component starts and
       ;; stops it like any other adapter. Nothing about it is special.
@@ -82,24 +82,25 @@
 (defn with-postgres
   "The same system, one line different.
 
-  `store` and `outbox` become Postgres records that need a `datasource`, and
-  Component supplies it — which is the entire difference between this function
-  and the one above."
+  One Postgres adapter owns facts, the command ledger and outgoing messages so
+  the complete command outcome retains one transaction boundary."
   ([config] (with-postgres config {}))
   ([config {:keys [clock ids oidc]}]
    (let [{:keys [verification-keys issuer audience]} (authentication oidc)]
      (component/system-map
       :database          (postgres/database config)
       :store             (component/using (postgres/store) {:datasource :database})
-      :outbox            (component/using (postgres/outbox) {:datasource :database})
       :clock             (or clock (clock/system-clock))
       :ids               (or ids (clock/random-ids))
       :verification-keys verification-keys
       :issuer            issuer
       :audience          audience))))
 
-(def ^:private app-keys
-  [:store :outbox :clock :ids :verification-keys :issuer :audience])
+(def ^:private dependency-keys
+  [:store :clock :ids :verification-keys :issuer :audience])
+
+(defn- runtime-deps [source]
+  (assoc (select-keys source dependency-keys) :outbox (:store source)))
 
 (defrecord HttpServer [port server]
   component/Lifecycle
@@ -108,7 +109,7 @@
     ;; allowed to name a concrete adapter, and a web server is an adapter like
     ;; any other. It has a lifecycle, so Component owns it.
     (let [run  (requiring-resolve 'ring.adapter.jetty/run-jetty)
-          deps (select-keys this app-keys)]
+          deps (runtime-deps this)]
       (assoc this :server (run (http/handler deps) {:port port :join? false}))))
   (stop [this]
     (when server (.stop server))
@@ -121,7 +122,7 @@
   It does not construct them, and it does not reach for them — Component
   supplies them, exactly as it supplies a datasource to a store."
   [base port]
-  (assoc base :http (component/using (map->HttpServer {:port port}) app-keys)))
+  (assoc base :http (component/using (map->HttpServer {:port port}) dependency-keys)))
 
 (defn app
   "The application layer's dependencies, taken from a started system.
@@ -132,7 +133,7 @@
   travel through it to the HTTP adapter, which is the only thing that
   authenticates."
   [system]
-  (select-keys system app-keys))
+  (runtime-deps system))
 
 (defn start [system] (component/start system))
 (defn stop [system] (component/stop system))

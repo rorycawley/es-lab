@@ -1,43 +1,51 @@
 (ns lab20.ledger
-  "The command ledger — and the hole in lab 10 it exists to close.
+  "Command idempotency independent of event production.
 
-  Lab 10 deduplicated a command by asking whether any event carried its
-  causation id:
-
-      (if (store/caused-by? log (:command/id command)) …)
-
-  That works while every command produces at least one event. [Lab 5]
-  established that producing *none* is a legitimate outcome, and for such a
-  command `caused-by?` answers false forever — so it runs again on every pass,
-  and again, and again.
-
-  The archive's ADR-0004 states the rule directly: causation and correlation
-  are traceability metadata, not idempotency keys. Idempotency belongs in a
-  ledger keyed by command id, whose row is written whether the command
-  produced three events, one, or none."
-  (:require [next.jdbc :as jdbc]
-            [next.jdbc.result-set :as rs]))
+  The ledger stores enough request identity to distinguish an exact retry from
+  accidental reuse of a command id. Causation remains traceability metadata."
+  (:require [clojure.data.json :as json]
+            [next.jdbc :as jdbc]
+            [next.jdbc.result-set :as rs])
+  (:import (org.postgresql.util PGobject)))
 
 (def ^:private opts {:builder-fn rs/as-unqualified-kebab-maps})
 
-(defn recorded?
-  [ds command-id]
-  (some? (jdbc/execute-one! ds ["SELECT 1 FROM command_ledger WHERE command_id = ?"
-                                command-id]
-                            opts)))
+(defn- ->jsonb [x]
+  (doto (PGobject.) (.setType "jsonb") (.setValue (json/write-str x))))
+
+(defn- <-jsonb [^PGobject o]
+  (when o (json/read-str (.getValue o) :key-fn keyword)))
+
+(defn entry [ds command-id]
+  (some-> (jdbc/execute-one!
+           ds ["SELECT * FROM command_ledger WHERE command_id = ?" command-id]
+           opts)
+          (update :command-data <-jsonb)))
+
+(defn assert-same-command!
+  "Return the entry for the same business request; reject command-id reuse
+  with a different target, type or data. Correlation remains trace metadata."
+  [entry stream-id command]
+  (let [recorded {:stream-id (:stream-id entry)
+                  :command-type (:command-type entry)
+                  :data (:command-data entry)}
+        attempted {:stream-id stream-id
+                   :command-type (name (:command/type command))
+                   :data (:data command)}]
+    (when-not (= recorded attempted)
+      (throw (ex-info "Command id already identifies another request"
+                      {:reason :command-id-collision
+                       :command/id (:command/id command)})))
+    entry))
 
 (defn record!
-  "Note that a command ran, and how many events it produced.
-
-  Called inside the command's own transaction, so the ledger row and the
-  events land together."
-  [tx command event-count]
+  "Record a handled request in the same transaction as its events and outbox."
+  [tx stream-id command event-count]
   (jdbc/execute-one!
-   tx ["INSERT INTO command_ledger (command_id, command_type, event_count) VALUES (?,?,?)"
-       (:command/id command) (name (:command/type command)) event-count]
+   tx
+   ["INSERT INTO command_ledger
+       (command_id, stream_id, command_type, correlation_id, command_data, event_count)
+     VALUES (?,?,?,?,?,?)"
+    (:command/id command) stream-id (name (:command/type command))
+    (:correlation-id command) (->jsonb (:data command)) event-count]
    opts))
-
-(defn entry
-  [ds command-id]
-  (jdbc/execute-one! ds ["SELECT * FROM command_ledger WHERE command_id = ?" command-id]
-                     opts))

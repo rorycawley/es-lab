@@ -56,7 +56,8 @@
   (testing "if :flavour-sold-gross had been shipped as :flavour-sold v4 instead"
     (let [mislabelled (-> corpus/flavour-sold-gross
                           (assoc :event/type :flavour-sold)
-                          (assoc-in [:metadata :schema-version] upcast/current-version))
+                          (assoc-in [:metadata :schema-version]
+                                    (upcast/current-version-of :flavour-sold)))
           wrong       (truck/replay [mislabelled])
           right       (truck/replay [corpus/flavour-sold-gross])]
       (is (= 3.00M (:net wrong)) "the gross figure added straight to a net total")
@@ -70,6 +71,11 @@
                                     (upcast/current-version-of :flavour-sold)))]
       (is (pos? (:net (truck/replay [mislabelled]))))
       (is (zero? (:incomplete (truck/replay [mislabelled])))))))
+
+(deftest the-domain-rejects-event-semantics-it-does-not-know-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                        (truck/evolve truck/initial-state
+                                      {:event/type :freezer-failed}))))
 
 (deftest both-kinds-of-sale-count-toward-the-same-tally-test
   (testing "the split is in how they are read, not in what they are about"

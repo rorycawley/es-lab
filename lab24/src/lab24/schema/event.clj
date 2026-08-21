@@ -1,10 +1,11 @@
 (ns lab24.schema.event
   "Event schemas — **open**, because a stream outlives its readers.
 
-  [Lab 13](../lab13) argued that a fold must tolerate event types it has never
-  heard of, and that a deserialiser must handle every schema ever written.
-  Here that argument becomes a setting: these maps are *not* `:closed`, so an
-  event carrying a field added after this code was deployed still reads.
+  [Lab 13](../lab13) argued for tolerant representation changes within a known
+  event type and version. Here that argument becomes a setting: these maps are
+  *not* `:closed`, so a known event carrying a compatible field added after
+  this code was deployed still reads. Unknown event semantics remain an error
+  in the fold, policy and contract.
 
   Close these and you have re-created the failure lab 13 spends its length
   warning about — a reader that crashes on its own history.
@@ -26,10 +27,7 @@
 (def TruckLoaded
   [:map
    [:flavour Flavour]
-   [:quantity :int]
-   ;; A policy stamps this (lab 10), and JSON has nowhere to put a UUID. The
-   ;; one field in this lab that genuinely needs decoding on the way back.
-   [:truck-id {:optional true} :uuid]])
+   [:quantity :int]])
 
 (def StockDepleted
   [:map
@@ -40,10 +38,21 @@
    [:driver-id :string]])
 
 (def by-type
-  {:flavour-sold    FlavourSold
-   :truck-loaded    TruckLoaded
-   :stock-depleted  StockDepleted
+  {:flavour-sold   FlavourSold
+   :truck-loaded   TruckLoaded
+   :stock-depleted StockDepleted
    :driver-assigned DriverAssigned})
+
+(def Actor
+  [:map {:closed true}
+   [:type [:enum "user" "system"]]
+   [:id :string]])
+
+(def Metadata
+  [:map
+   [:causation-id {:optional true} :uuid]
+   [:correlation-id {:optional true} :uuid]
+   [:actor {:optional true} Actor]])
 
 ;; ---------------------------------------------------------------------------
 ;; Decoding: what lab 19 did by hand
@@ -70,9 +79,9 @@
 ;; have.
 ;;
 ;; What is left is the loss JSON hands you whether you like it or not. It has
-;; no UUID type, so `:truck-id` — put in the data by a policy (lab 10) — goes
-;; in as a UUID and comes back as a string. No decision at design time avoids
-;; that. JSON cannot hold one.
+;; no UUID type, so the causation and correlation ids in the event envelope go
+;; in as UUIDs and come back as strings. No design decision can make JSON hold
+;; a UUID; the adapter restores those declared envelope fields.
 ;;
 ;; Which is the distinction worth keeping. A schema-driven decoder is the
 ;; right tool for an **inherent** loss and the wrong one for a
@@ -84,16 +93,24 @@
 (defn decode-data
   "Coerce one event's `:data` out of its wire representation.
 
-  Unknown event types pass through untouched, for the same reason the schemas
-  are open: this code will meet events it was not written for."
+  This generic storage adapter passes an unregistered type through because it
+  has no semantic authority to decode it. A downstream fold, policy, contract
+  or projection must still understand or explicitly ignore that event before
+  advancing a checkpoint."
   [event-type data]
   (if-let [schema (get by-type event-type)]
     (m/decode schema data json->domain)
     data))
 
+(defn decode-metadata
+  "Restore the UUID fields declared in the event metadata envelope."
+  [metadata]
+  (m/decode Metadata metadata json->domain))
+
 (defn valid-data?
   [event-type data]
   (if-let [schema (get by-type event-type)]
     (m/validate schema data)
-    ;; Nothing to check against is not the same as invalid — see above.
+    ;; No registered schema means this generic adapter cannot validate the
+    ;; payload. It does not mean a semantic consumer understands the event.
     true))

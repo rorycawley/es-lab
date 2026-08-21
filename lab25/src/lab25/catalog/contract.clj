@@ -3,28 +3,38 @@
 
   Ordering may depend on this namespace. It may not depend on Catalog's
   handlers, SQL, tables or internal state. The map is an integration message,
-  so the fact being carried belongs under `:payload` (lab 3)."
+  so its stable fact id and data belong under `:payload`; delivery identity
+  and trace metadata remain separate (labs 3 and 4)."
   (:require [malli.core :as m]))
 
 (def price-changed-type :catalog/price-changed)
 
 (def PriceChanged
-  [:map
+  [:map {:closed true}
    [:message/id :uuid]
    [:message/type [:= price-changed-type]]
+   [:metadata
+    [:map {:closed true}
+     [:causation-id :uuid]
+     [:correlation-id :uuid]]]
    [:payload
-    [:map
+    [:map {:closed true}
+     [:fact-id :uuid]
      [:product-id :uuid]
-     [:product-name :string]
-     [:price-cents pos-int?]]]])
+     [:product-name [:string {:min 1 :max 80}]]
+     [:price-cents [:int {:min 1 :max 100000}]]]]])
 
 (defn price-changed
-  [message-id product-id product-name price-cents]
+  [message-id fact-id causation-id correlation-id
+   product-id product-name price-cents]
   {:message/id   message-id
    :message/type price-changed-type
-   :payload      {:product-id    product-id
-                  :product-name  product-name
-                  :price-cents   price-cents}})
+   :metadata     {:causation-id causation-id
+                  :correlation-id correlation-id}
+   :payload      {:fact-id     fact-id
+                  :product-id   product-id
+                  :product-name product-name
+                  :price-cents  price-cents}})
 
 (defn price-changed? [message]
   (m/validate PriceChanged message))

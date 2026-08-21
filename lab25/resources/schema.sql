@@ -21,14 +21,31 @@ CREATE TABLE catalog.product (
 );
 
 CREATE TABLE catalog.outbox (
-  created_order BIGSERIAL PRIMARY KEY,
-  message_id    UUID      NOT NULL UNIQUE,
-  message_type  TEXT      NOT NULL,
-  product_id    UUID      NOT NULL,
-  product_name  TEXT      NOT NULL,
-  price_cents   INTEGER   NOT NULL CHECK (price_cents > 0),
-  published     BOOLEAN   NOT NULL DEFAULT FALSE
+  created_order  BIGSERIAL PRIMARY KEY,
+  message_id     UUID      NOT NULL UNIQUE,
+  message_type   TEXT      NOT NULL,
+  fact_id        UUID      NOT NULL,
+  causation_id   UUID      NOT NULL,
+  correlation_id UUID      NOT NULL,
+  product_id     UUID      NOT NULL,
+  product_name   TEXT      NOT NULL,
+  price_cents    INTEGER   NOT NULL CHECK (price_cents > 0),
+  published      BOOLEAN   NOT NULL DEFAULT FALSE
 );
+
+CREATE TABLE catalog.command_ledger (
+  command_id     UUID        PRIMARY KEY,
+  correlation_id UUID        NOT NULL,
+  product_id     UUID        NOT NULL,
+  product_name   TEXT        NOT NULL,
+  price_cents    INTEGER     NOT NULL CHECK (price_cents > 0),
+  fact_id        UUID        NOT NULL UNIQUE,
+  message_id     UUID        NOT NULL,
+  handled_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX catalog_outbox_pending_idx
+  ON catalog.outbox (created_order) WHERE published = FALSE;
 
 RESET ROLE;
 SET ROLE ordering_module;
@@ -41,6 +58,7 @@ CREATE TABLE ordering.price_book (
 
 CREATE TABLE ordering.orders (
   order_id         UUID      PRIMARY KEY,
+  correlation_id   UUID      NOT NULL,
   product_id       UUID      NOT NULL,
   product_name     TEXT      NOT NULL,
   quantity         INTEGER   NOT NULL CHECK (quantity > 0),
@@ -49,7 +67,11 @@ CREATE TABLE ordering.orders (
 );
 
 CREATE TABLE ordering.inbox (
-  message_id UUID PRIMARY KEY
+  fact_id          UUID        PRIMARY KEY,
+  first_message_id UUID      NOT NULL,
+  causation_id     UUID        NOT NULL,
+  correlation_id   UUID        NOT NULL,
+  handled_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 RESET ROLE;

@@ -3,18 +3,26 @@
 -- Every column here is argued for somewhere in that document; this file is
 -- where those arguments become a schema.
 
+-- A unique stream-version constraint catches stale writers, but not a caller
+-- claiming a version ahead of reality. This row is the compare-and-set token.
+CREATE TABLE IF NOT EXISTS stream_head (
+  stream_id       UUID   PRIMARY KEY,
+  stream_version  BIGINT NOT NULL,
+  CONSTRAINT stream_head_version_non_negative CHECK (stream_version >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS event (
-  -- Assigned by the single writer. Orders the whole log across streams, and
-  -- exists for exactly one job: letting a reader resume (lab 9).
+  -- Assigned by one database authority across concurrent writers. Sequence
+  -- gaps after rollback are valid.
   global_position BIGSERIAL   PRIMARY KEY,
 
   -- The transaction that wrote this row. Not domain data — it is what lets a
   -- reader tell "committed" from "assigned but still in flight".
   xid             xid8        NOT NULL DEFAULT pg_current_xact_id(),
 
-  -- Minted by the application, before the write (lab 4), so a retry after an
-  -- ambiguous failure carries the same id and the UNIQUE makes it idempotent.
-  event_id        UUID        NOT NULL UNIQUE,
+  -- Minted by the application, before the write (lab 4). UNIQUE detects a
+  -- repetition; the adapter verifies an exact retry before returning it.
+  event_id        UUID        NOT NULL,
 
   event_type      TEXT        NOT NULL,
 
@@ -25,20 +33,18 @@ CREATE TABLE IF NOT EXISTS event (
   -- When it happened, from the application (lab 1).
   occurred_at     TIMESTAMPTZ NOT NULL,
 
-  -- When the store wrote it down. `now()` is transaction-start and constant
-  -- for the transaction, so a batch shares one value — which is truthful,
-  -- because they committed together.
+  -- Database transaction time, deliberately distinct from occurred_at.
   recorded_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   data            JSONB       NOT NULL,
   metadata        JSONB       NOT NULL DEFAULT '{}'::jsonb,
 
-  -- Optimistic concurrency (lab 7), enforced by the database rather than by
-  -- the application reading and hoping.
-  UNIQUE (stream_id, stream_version),
+  CONSTRAINT event_id_unique UNIQUE (event_id),
+  CONSTRAINT stream_version_unique UNIQUE (stream_id, stream_version),
 
   CONSTRAINT stream_version_positive CHECK (stream_version > 0),
-  CONSTRAINT data_is_object CHECK (jsonb_typeof(data) = 'object')
+  CONSTRAINT data_is_object CHECK (jsonb_typeof(data) = 'object'),
+  CONSTRAINT metadata_is_object CHECK (jsonb_typeof(metadata) = 'object')
 );
 
 CREATE INDEX IF NOT EXISTS event_stream_idx ON event (stream_id, stream_version);
@@ -103,10 +109,22 @@ CREATE TABLE IF NOT EXISTS inbox (
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS command_ledger (
-  command_id   UUID        NOT NULL PRIMARY KEY,
-  command_type TEXT        NOT NULL,
-  event_count  INTEGER     NOT NULL,
-  handled_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  command_id      UUID        NOT NULL PRIMARY KEY,
+  stream_id       UUID        NOT NULL,
+  command_type    TEXT        NOT NULL,
+  correlation_id  UUID        NOT NULL,
+  command_data    JSONB       NOT NULL,
+  event_count     INTEGER     NOT NULL,
+  handled_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  CONSTRAINT event_count_not_negative CHECK (event_count >= 0)
+  CONSTRAINT event_count_not_negative CHECK (event_count >= 0),
+  CONSTRAINT command_data_is_object CHECK (jsonb_typeof(command_data) = 'object')
+);
+
+-- A representative local consumer effect. Keeping it out of the event table
+-- prevents the example consumer from bypassing aggregate stream invariants.
+CREATE TABLE IF NOT EXISTS customer_notification (
+  fact_id      UUID        PRIMARY KEY,
+  flavour     TEXT        NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

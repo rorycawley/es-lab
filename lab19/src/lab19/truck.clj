@@ -1,11 +1,11 @@
 (ns lab19.truck
   "The domain: what an Ice Cream truck knows.
 
-  **Copied from lab 8, unchanged.** Not adapted, not parameterised, not handed
-  a repository to talk to. It was written against an in-memory vector and it
-  now runs against Postgres, because it was never told the difference.
+  The decision model introduced in lab 8, still not handed a repository to
+  talk to. It was written against values and now runs with Postgres outside
+  it, because it was never told the difference.
 
-  That is the claim eighteen labs were making, and this file is the evidence.")
+  Technology independence is the claim this file demonstrates.")
 
 ;; ---------------------------------------------------------------------------
 ;; evolve : state -> event -> state          (lab 6, trimmed to stock)
@@ -24,9 +24,15 @@
   [state event]
   (update state (get-in event [:data :flavour]) (fnil dec 0)))
 
-(defmethod evolve :default
+(defmethod evolve :stock-depleted
   [state _event]
+  ;; A supported notification fact that does not change the stock fold.
   state)
+
+(defmethod evolve :default
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -38,7 +44,8 @@
 ;; The only function in these labs that is allowed to say no, because it is
 ;; the only one that runs while the answer is still open. Events returned here
 ;; carry no identity and no stream — they are what happened, not where it is
-;; recorded. The store stamps the rest.
+;; recorded. The application identifies them; persistence assigns only storage
+;; coordinates and transaction time.
 ;; ---------------------------------------------------------------------------
 
 (defmulti decide (fn [command _state] (:command/type command)))
@@ -46,11 +53,11 @@
 (defmethod decide :load-truck
   [command _state]
   (let [{:keys [quantity]} (:data command)]
-    ;; Loading nothing onto the truck is not a fact. Nothing happened, and
-    ;; nothing went wrong either.
-    (if (pos? quantity)
-      [{:event/type :truck-loaded :data (:data command)}]
-      [])))
+    (when-not (and (int? quantity) (pos? quantity))
+      (throw (ex-info "Quantity must be a positive integer"
+                      {:reason :invalid-quantity
+                       :quantity quantity})))
+    [{:event/type :truck-loaded :data (:data command)}]))
 
 (defmethod decide :buy-flavour
   [command state]
@@ -58,7 +65,8 @@
         remaining (get state flavour 0)]
     (when-not (pos? remaining)
       (throw (ex-info "Sold out"
-                      {:command/type :buy-flavour
+                      {:reason       :sold-out
+                       :command/type :buy-flavour
                        :flavour      flavour
                        :remaining    remaining})))
     ;; Selling the last cone is two facts, in the order they became true.
@@ -66,3 +74,8 @@
       [{:event/type :flavour-sold   :data {:flavour flavour}}
        {:event/type :stock-depleted :data {:flavour flavour}}]
       [{:event/type :flavour-sold   :data {:flavour flavour}}])))
+
+(defmethod decide :default
+  [command _state]
+  (throw (ex-info "Unknown command type"
+                  {:command/type (:command/type command)})))

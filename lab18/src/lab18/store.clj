@@ -1,10 +1,10 @@
 (ns lab18.store
-  "The log, unchanged since lab 11.
+  "The in-memory append-only log.
 
-  Every question this lab asks was already answerable on the day lab 11 was
-  written. Nothing needed adding — which is the point: the ability to ask
-  what was true last Tuesday is a consequence of keeping events, not a
-  feature you build.")
+  The application owns event identity, occurrence time and causal context.
+  Persistence assigns stream coordinates, global position and transaction
+  time (`:recorded-at`). A real adapter obtains that last value from the
+  database rather than trusting a client clock.")
 
 (defn stream
   [log stream-id]
@@ -40,32 +40,37 @@
        vec))
 
 (defn caused-by?
-  "Has any event already been caused by this command? (lab 10)"
+  "Has any event already been caused by this command?
+
+  This is the narrow lab 10 shortcut for commands guaranteed to emit an
+  event, not a general command ledger."
   [log command-id]
   (boolean (some #(= command-id (get-in % [:metadata :causation-id])) log)))
 
 (defn append
-  "Append the events `command` produced to `stream-id`.
+  "Append identified `events` at `expected-version`.
 
-  The store stamps identity, position, stream coordinates, the occurrence time
-  from the injected clock, and the two ids that place the event in a chain:
-  causation (this command) and correlation (this conversation)."
-  [log stream-id expected-version gen-id now command events]
+  `recorded-at` represents an authoritative persistence clock in this
+  in-memory adapter. A production compare-and-append must perform the version
+  check, timestamp assignment and write atomically."
+  [log stream-id expected-version recorded-at events]
+  (when-not (inst? recorded-at)
+    (throw (ex-info "Invalid recorded-at instant"
+                    {:recorded-at recorded-at})))
   (let [actual (current-version log stream-id)
         end    (last-position log)]
     (when-not (= expected-version actual)
       (throw (ex-info "Concurrent modification of stream"
-                      {:stream/id        stream-id
+                      {:reason           :concurrent-modification
+                       :stream/id        stream-id
                        :expected-version expected-version
                        :actual-version   actual})))
     (into log
           (map-indexed (fn [i event]
                          (assoc event
-                                :event/id (gen-id)
-                                :event/occurred-at now
                                 :event/position (+ end 1 i)
                                 :stream/id stream-id
                                 :stream/version (+ actual 1 i)
-                                :metadata {:causation-id   (:command/id command)
-                                           :correlation-id (:correlation-id command)}))
+                                :metadata (assoc (:metadata event)
+                                                 :recorded-at recorded-at)))
                        events))))

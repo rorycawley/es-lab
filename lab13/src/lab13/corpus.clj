@@ -6,9 +6,10 @@
   store's contract is that every schema it has ever written stays readable, and
   the only way to know that still holds is to keep specimens and read them.
 
-  Nothing here may ever be edited. Correcting a shape in the corpus is exactly
-  the mistake the corpus exists to catch — the events in production will not
-  have been corrected.")
+  The captured specimen values are append-only: add new historical shapes,
+  but never correct an old value to resemble today's model. Production events
+  will not have been corrected either. Comments and test organization may
+  evolve without changing those specimens.")
 
 (def truck-1 #uuid "0f1c2b3a-0000-4000-8000-000000000001")
 

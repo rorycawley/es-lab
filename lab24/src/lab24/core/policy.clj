@@ -22,8 +22,12 @@
 
 (defn derived-command-id
   ^UUID [policy-name event]
-  (UUID/nameUUIDFromBytes (.getBytes (str policy-name "/" (:event/id event))
-                                     "UTF-8")))
+  (let [event-id (:event/id event)]
+    (when-not (uuid? event-id)
+      (throw (ex-info "Invalid event id"
+                      {:event/id event-id})))
+    (UUID/nameUUIDFromBytes (.getBytes (str policy-name "/" event-id)
+                                       "UTF-8"))))
 
 ;; ---------------------------------------------------------------------------
 ;; react : event -> [command]
@@ -39,12 +43,13 @@
   [event]
   ;; Whenever a truck runs out of a flavour, ask for more.
   ;;
-  ;; Note what this does NOT do: it does not check whether restocking is
-  ;; allowed, whether the depot has stock, or whether the truck is off shift.
-  ;; A policy routes; `decide` decides. Business logic here would put the
-  ;; rules in two places and let them disagree.
+  ;; This policy owns the reaction "depleted -> request a restock of 20". It
+  ;; does not copy the target aggregate's state-dependent acceptance rules;
+  ;; those remain authoritative in `decide`.
   [{:command/id   (derived-command-id :restock-when-depleted event)
     :command/type :load-truck
+    :correlation-id (or (get-in event [:metadata :correlation-id])
+                        (:event/id event))
     ;; ── Authority does not propagate ───────────────────────────────────
     ;;
     ;; The customer who bought the last cone did not ask for a restock and
@@ -68,11 +73,24 @@
                    :flavour  (get-in event [:data :flavour])
                    :quantity restock-quantity}}])
 
-;; Every other event type. A policy has an opinion about a handful of facts
-;; and shrugs at the rest, exactly as a fold does (lab 6).
-(defmethod react :default
+(defmethod react :truck-loaded
   [_event]
   [])
+
+(defmethod react :flavour-sold
+  [_event]
+  [])
+
+(defmethod react :driver-assigned
+  [_event]
+  [])
+
+;; Known irrelevant facts are explicit. Unknown semantics may require a new
+;; reaction, so an old reader must not checkpoint past them silently.
+(defmethod react :default
+  [event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn react-to-all
   "The commands asked for by a batch of events, in order."

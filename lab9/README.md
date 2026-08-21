@@ -1,6 +1,6 @@
 # Lab 9: projections
 
-[Lab 8](../lab8) finished the write side: a command goes in, history comes out, and nothing is stored but events. Which leaves an obvious problem.
+[Lab 8](../lab8) completed the minimal decision loop: read one history, fold it, decide, identify the resulting facts and conditionally append them. Which leaves an obvious problem.
 
 *Which flavour sells best?* The events know. But answering it means folding a history, and folding a history on every page load — for every question, forever — is not a system anyone can run.
 
@@ -26,21 +26,21 @@ Same operation, different question. What changed is who's asking:
 | folds | one stream | the whole log |
 | answers | *may this truck sell?* | *which flavour sells best?* |
 | used by | `decide`, before writing | somebody reading |
-| must be | correct at the instant of the decision | useful |
+| must be | current through the expected stream version | correct through its checkpoint; possibly behind the log head |
 
-That last row is the one that matters, and the next section is about it.
+That last row is the one that matters. Eventual consistency permits **lag**, not an approximately correct fold. Given the same consumed prefix, a projection must still produce the right answer deterministically.
 
 ## Folding everything: bug in lab7, point in lab9
 
-[Lab 7](../lab7) opened by showing that folding the entire log gives "nobody's answer" — the fleet had two cones while truck 1 was empty, and using that number to decide a sale is a bug.
+[Lab 7](../lab7) opened by showing that folding the entire log answers a different question — the fleet had three vanilla cones while truck 2 had one, so using the fleet total to approve an order for two from truck 2 is a bug.
 
 Here, folding the entire log is the whole idea. Both are true, and the distinction is not about the fold:
 
 **An aggregate's state is used to decide.** It must be exactly right at the moment of the decision, which is why it is scoped to one stream and guarded by a version check. Truck 1 cannot sell a cone because the *fleet* has one.
 
-**A projection is used to look at.** Nobody's invariant depends on it. If the popularity chart is a few seconds behind, the business is not harmed — nothing is being permitted or refused on the strength of it.
+**A projection is usually used to look at.** A popularity chart may safely be a few seconds behind if that is its stated freshness contract. Other read models may drive workflows or customer promises, so their tolerated lag is a business decision rather than a property granted by the word “projection.”
 
-So the rule isn't "never fold across streams." It's **never make a decision against a projection.** The consistency boundary from lab7 is a boundary on *deciding*, not on *reading*.
+So the rule isn't “never fold across streams.” It is: **do not enforce a strong aggregate invariant using a projection whose consistency model cannot support it.** A workflow may deliberately accept an eventually consistent input; a sale that must never take stock below zero may not. The consistency boundary from lab7 is a boundary on that command-side invariant, not a ban on cross-stream reads.
 
 This is also why `fleet-stock` in this lab re-derives something lab8's aggregate already computes. That duplication looks wrong and isn't: one exists to decide with, one exists to look at, and they are allowed to disagree by a few milliseconds. That split is what CQRS names.
 
@@ -70,25 +70,27 @@ position  stream    version   event
    6      truck-1      3      flavour-sold  vanilla
 ```
 
-Position is contiguous straight down. Version is contiguous only after filtering to one truck. Two trucks trading at once means their events interleave, and no per-stream number can express that interleaving — which is exactly why `:stream/version` cannot do this job. There is no single version meaning "everything before here," because every stream has its own.
+In this small fixture, position happens to be contiguous straight down. The contract does **not** require gapless numbers: database sequences leave gaps after rollbacks and allocation. A projector compares `position > checkpoint`; it never guesses that the next event must be `checkpoint + 1`.
 
-Like `:stream/version`, position is assigned by the store at append time. It is not the event's own property; it's the log's.
+Version is contiguous only after filtering to one truck. Two trucks trading at once means their events interleave, and no per-stream number can express that interleaving — which is exactly why `:stream/version` cannot do this job. There is no single version meaning "everything before here," because every stream has its own.
+
+Like `:stream/version`, position is assigned by the store at append time. It is not the event's own property; it's the log's. `:event/id` is different: the application boundary supplies it before append and the store preserves it, as Labs [4](../lab4) and [8](../lab8) established.
 
 And it has exactly one job — being this cursor. Position is **not** domain ordering and should never reach the domain model: ordering that carries meaning is `(:stream/id, :stream/version)`. Keeping that straight is what makes the column droppable if you ever shard the store and no single sequence exists to assign it ([REFERENCE.md](../REFERENCE.md#global_position-and-sharding) works through the options).
 
 ## Checkpoint, advance, rebuild
 
-A read model is its data *plus* the position it has consumed:
+A persistable read model is its data *plus* the position it has consumed:
 
 ```clojure
 {:state      {"vanilla" 2 "chocolate" 2}
  :checkpoint 6}
 ```
 
-`advance` folds whatever arrived since, and moves the mark:
+The projection function is runtime wiring, not stored data. `advance` receives it separately, folds whatever arrived since, and moves the mark only as far as the events actually consumed:
 
 ```clojure
-(advance model log)   ;; folds (since log 6), checkpoint → 7
+(advance model popularity log)   ;; folds (since log 6), checkpoint → 7
 ```
 
 Two properties fall out, and both are tested:
@@ -97,18 +99,20 @@ Two properties fall out, and both are tested:
 
 **Catching up incrementally equals rebuilding from scratch.** A model advanced event-by-event is indistinguishable from one folded from position 0. That equivalence is what makes the read model *disposable*: it holds nothing the events don't.
 
-Which is the payoff of the whole arrangement. A read model can be deleted and rebuilt at will — because the schema changed, because it was wrong, because a new question came up. A projection written today folds events recorded long before it existed and knows the entire history:
+In memory, updating `:state` and `:checkpoint` means returning one new map. A durable projector must persist both in the **same transaction**. Saving state without its checkpoint re-applies an increment after a crash; saving the checkpoint without state skips an increment forever. The fold need not be intrinsically idempotent — popularity uses `inc` — because the atomic checkpoint makes each position contribute once.
+
+Which is the payoff of the whole arrangement. A read model can be deleted and rebuilt — because the schema changed, because it was wrong, because a new question came up — provided the source events remain retained and readable and the projection depends only on reproducible inputs. A projection written today can fold facts recorded long before it existed:
 
 ```clojure
 (rebuild busiest-truck log)
 ;; => {truck-1 2, truck-2 2}
 ```
 
-That is not possible in a system that stores current state. There, the answer to a question nobody thought to ask is simply gone.
+That is not possible when a system retained only current state. Any past detail not represented there is gone. Event sourcing can answer a new question only when the facts needed to derive it were actually recorded; it does not recover information the model discarded.
 
 ## A caveat about position
 
-In this lab the log is an in-memory vector, so position is the index and the ordering is exact. A real store is less tidy.
+In this lab the log is an in-memory vector, so one function can assign `max + 1` deterministically. That is a simulation, not a concurrent allocator: two writers given the same immutable log would both choose the same next position. A production store needs one authority to assign positions as part of the atomic append.
 
 The trap is that sequence values are assigned at **INSERT** time while rows become visible at **COMMIT** time. Transaction A takes position 5; transaction B takes 6 and commits first. A projection polling `WHERE position > last_seen` sees 6, checkpoints there, and **permanently skips 5** when A commits a moment later. The failure is silent — the read model is simply missing an event, and nothing reports it.
 
@@ -116,9 +120,11 @@ Storing the checkpoint is right; assuming positions become *visible* in order is
 
 - take an advisory lock, or serialise the append, so sequence assignment and commit cannot interleave;
 - track in-flight transaction ids (`pg_snapshot_xmin`) and refuse to advance the checkpoint past them;
-- poll with a lag window and tolerate re-delivery — which costs nothing here, because `advance` is already idempotent.
+- poll with a lag window and tolerate re-reading rows. Positions at or below the durable checkpoint are ignored; state and checkpoint must still commit atomically.
 
 Worth settling before the first projection reaches production — [lab19](../lab19) demonstrates it against a real Postgres, and implements the second fix. Note this is *not* what the transactional outbox solves: the outbox addresses writing to the store and a broker without a dual write, which is a different problem — sketched in [lab12](../lab12) and built in [lab20](../lab20).
+
+Unknown event semantics are another reason to stop rather than advance. Each projection names known irrelevant facts explicitly; an unrecognised event throws before a new model value or checkpoint is returned. Deploy readers that understand a new event before writers emit it, instead of silently checkpointing past data the projection may have needed.
 
 ## What's next
 

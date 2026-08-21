@@ -10,8 +10,8 @@
   at the adapter, *before the command object is even constructed*.
 
   Which is also why `app.clj` still contains no `if`. Rejecting a malformed
-  message happens out here, before an id is allocated or an internal command
-  is constructed. The application layer only sees well-formed commands."
+  message happens out here, before ids are allocated or an internal command is
+  constructed. The application layer only sees well-formed commands."
   (:require [lab22.app :as app]
             [lab22.port :as port]
             [lab22.schema.command :as schema]))
@@ -21,6 +21,7 @@
   [ids {:keys [type data]}]
   {:command/id   (port/new-id ids)
    :command/type type
+   :correlation-id (port/new-id ids)
    :data         data})
 
 (defn submit
@@ -41,4 +42,6 @@
       (try
         {:accepted (app/handle deps truck-id command)}
         (catch clojure.lang.ExceptionInfo e
-          {:rejected :refused :because (ex-message e) :data (ex-data e)})))))
+          (if (= :sold-out (:reason (ex-data e)))
+            {:rejected :refused :because (ex-message e) :data (ex-data e)}
+            (throw e)))))))

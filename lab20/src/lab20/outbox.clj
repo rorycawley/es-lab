@@ -19,10 +19,9 @@
 (defn enqueue!
   "Write one outgoing message. Call inside the caller's transaction.
 
-  `message-id` is minted by the sender before the write, so a retry of the
-  whole transaction carries the same id and the UNIQUE makes it idempotent
-  (lab 4). The payload carries the *fact's* id, which is what the recipient
-  will deduplicate on."
+  `message-id` identifies this envelope. Command-ledger idempotency prevents
+  an ambiguous command retry from creating another envelope; the payload's
+  *fact id* is what recipients use to recognise a republished fact."
   [tx {:keys [message-id message-type recipient payload]}]
   (jdbc/execute-one!
    tx
@@ -41,7 +40,8 @@
 (defn mark-sent!
   "The second write — and the one that can fail on its own."
   [tx id]
-  (jdbc/execute-one! tx ["UPDATE outbox SET sent_at = now() WHERE id = ?" id] opts))
+  (jdbc/execute-one! tx ["UPDATE outbox SET sent_at = now()
+                          WHERE id = ? AND sent_at IS NULL RETURNING id" id] opts))
 
 (defn all
   [ds]

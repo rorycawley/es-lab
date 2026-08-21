@@ -1,13 +1,13 @@
 (ns lab15.projection
   "A read model — and the place erasure actually leaks.
 
-  Shredding a key makes the log unreadable. It does nothing whatever for a
-  projection that already materialised the plaintext, because that copy was
-  made while the key still existed and lives in a store nobody encrypted.
+  Shredding a key makes the protected field in the log unreadable. It does
+  nothing whatever for a projection that already materialised the plaintext,
+  because that copy was made while the key still existed.
 
   Which turns lab 9's 'read models are disposable' from a nice property into
-  an obligation: erasure means destroy the key **and rebuild every projection
-  that touched the data**."
+  an obligation: the projection must be deleted, rebuilt or otherwise purged
+  as part of the same operational erasure workflow."
   (:require [lab15.reading :as reading]))
 
 (def initial-model {:customers {} :sales {}})
@@ -24,9 +24,18 @@
   (let [{:keys [customer-id flavour]} (:data event)]
     (update-in model [:sales customer-id] (fnil conj []) flavour)))
 
-(defmethod apply-event :default
+(defmethod apply-event :truck-loaded
   [model _event]
   model)
+
+(defmethod apply-event :card-cancelled
+  [model _event]
+  model)
+
+(defmethod apply-event :default
+  [_model event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn rebuild
   "Fold the log from the beginning, reading through the vault as it stands now.

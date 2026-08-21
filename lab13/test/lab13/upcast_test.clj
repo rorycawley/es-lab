@@ -8,7 +8,11 @@
     (doseq [stored corpus/every-shape]
       (let [event (upcast/read-event stored)]
         (is (some? event))
-        (is (= (:event/id stored) (:event/id event)) "identity survives the ladder")))))
+        (is (= (select-keys stored [:event/id :event/type
+                                    :stream/id :stream/version :event/position])
+               (select-keys event [:event/id :event/type
+                                   :stream/id :stream/version :event/position]))
+            "identity and storage coordinates survive the ladder")))))
 
 (deftest v1-reaches-the-current-shape-test
   (let [event (upcast/read-event corpus/flavour-sold-v1)]
@@ -62,15 +66,57 @@
     (is (= 2 (upcast/current-version-of :flavour-sold-gross)))
     (is (= 2 (get-in (upcast/read-event corpus/flavour-sold-gross)
                      [:metadata :schema-version])))
-    (testing "and a type nobody has ever versioned is already current"
-      (is (= 1 (upcast/current-version-of :truck-repainted))))))
+    (testing "an unregistered type has unknown semantics"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                            (upcast/current-version-of :truck-repainted))))))
 
 (deftest a-step-that-forgets-to-raise-the-version-fails-loudly-test
-  (testing "the easiest upcaster bug to write, and it would otherwise hang"
+  (testing "every rung must advance exactly one version"
     (defmethod upcast/upcast-step [::forgetful 1] [event] event)
     (try
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"did not terminate"
-           (upcast/read-event {:event/type ::forgetful
-                               :metadata   {:schema-version 1}})))
+      (with-redefs [upcast/current-version (assoc upcast/current-version ::forgetful 2)]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"advance exactly one version"
+             (upcast/read-event {:event/type ::forgetful
+                                 :metadata   {:schema-version 1}}))))
       (finally (remove-method upcast/upcast-step [::forgetful 1])))))
+
+(deftest unsupported-reader-inputs-fail-before-reaching-the-domain-test
+  (testing "a writer deployed ahead of its reader"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"future schema version"
+                          (upcast/read-event
+                           (assoc-in corpus/flavour-sold-v4
+                                     [:metadata :schema-version]
+                                     5)))))
+  (testing "a malformed or absent version"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid schema version"
+                          (upcast/read-event
+                           (update corpus/flavour-sold-v4 :metadata
+                                   dissoc :schema-version)))))
+  (testing "a type this semantic reader does not understand"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                          (upcast/read-event {:event/type :freezer-failed
+                                              :metadata {:schema-version 1}}))))
+  (testing "a missing rung in a registered ladder"
+    (with-redefs [upcast/current-version (assoc upcast/current-version ::missing 2)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing upcaster step"
+                            (upcast/read-event {:event/type ::missing
+                                                :metadata {:schema-version 1}}))))))
+
+(deftest an-upcaster-cannot-change-the-recorded-envelope-test
+  (defmethod upcast/upcast-step [::mutating 1]
+    [event]
+    (-> event
+        (assoc :stream/id #uuid "0f1c2b3a-0000-4000-8000-000000000099")
+        (assoc-in [:metadata :schema-version] 2)))
+  (try
+    (with-redefs [upcast/current-version (assoc upcast/current-version ::mutating 2)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"changed the recorded event envelope"
+                            (upcast/read-event
+                             {:event/id #uuid "018f7a3e-0000-7000-8000-000000000099"
+                              :event/type ::mutating
+                              :stream/id corpus/truck-1
+                              :stream/version 1
+                              :event/position 1
+                              :metadata {:schema-version 1}}))))
+    (finally (remove-method upcast/upcast-step [::mutating 1]))))

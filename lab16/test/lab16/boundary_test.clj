@@ -46,7 +46,7 @@
                     (command :load-truck {:truck-id (first trucks)
                                           :flavour "vanilla" :quantity 999}))))))
 
-(deftest design-a-contends-on-every-sale-test
+(deftest design-a-makes-overlapping-sales-share-one-version-test
   (testing "five tills, five different trucks, one stream"
     (let [attempts (mapv (fn [t]
                            (contention/attempt design-a fleet-stream
@@ -70,7 +70,7 @@
           trucks))
 
 (deftest design-b-does-not-contend-test
-  (testing "five tills, five streams, nobody waits"
+  (testing "five overlapping sales, five streams, no shared version"
     (let [attempts (mapv (fn [t]
                            (contention/attempt design-b t truck/decide truck/replay
                                                (command :buy-flavour {:flavour "vanilla"})))
@@ -100,6 +100,29 @@
   (apply-one [] depot-stream depot/decide depot/replay
              (command :stock-depot {:flavour "vanilla" :quantity 100})))
 
+(def design-c-stocked
+  (reduce (fn [log truck-id]
+            (let [issued (apply-one log depot-stream depot/decide depot/replay
+                                    (command :issue-stock
+                                             {:flavour "vanilla" :quantity 10}))]
+              (apply-one issued truck-id truck/decide truck/replay
+                         (command :load-truck
+                                  {:flavour "vanilla" :quantity 10}))))
+          design-c
+          trucks))
+
+(deftest design-c-accounts-for-both-sides-of-the-setup-test
+  (let [at-depot (get (depot/replay (store/stream design-c-stocked depot-stream))
+                      "vanilla")
+        on-trucks (reduce + (map #(get (truck/replay
+                                        (store/stream design-c-stocked %))
+                                       "vanilla" 0)
+                                 trucks))]
+    (is (= 50 at-depot))
+    (is (= 50 on-trucks))
+    (is (= 100 (+ at-depot on-trucks))
+        "the setup no longer creates truck stock outside the depot workflow")))
+
 (deftest design-c-enforces-the-invariant-where-it-lives-test
   (let [issued (reduce (fn [l _]
                          (apply-one l depot-stream depot/decide depot/replay
@@ -114,17 +137,14 @@
                       (command :issue-stock {:flavour "vanilla" :quantity 30})))))))
 
 (deftest design-c-moves-contention-to-where-it-means-something-test
-  (testing "sales contend nowhere — they never touch the depot"
-    (let [stocked (reduce (fn [l t]
-                            (apply-one l t truck/decide truck/replay
-                                       (command :load-truck {:flavour "vanilla" :quantity 10})))
-                          design-c trucks)
-          attempts (mapv (fn [t]
-                           (contention/attempt stocked t truck/decide truck/replay
+  (testing "sales on different trucks do not conflict with each other"
+    (let [attempts (mapv (fn [t]
+                           (contention/attempt design-c-stocked t truck/decide truck/replay
                                                (command :buy-flavour {:flavour "vanilla"})))
                          trucks)]
-      (is (zero? (:conflicts (contention/run-concurrently stocked attempts gen-id t0))))))
-  (testing "restocks contend only on the depot, and that is a real signal"
+      (is (zero? (:conflicts (contention/run-concurrently design-c-stocked
+                                                          attempts gen-id t0))))))
+  (testing "stock issues contend only on the depot"
     (let [attempts (mapv (fn [_]
                            (contention/attempt design-c depot-stream depot/decide depot/replay
                                                (command :issue-stock {:flavour "vanilla"
@@ -147,9 +167,12 @@
         a (sales-conflicts design-a (constantly fleet-stream) fleet/decide fleet/replay
                            #(command :buy-flavour {:truck-id % :flavour "vanilla"}))
         b (sales-conflicts design-b identity truck/decide truck/replay
+                           (fn [_] (command :buy-flavour {:flavour "vanilla"})))
+        c (sales-conflicts design-c-stocked identity truck/decide truck/replay
                            (fn [_] (command :buy-flavour {:flavour "vanilla"})))]
-    (is (= 4 a) "design A: one stream, four writers refused")
-    (is (= 0 b) "design B and C: five streams, none refused")
+    (is (= 4 a) "design A: one stream, four optimistic conflicts")
+    (is (= 0 b) "design B: five streams, no optimistic conflicts")
+    (is (= 0 c) "design C: five truck streams, no sale conflicts")
     (testing "and only A and C can refuse an over-draw"
       (is (thrown? clojure.lang.ExceptionInfo
                    (apply-one design-a fleet-stream fleet/decide fleet/replay
@@ -166,4 +189,60 @@
   (testing "design A folds the whole fleet's history to answer one truck's question"
     (is (= 6 (count (store/stream design-a fleet-stream)))))
   (testing "design B folds one truck's"
-    (is (= 1 (count (store/stream design-b (first trucks)))))))
+    (is (= 1 (count (store/stream design-b (first trucks))))))
+  (testing "design C folds one truck plus the depot only for depot decisions"
+    (is (= 1 (count (store/stream design-c-stocked (first trucks)))))
+    (is (= 6 (count (store/stream design-c-stocked depot-stream))))))
+
+(deftest invalid-domain-inputs-and-unknown-semantics-fail-test
+  (doseq [[decide state command-type]
+          [[fleet/decide fleet/initial-state :stock-depot]
+           [fleet/decide fleet/initial-state :load-truck]
+           [depot/decide depot/initial-state :stock-depot]
+           [depot/decide depot/initial-state :issue-stock]
+           [truck/decide truck/initial-state :load-truck]]
+          quantity [0 -1 1.5 nil]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Quantity must be"
+                          (decide (command command-type
+                                           {:truck-id (first trucks)
+                                            :flavour "vanilla"
+                                            :quantity quantity})
+                                  state))))
+  (doseq [replay [fleet/replay depot/replay truck/replay]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                          (replay [{:event/type :freezer-failed}]))))
+  (doseq [[decide state] [[fleet/decide fleet/initial-state]
+                          [depot/decide depot/initial-state]
+                          [truck/decide truck/initial-state]]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown command type"
+                          (decide (command :teleport-stock {}) state)))))
+
+(deftest the-application-identifies-before-the-store-and-validates-identity-test
+  (let [event-id #uuid "018f7a3e-0000-7000-8000-000000002001"
+        cmd      {:command/id     #uuid "0f1c2b3a-0000-4000-8000-000000001101"
+                  :command/type   :stock-depot
+                  :correlation-id #uuid "cc79c083-0000-4000-8000-000000000011"
+                  :data           {:flavour "vanilla" :quantity 10}}
+        event    (first ((contention/attempt [] depot-stream
+                                             depot/decide depot/replay cmd)
+                         [] (constantly event-id) t0))]
+    (is (= event-id (:event/id event)))
+    (is (= t0 (:event/occurred-at event)))
+    (is (= (:command/id cmd) (get-in event [:metadata :causation-id])))
+    (is (= (:correlation-id cmd) (get-in event [:metadata :correlation-id])))
+    (is (= 1 (:stream/version event)))
+    (is (= 1 (:event/position event))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid event id"
+                        ((contention/attempt design-c depot-stream
+                                             depot/decide depot/replay
+                                             (command :issue-stock
+                                                      {:flavour "vanilla"
+                                                       :quantity 10}))
+                         design-c (constantly "not-a-uuid") t0))))
+
+(deftest contention-counting-does-not-hide-unexpected-failures-test
+  (let [unexpected (fn [_log _gen-id _now]
+                     (throw (ex-info "Database unavailable"
+                                     {:reason :database-unavailable})))]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Database unavailable"
+                          (contention/run-concurrently [] [unexpected] gen-id t0)))))

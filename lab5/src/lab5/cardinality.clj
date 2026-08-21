@@ -31,8 +31,9 @@
 
 (def ordinary-sale
   {:command buy-vanilla
-   :events  [{:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e1"
-              :event/type :flavour-sold
+   ;; These are decision outcomes, not recorded envelopes. Lab 8's store will
+   ;; stamp identity, stream and version at the recording boundary.
+   :events  [{:event/type :flavour-sold
               :data       {:flavour "vanilla"}}]})
 
 ;; ---------------------------------------------------------------------------
@@ -53,11 +54,9 @@
 
 (def last-cone-sale
   {:command buy-chocolate
-   :events  [{:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e2"
-              :event/type :flavour-sold
+   :events  [{:event/type :flavour-sold
               :data       {:flavour "chocolate"}}
-             {:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e3"
-              :event/type :stock-depleted
+             {:event/type :stock-depleted
               :data       {:flavour "chocolate"}}]})
 
 (def decisions
@@ -88,7 +87,24 @@
    :messages []})
 
 ;; ---------------------------------------------------------------------------
-;; An event produces ONE message, or MANY.
+;; An event produces ONE message.
+;;
+;; Opening the truck matters to the customer app and nobody else.
+;; ---------------------------------------------------------------------------
+
+(def truck-opened-smithfield
+  {:event/id   #uuid "018f7a3e-0000-7000-8000-0000000000e4"
+   :event/type :truck-opened
+   :data       {:area "Smithfield"}})
+
+(def announced-once
+  {:event    truck-opened-smithfield
+   :messages [{:message/type :truck-opened
+               :payload      {:event/id (:event/id truck-opened-smithfield)
+                              :area     "Smithfield"}}]})
+
+;; ---------------------------------------------------------------------------
+;; An event produces MANY messages.
 ;;
 ;; Two modules care that stock ran out, and they want different contracts:
 ;; purchasing needs to reorder, the customer app needs to grey out a button.
@@ -97,17 +113,24 @@
 
 (def fanned-out
   {:event    stock-depleted-chocolate
-   :messages [{:message/id   #uuid "018f7a3f-0000-7000-8000-0000000000f1"
-               :message/type :stock-depleted
+   :messages [{:message/type :flavour-unavailable
                :payload      {:event/id (:event/id stock-depleted-chocolate)
                               :flavour  "chocolate"}}
-              {:message/id   #uuid "018f7a3f-0000-7000-8000-0000000000f2"
-               :message/type :flavour-unavailable
+              {:message/type :restock-required
                :payload      {:event/id (:event/id stock-depleted-chocolate)
                               :flavour  "chocolate"}}]})
 
+;; Publication decides the contracts first. The publisher then creates one
+;; transport envelope per proposal, which is where delivery identity belongs.
+(def fanned-out-envelopes
+  (mapv (fn [message message-id] (assoc message :message/id message-id))
+        (:messages fanned-out)
+        [#uuid "018f7a3f-0000-7000-8000-0000000000f1"
+         #uuid "018f7a3f-0000-7000-8000-0000000000f2"]))
+
 (def publications
   [kept-private
+   announced-once
    fanned-out])
 
 ;; ---------------------------------------------------------------------------
@@ -123,13 +146,3 @@
   "How many deliveries this fact caused. Zero, one, or many."
   [publication]
   (count (:messages publication)))
-
-(defn causes
-  "Every command that produced `event-id` across `decisions`.
-
-  Always zero or one: an event has exactly one cause. The fan is one-way."
-  [decisions event-id]
-  (->> decisions
-       (filter (fn [decision]
-                 (some #(= event-id (:event/id %)) (:events decision))))
-       (mapv :command)))

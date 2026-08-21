@@ -5,8 +5,8 @@
          ;; JOSE — signing and verifying tokens. Do not hand-roll this: JWT has
          ;; a decade of CVEs in it (alg confusion, alg:none, unchecked `kid`),
          ;; and a library that gets them right is the whole reason to use one.
-         ;; Required by adapter/idp.clj (signs) and adapter/auth.clj (verifies)
-         ;; and by nothing else.
+         ;; Used by adapter/auth.clj to verify and adapter/oidc.clj to build
+         ;; public keys, and by nothing further inward.
          buddy/buddy-sign                  {:mvn/version "3.6.1-359"}
          buddy/buddy-core                  {:mvn/version "1.12.0-430"}
          ;; HTTP — required by exactly one namespace, adapter/http.clj

@@ -21,13 +21,16 @@
        (apply max 0)))
 
 (defn append
-  "Append `events` to `stream-id`, but only if it is still at
-  `expected-version`. All of them land, or none do.
+  "Model appending identified `events` to `stream-id`, on the condition that
+  the supplied log is still at `expected-version`.
 
-  The store stamps what it owns: an identity for each event, the stream it
-  belongs to, and consecutive versions. `gen-id` supplies the identities —
-  minting one is an effect, so it comes in as an argument (lab 4)."
-  [log stream-id expected-version gen-id events]
+  This immutable implementation returns the whole new log or throws before
+  returning one. A real store must enforce the condition and batch insert in
+  one atomic transaction.
+
+  Event identity already exists and is preserved. The store assigns the
+  stream and consecutive versions it owns."
+  [log stream-id expected-version events]
   (let [actual (current-version log stream-id)]
     (when-not (= expected-version actual)
       (throw (ex-info "Concurrent modification of stream"
@@ -37,7 +40,6 @@
     (into log
           (map-indexed (fn [i event]
                          (assoc event
-                                :event/id (gen-id)
                                 :stream/id stream-id
                                 :stream/version (+ actual 1 i)))
                        events))))

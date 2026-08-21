@@ -6,8 +6,9 @@
   steps, two aggregates, and a wait in the middle that may never end.
 
   Note the shape. `evolve` folds observed events into the process's own state,
-  and `decide` turns that state into the next request. That is lab 8's decider
-  with one substitution: it emits commands rather than events."
+  and `decide` turns that state and an explicit time into the next request.
+  That is lab 8's decider with two substitutions: it emits commands rather
+  than events, and a timer may wake it without a new fact."
   (:import (java.time Duration Instant)
            (java.util UUID)))
 
@@ -20,8 +21,9 @@
 ;; ---------------------------------------------------------------------------
 ;; evolve : state -> event -> state
 ;;
-;; The process has no stream of its own. Its history is every event sharing
-;; its correlation id, which is what lets the fold span two trucks.
+;; In this implementation the process has no stream of its own. Its state is
+;; derived from events sharing a correlation id, which lets the fold span two
+;; truck streams.
 ;; ---------------------------------------------------------------------------
 
 (def initial-state {:status :not-started})
@@ -34,6 +36,10 @@
    :flavour    (get-in event [:data :flavour])
    :to         (:stream/id event)
    :started-at (:event/occurred-at event)})
+
+(defmethod evolve :flavour-sold
+  [state _event]
+  state)
 
 (defmethod evolve :flavour-unloaded
   [state _event]
@@ -48,8 +54,9 @@
   (assoc state :status :abandoned))
 
 (defmethod evolve :default
-  [state _event]
-  state)
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -64,6 +71,12 @@
 
 (defn derived-command-id
   ^UUID [correlation-id step]
+  (when-not (uuid? correlation-id)
+    (throw (ex-info "Invalid correlation id"
+                    {:correlation-id correlation-id})))
+  (when-not (keyword? step)
+    (throw (ex-info "Invalid process step"
+                    {:step step})))
   (UUID/nameUUIDFromBytes (.getBytes (str "transfer/" correlation-id "/" (name step))
                                      "UTF-8")))
 
@@ -74,27 +87,32 @@
    :correlation-id correlation-id
    :data           data})
 
-(defn- waited-too-long?
+(defn timeout-reached?
+  "Has this process reached or passed its deadline?"
   [state now]
   (and (:started-at state)
-       (.isAfter ^Instant (.toInstant ^java.util.Date now)
-                 (.plus ^Instant (.toInstant ^java.util.Date (:started-at state))
-                        timeout))))
+       (not (.isBefore ^Instant (.toInstant ^java.util.Date now)
+                       (.plus ^Instant (.toInstant ^java.util.Date (:started-at state))
+                              timeout)))))
+
+(defn active?
+  "Does this state still need an event or a timer to move it forward?"
+  [state]
+  (contains? #{:awaiting-unload :awaiting-load} (:status state)))
 
 ;; ---------------------------------------------------------------------------
 ;; decide : state -> now -> [command]
 ;;
-;; The process manager only ever issues commands. It never writes events
-;; directly — every fact in the log is still produced by an aggregate that
-;; decided it. That falls out of "a process manager routes; it does not
-;; decide" (lab 2): if it wrote its own facts, it would be deciding.
+;; This process manager owns the workflow decision: which request comes next,
+;; and when to abandon. It changes a truck only by issuing a command, leaving
+;; the truck's state-dependent acceptance rules authoritative in its decider.
 ;; ---------------------------------------------------------------------------
 
 (defn decide
   [state correlation-id donor now]
   (case (:status state)
     :awaiting-unload
-    (if (waited-too-long? state now)
+    (if (timeout-reached? state now)
       [(command correlation-id :abandon :abandon-transfer
                 {:truck-id (:to state)
                  :flavour  (:flavour state)
@@ -110,5 +128,9 @@
                :flavour  (:flavour state)
                :quantity transfer-quantity})]
 
-    ;; :not-started, :complete, :abandoned — nothing to ask for.
-    []))
+    :not-started []
+    :complete    []
+    :abandoned   []
+
+    (throw (ex-info "Unknown process status"
+                    {:status (:status state)}))))

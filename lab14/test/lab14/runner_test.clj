@@ -10,6 +10,11 @@
 
 (def t0     #inst "2026-08-16T09:00:00.000-00:00")
 (def within #inst "2026-08-16T09:20:00.000-00:00")
+(def beyond #inst "2026-08-16T09:31:00.000-00:00")
+
+(def recorded-event-id #uuid "018f7a3e-0000-7000-8000-000000002001")
+(def recorded-command-id #uuid "0f1c2b3a-0000-4000-8000-000000001101")
+(def recorded-correlation #uuid "cc79c083-0000-4000-8000-000000000011")
 
 (defn- gen-id [] (random-uuid))
 
@@ -82,7 +87,7 @@
           after-unload (:log (runner/run-once sold-out 0 gen-id within truck-2))]
       (is (= 49 before) "19 on truck 1, 30 on truck 2")
       (is (= (- before process/transfer-quantity) (fleet-total after-unload))
-          "ten cones exist nowhere"))))
+          "ten cones are not held by either truck"))))
 
 (deftest compensation-restores-the-invariant-test
   (let [before (fleet-total sold-out)
@@ -101,7 +106,7 @@
                              (store/stream log truck-2))))))))
 
 (deftest the-whole-story-survives-test
-  (testing "a rollback leaves no trace; this leaves the attempt and the undo"
+  (testing "the event stream retains the attempt, refusal and return"
     (let [{:keys [log]} (runner/run-until-quiet sold-out 0 gen-id within truck-2)
           history (map :event/type (store/correlated log conversation))]
       (is (= [:flavour-sold :stock-depleted :flavour-unloaded :load-refused :flavour-returned]
@@ -125,7 +130,7 @@
                                          {:truck-id truck-2 :flavour "chocolate" :quantity 10}))
           {:keys [log]} (runner/run-until-quiet topped 0 gen-id within truck-2)]
       (is (= :needs-attention (:status (process/replay (store/correlated log cid)))))
-      (is (some #(= :compensation-failed (:event/type %)) log))
+      (is (some #(= :stock-return-refused (:event/type %)) log))
       (testing "and the ten vanilla cones are still missing — a human must sort it out"
         (is (= 30 (fleet-vanilla tight)))
         (is (= 20 (fleet-vanilla log)) "ten short, and no automatic route back")))))
@@ -140,3 +145,40 @@
 (deftest nothing-new-means-nothing-happens-test
   (let [{:keys [log checkpoint]} (runner/run-until-quiet sold-out 0 gen-id within truck-2)]
     (is (= log (:log (runner/run-once log checkpoint gen-id within truck-2))))))
+
+(deftest the-application-identifies-facts-before-the-store-test
+  (let [c {:command/id     recorded-command-id
+           :command/type   :commission-truck
+           :correlation-id recorded-correlation
+           :data           {:truck-id truck-1 :capacity 20}}
+        event (first (runner/handle [] (constantly recorded-event-id) t0 c))]
+    (is (= recorded-event-id (:event/id event)))
+    (is (= t0 (:event/occurred-at event)))
+    (is (= recorded-command-id (get-in event [:metadata :causation-id])))
+    (is (= recorded-correlation (get-in event [:metadata :correlation-id])))
+    (is (= 1 (:stream/version event)))
+    (is (= 1 (:event/position event)))))
+
+(deftest a-timer-wakes-a-process-after-its-event-checkpoint-advanced-test
+  (let [empty-donor (trading-day 1)
+        first-pass (runner/run-once empty-donor 0 gen-id within truck-2)
+        checkpoint (:checkpoint first-pass)
+        log        (:log first-pass)]
+    (is (empty? (store/since log checkpoint))
+        "the expected donor refusal recorded no event")
+    (let [timed-out (runner/run-once log checkpoint gen-id beyond truck-2)]
+      (is (= :transfer-abandoned (-> timed-out :log last :event/type)))
+      (is (= :abandoned
+             (:status (process/replay
+                       (store/correlated (:log timed-out) (conversation-of log)))))))))
+
+(deftest unexpected-failures-are-not-disguised-as-business-refusals-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown command type"
+                        (runner/dispatch sold-out gen-id within
+                                         (command :teleport-stock (random-uuid)
+                                                  {:truck-id truck-1}))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid event id"
+                        (runner/handle [] (constantly "not-a-uuid") t0
+                                       (command :commission-truck (random-uuid)
+                                                {:truck-id truck-1
+                                                 :capacity 20})))))

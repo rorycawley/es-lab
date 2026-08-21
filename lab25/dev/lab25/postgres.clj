@@ -46,6 +46,6 @@
   (let [{:keys [admin]} @environment]
     (jdbc/execute!
      admin
-     ["TRUNCATE catalog.product, catalog.outbox,
+     ["TRUNCATE catalog.product, catalog.outbox, catalog.command_ledger,
                 ordering.price_book, ordering.orders, ordering.inbox
         RESTART IDENTITY"])))

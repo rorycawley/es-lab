@@ -1,5 +1,6 @@
 (ns lab18.as-of-test
   (:require [clojure.test :refer [deftest is testing]]
+            [lab18.application :as application]
             [lab18.as-of :as as-of]
             [lab18.store :as store]
             [lab18.truck :as truck]))
@@ -17,13 +18,10 @@
   {:command/id (random-uuid) :command/type type
    :correlation-id (random-uuid) :data data})
 
-(defn- append
-  "Append events that OCCURRED at one moment and were RECORDED at another."
-  [log occurred-at recorded-at cmd events]
-  (let [base (store/append log truck-1 (store/current-version log truck-1)
-                           gen-id occurred-at cmd events)
-        new  (subvec base (count log))]
-    (into log (mapv #(assoc-in % [:metadata :recorded-at] recorded-at) new))))
+(defn- handle
+  "Handle a command whose facts occur at one time and commit at another."
+  [log occurred-at recorded-at cmd]
+  (application/handle log truck-1 cmd 1 gen-id occurred-at recorded-at))
 
 ;; ---------------------------------------------------------------------------
 ;; The offline till from lab 1, made concrete.
@@ -33,15 +31,22 @@
 ;;   3 Sep   sold one MORE            the till was offline; recorded on the 6th
 ;; ---------------------------------------------------------------------------
 
+(def first-sale-command
+  (command :buy-flavour {:flavour "vanilla"}))
+
+(def late-sale-command
+  (command :buy-flavour {:flavour "vanilla"}))
+
 (def log
   (-> []
-      (append sep-01 sep-01 (command :load-truck {:flavour "vanilla" :quantity 10})
-              [{:event/type :truck-loaded :data {:flavour "vanilla" :quantity 10}}
-               {:event/type :truck-loaded :data {:flavour "chocolate" :quantity 5}}])
-      (append sep-03 sep-03 (command :buy-flavour {:flavour "vanilla"})
-              [{:event/type :flavour-sold :data {:flavour "vanilla"}}])
-      (append sep-03 sep-06 (command :buy-flavour {:flavour "vanilla"})
-              [{:event/type :flavour-sold :data {:flavour "vanilla"}}])))
+      (handle sep-01 sep-01
+              (command :load-truck {:flavour "vanilla" :quantity 10}))
+      (handle sep-01 sep-01
+              (command :load-truck {:flavour "chocolate" :quantity 5}))
+      (handle sep-03 sep-03
+              first-sale-command)
+      (handle sep-03 sep-06
+              late-sale-command)))
 
 (defn- stock [events] (get-in (truck/replay events) [:stock "vanilla"]))
 (defn- chocolate [events] (get-in (truck/replay events) [:stock "chocolate"]))
@@ -51,6 +56,27 @@
   (let [late (last log)]
     (is (= sep-03 (:event/occurred-at late)) "the cone was sold on the 3rd")
     (is (= sep-06 (get-in late [:metadata :recorded-at])) "we heard on the 6th")))
+
+(deftest application-and-store-own-different-parts-of-the-envelope-test
+  (let [event-id #uuid "018f7a3e-0000-7000-8000-000000001801"
+        cmd      {:command/id     #uuid "0f1c2b3a-0000-4000-8000-000000001801"
+                  :command/type   :load-truck
+                  :correlation-id #uuid "cc79c083-0000-4000-8000-000000001801"
+                  :data           {:flavour "vanilla" :quantity 10}}
+        event    (first (application/handle [] truck-1 cmd 1
+                                            (constantly event-id)
+                                            sep-01 sep-03))]
+    (testing "application-owned fact identity and context"
+      (is (= event-id (:event/id event)))
+      (is (= sep-01 (:event/occurred-at event)))
+      (is (= (:command/id cmd) (get-in event [:metadata :causation-id])))
+      (is (= (:correlation-id cmd) (get-in event [:metadata :correlation-id])))
+      (is (= 0 (get-in event [:metadata :decision-stream-version])))
+      (is (= 1 (get-in event [:metadata :rules-version]))))
+    (testing "persistence-owned coordinates and transaction time"
+      (is (= sep-03 (get-in event [:metadata :recorded-at])))
+      (is (= 1 (:stream/version event)))
+      (is (= 1 (:event/position event))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Two axes, two right answers
@@ -75,18 +101,16 @@
 (deftest transaction-time-is-stable-test
   (testing "what we believed on the 5th cannot change, whatever arrives later"
     (let [before (as-of/as-known-on log truck-1 sep-05)
-          later  (append log sep-03 #inst "2026-09-20T10:00:00.000-00:00"
-                         (command :buy-flavour {:flavour "vanilla"})
-                         [{:event/type :flavour-sold :data {:flavour "vanilla"}}])]
+          later  (handle log sep-03 #inst "2026-09-20T10:00:00.000-00:00"
+                         (command :buy-flavour {:flavour "vanilla"}))]
       (is (= before (as-of/as-known-on later truck-1 sep-05))
           "a fact recorded in three weeks' time does not rewrite the 5th"))))
 
 (deftest valid-time-is-not-stable-and-should-not-be-test
   (testing "learning something new about the 3rd changes what was true on the 5th"
     (let [before (stock (as-of/as-happened-by log truck-1 sep-05))
-          later  (append log sep-03 #inst "2026-09-20T10:00:00.000-00:00"
-                         (command :buy-flavour {:flavour "vanilla"})
-                         [{:event/type :flavour-sold :data {:flavour "vanilla"}}])]
+          later  (handle log sep-03 #inst "2026-09-20T10:00:00.000-00:00"
+                         (command :buy-flavour {:flavour "vanilla"}))]
       (is (= 8 before))
       (is (= 7 (stock (as-of/as-happened-by later truck-1 sep-05)))
           "not a bug — the truck really did have seven"))))
@@ -111,14 +135,19 @@
 ;; ---------------------------------------------------------------------------
 
 (def with-correction
-  (append log sep-03 sep-06
-          (command :correct-sale {:from "vanilla" :to "chocolate"})
-          [{:event/type :sale-corrected :data {:from "vanilla" :to "chocolate"}}]))
+  (handle log sep-06 sep-06
+          (command :correct-sale {:sale-id      (:event/id (last log))
+                                  :from         "vanilla"
+                                  :to           "chocolate"
+                                  :effective-at sep-03})))
 
 (deftest a-correction-is-a-new-fact-about-an-old-moment-test
   (testing "the till rang up vanilla; it was chocolate"
     (is (= 5 (count with-correction)))
-    (is (= sep-03 (:event/occurred-at (last with-correction))))
+    (is (= sep-06 (:event/occurred-at (last with-correction)))
+        "the correction happened when it was made")
+    (is (= sep-03 (as-of/valid-at (last with-correction)))
+        "its effect belongs to the original sale date")
     (is (= sep-06 (get-in (last with-correction) [:metadata :recorded-at])))))
 
 (deftest a-correction-changes-what-was-true-not-what-was-believed-test
@@ -133,17 +162,37 @@
     (testing "and the original sale is still in the log, unaltered"
       (is (= 2 (count (filter #(= :flavour-sold (:event/type %)) with-correction)))))))
 
+(deftest a-correction-identifies-one-sale-and-cannot-be-applied-twice-test
+  (let [sale-id (:event/id (last log))
+        cmd     (command :correct-sale {:sale-id      sale-id
+                                        :from         "vanilla"
+                                        :to           "chocolate"
+                                        :effective-at sep-03})]
+    (is (= sale-id (get-in (last with-correction) [:data :sale-id])))
+    (try
+      (handle with-correction sep-06 sep-06 cmd)
+      (is false "the same sale must not be corrected twice")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :sale-already-corrected (:reason (ex-data e))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Reconstructing a decision
 ;; ---------------------------------------------------------------------------
 
 (deftest a-past-decision-can-be-re-run-exactly-test
-  (testing "decide is pure, so the state it saw plus the command reproduces it"
-    (let [cmd   (command :buy-flavour {:flavour "vanilla"})
-          state (as-of/state-before log truck-1 3 truck/replay)]
+  (testing "retained inputs reproduce the original pure decision"
+    (let [event            (nth log 2)
+          expected-version (get-in event [:metadata :decision-stream-version])
+          rules            (get-in event [:metadata :rules-version])
+          state            (as-of/state-at-version log truck-1
+                                                   expected-version truck/replay)]
+      (is (= (:command/id first-sale-command)
+             (get-in event [:metadata :causation-id])))
+      (is (= 2 expected-version))
       (is (= 10 (get-in state [:stock "vanilla"])) "the truck as it was")
       (is (= [{:event/type :flavour-sold :data {:flavour "vanilla"}}]
-             (:events (as-of/reconstruct truck/decide cmd state 1)))))))
+             (:events (as-of/reconstruct truck/decide first-sale-command
+                                         state rules)))))))
 
 (deftest the-rules-must-be-the-rules-of-the-day-test
   (testing "a sale allowed under the old rules is refused under the new ones"
@@ -170,3 +219,55 @@
                (:events (as-of/reconstruct truck/decide cmd state 2)))))
       (testing "which is why a rules change can pass unnoticed for a long time"
         (is (some? (:events (as-of/reconstruct truck/decide cmd state 2))))))))
+
+(deftest unexpected-decision-failures-are-not-reported-as-business-refusals-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown command or rules"
+                        (as-of/reconstruct truck/decide
+                                           (command :buy-flavour {:flavour "vanilla"})
+                                           {:stock {"vanilla" 5}}
+                                           999)))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"programming failure"
+                        (as-of/reconstruct
+                         (fn [_command _state _rules]
+                           (throw (ex-info "programming failure" {:reason :bug})))
+                         (command :buy-flavour {:flavour "vanilla"})
+                         {:stock {"vanilla" 5}}
+                         1))))
+
+(deftest invalid-domain-and-temporal-inputs-fail-explicitly-test
+  (doseq [quantity [0 -1 1.5 nil]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Quantity must be"
+                          (truck/decide
+                           (command :load-truck {:flavour "vanilla"
+                                                 :quantity quantity})
+                           truck/initial-state
+                           1))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                        (truck/replay [{:event/type :freezer-failed}])))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown command or rules"
+                        (truck/decide (command :teleport {})
+                                      truck/initial-state 1)))
+  (doseq [bad-version [-1 1.5 nil]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Version must be"
+                          (as-of/up-to-version log truck-1 bad-version))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not exist"
+                        (as-of/state-before log truck-1 99 truck/replay)))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"cutoff must be"
+                        (as-of/as-known-on log truck-1 "2026-09-05")))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid event id"
+                        (application/handle [] truck-1
+                                            (command :load-truck
+                                                     {:flavour "vanilla"
+                                                      :quantity 10})
+                                            1 (constantly "not-a-uuid")
+                                            sep-01 sep-01)))
+  (let [sale-id (:event/id (last log))]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"effective time must match"
+         (truck/decide
+          (command :correct-sale {:sale-id      sale-id
+                                  :from         "vanilla"
+                                  :to           "chocolate"
+                                  :effective-at sep-01})
+          (truck/replay (store/stream log truck-1))
+          1)))))

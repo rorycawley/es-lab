@@ -41,10 +41,9 @@
 ;; ---------------------------------------------------------------------------
 ;; The modular-monolith case: one database, one transaction.
 ;;
-;; Lab 12 said nobody can build exactly-once delivery. That is true across a
-;; network and false across a schema — and the difference is not a trick. The
-;; outbox row and the inbox row are both rows here, so "delivered" and "marked
-;; delivered" are one write, and there is no window to crash in.
+;; One database can make the inbox claim, a local database effect and the
+;; outbox mark atomic. This is exactly-once local effect, not a general claim
+;; about delivery or remote side effects.
 ;; ---------------------------------------------------------------------------
 
 (defn relay-within-one-database!
@@ -53,20 +52,22 @@
   `effects` maps a recipient to a function of `[tx message]`, run in the same
   transaction as its inbox row and the outbox row's `sent_at`."
   [ds effects]
-  (reduce (fn [moved row]
-            (jdbc/with-transaction [tx ds]
-              (let [recipient (:recipient row)
-                    fact-id   (parse-uuid (get-in row [:payload :fact-id]))
-                    result    (if (inbox/handled? tx recipient fact-id)
-                                :already-handled
-                                (do
-                                  (jdbc/execute-one!
-                                   tx ["INSERT INTO inbox (recipient, fact_id) VALUES (?,?)"
-                                       recipient fact-id])
-                                  (when-let [effect! (get effects (keyword recipient))]
-                                    (effect! tx row))
-                                  :handled))]
-                (outbox/mark-sent! tx (:id row))
-                (conj moved [(:message-id row) result]))))
-          []
-          (outbox/pending ds)))
+  (let [pending (outbox/pending ds)
+        missing (->> pending
+                     (map (comp keyword :recipient))
+                     (remove #(contains? effects %))
+                     distinct
+                     seq)]
+    (when missing
+      (throw (ex-info "No handler for recipient" {:recipients missing})))
+    (reduce (fn [moved row]
+              (jdbc/with-transaction [tx ds]
+                (let [recipient (:recipient row)
+                      fact-id   (parse-uuid (get-in row [:payload :fact-id]))
+                      effect!   (get effects (keyword recipient))
+                      result    (inbox/handle-once-in-transaction!
+                                 tx recipient fact-id #(effect! % row))]
+                  (outbox/mark-sent! tx (:id row))
+                  (conj moved [(:message-id row) result]))))
+            []
+            pending)))

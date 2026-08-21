@@ -20,8 +20,9 @@
   (update state (get-in event [:data :flavour]) (fnil dec 0)))
 
 (defmethod evolve :default
-  [state _event]
-  state)
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -33,12 +34,25 @@
   [command _state]
   ;; Note what is *not* checked. A truck has no idea what the depot holds, and
   ;; under design B nothing else does either.
-  [{:event/type :truck-loaded :data (:data command)}])
+  (let [quantity (get-in command [:data :quantity])]
+    (when-not (and (int? quantity) (pos? quantity))
+      (throw (ex-info "Quantity must be a positive integer"
+                      {:reason :invalid-quantity
+                       :quantity quantity})))
+    [{:event/type :truck-loaded :data (:data command)}]))
 
 (defmethod decide :buy-flavour
   [command state]
   (let [flavour   (get-in command [:data :flavour])
         remaining (get state flavour 0)]
     (when-not (pos? remaining)
-      (throw (ex-info "Sold out" {:flavour flavour})))
+      (throw (ex-info "Sold out"
+                      {:reason :sold-out
+                       :flavour flavour
+                       :remaining remaining})))
     [{:event/type :flavour-sold :data (:data command)}]))
+
+(defmethod decide :default
+  [command _state]
+  (throw (ex-info "Unknown command type"
+                  {:command/type (:command/type command)})))

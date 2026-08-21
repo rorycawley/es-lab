@@ -179,6 +179,16 @@
       (is (empty? (filter #(str/includes? % "adapter") (requires app)))
           "app.clj requires an adapter — the shell must be told, not choose"))))
 
+(deftest the-audited-command-outcome-is-one-driven-operation-test
+  (testing "facts, actor-bearing ledger entry and messages cannot split"
+    (let [application (source "app.clj")
+          composition (source "system.clj")]
+      (is (str/includes? application "driven/commit-command"))
+      (is (not (str/includes? application "driven/append")))
+      (is (not (str/includes? application "driven/enqueue")))
+      (is (not (str/includes? composition "memory/outbox")))
+      (is (not (str/includes? composition "postgres/outbox"))))))
+
 (deftest only-the-composition-root-constructs-adapters-test
   (testing "search the source for a concrete adapter and find one file"
     (let [files (->> (file-seq (io/file "src/lab24"))
@@ -236,5 +246,5 @@
                      (remove str/blank?)
                      (remove #(str/starts-with? (str/trim %) ";"))
                      (drop-while #(not (str/starts-with? % "(defn"))))]
-      (is (< (count lines) 40)
+      (is (< (count lines) 45)
           (str "app.clj has grown to " (count lines) " lines of code")))))

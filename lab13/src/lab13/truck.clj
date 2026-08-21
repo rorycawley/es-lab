@@ -34,8 +34,9 @@
         (update :net + (/ unit-price (+ 1M upcast/vat-rate))))))
 
 (defmethod evolve :default
-  [state _event]
-  state)
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   "Fold stored events. Reading is the only place versions exist."

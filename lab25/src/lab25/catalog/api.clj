@@ -8,7 +8,7 @@
             [lab25.catalog.outbox :as outbox]
             [lab25.platform.behaviour :as behaviour]))
 
-(defrecord Catalog [datasource new-id audit change-price get-product])
+(defrecord Catalog [change-price get-product relay audit-log])
 
 (defn new-module
   ([datasource] (new-module datasource {}))
@@ -23,8 +23,14 @@
          query      (behaviour/compose
                      #(get-product/handle context %)
                      [(behaviour/observation audit :catalog/get-product)
-                      (behaviour/validation get-product/Request)])]
-     (->Catalog datasource new-id audit command query))))
+                      (behaviour/validation get-product/Request)])
+         relay      (fn [publish!]
+                      (mapv (fn [message]
+                              (let [delivery (publish! message)]
+                                (outbox/mark-published! context (:message/id message))
+                                {:message message :delivery delivery}))
+                            (outbox/pending context)))]
+     (->Catalog command query relay #(deref audit)))))
 
 (defn change-price! [catalog request]
   ((:change-price catalog) request))
@@ -35,11 +41,7 @@
 (defn relay!
   "Publish pending Catalog messages and mark each only after delivery returns."
   [catalog publish!]
-  (mapv (fn [message]
-          (let [delivery (publish! message)]
-            (outbox/mark-published! catalog (:message/id message))
-            {:message message :delivery delivery}))
-        (outbox/pending catalog)))
+  ((:relay catalog) publish!))
 
 (defn audit-log [catalog]
-  @(:audit catalog))
+  ((:audit-log catalog)))

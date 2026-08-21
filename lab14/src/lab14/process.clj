@@ -41,6 +41,12 @@
    :to         (:stream/id event)
    :started-at (:event/occurred-at event)})
 
+(defmethod evolve :flavour-sold
+  [state _event]
+  ;; The sale and depletion are recorded atomically. The sale belongs to this
+  ;; conversation but does not move the transfer process forward.
+  state)
+
 (defmethod evolve :flavour-unloaded
   [state event]
   ;; Remember who gave it up. Compensation has to know where to put it back,
@@ -62,7 +68,7 @@
   [state _event]
   (assoc state :status :compensated))
 
-(defmethod evolve :compensation-failed
+(defmethod evolve :stock-return-refused
   [state _event]
   (assoc state :status :needs-attention))
 
@@ -71,8 +77,9 @@
   (assoc state :status :abandoned))
 
 (defmethod evolve :default
-  [state _event]
-  state)
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -84,6 +91,12 @@
 
 (defn derived-command-id
   ^UUID [correlation-id step]
+  (when-not (uuid? correlation-id)
+    (throw (ex-info "Invalid correlation id"
+                    {:correlation-id correlation-id})))
+  (when-not (keyword? step)
+    (throw (ex-info "Invalid process step"
+                    {:step step})))
   (UUID/nameUUIDFromBytes (.getBytes (str "transfer/" correlation-id "/" (name step))
                                      "UTF-8")))
 
@@ -94,18 +107,24 @@
    :correlation-id correlation-id
    :data           data})
 
-(defn- waited-too-long?
+(defn timeout-reached?
+  "Has this process reached or passed its deadline?"
   [state now]
   (and (:started-at state)
-       (.isAfter ^Instant (.toInstant ^java.util.Date now)
-                 (.plus ^Instant (.toInstant ^java.util.Date (:started-at state))
-                        timeout))))
+       (not (.isBefore ^Instant (.toInstant ^java.util.Date now)
+                       (.plus ^Instant (.toInstant ^java.util.Date (:started-at state))
+                              timeout)))))
+
+(defn active?
+  "Does this state still need an event or a timer to move it forward?"
+  [state]
+  (contains? #{:awaiting-unload :awaiting-load :compensating} (:status state)))
 
 (defn decide
   [state correlation-id donor now]
   (case (:status state)
     :awaiting-unload
-    (if (waited-too-long? state now)
+    (if (timeout-reached? state now)
       [(command correlation-id :abandon :abandon-transfer
                 {:truck-id (:to state) :flavour (:flavour state)
                  :reason   "donor-did-not-respond"})]
@@ -125,5 +144,11 @@
               {:truck-id (:donor state) :flavour (:flavour state)
                :quantity (:quantity state)})]
 
-    ;; :complete, :compensated, :abandoned, :needs-attention — terminal.
-    []))
+    :not-started     []
+    :complete        []
+    :compensated     []
+    :abandoned       []
+    :needs-attention []
+
+    (throw (ex-info "Unknown process status"
+                    {:status (:status state)}))))

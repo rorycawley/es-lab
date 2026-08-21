@@ -13,8 +13,11 @@
   swapping one a one-line change rather than an audit.
 
   **Nothing in `core` requires this namespace, or `component`, or a port.**
-  The dependency arrows all point inward: shell → ports → core, and never
-  back. A test asserts it rather than trusting it."
+  The core depends on nothing in this application. `app.clj` depends on the
+  core and output-port abstractions; concrete adapters implement those
+  abstractions; this outer composition root wires the choices together. A test
+  asserts those inward-pointing source dependencies rather than trusting a
+  diagram."
   (:require [com.stuartsierra.component :as component]
             [lab23.adapter.clock :as clock]
             [lab23.adapter.http :as http]
@@ -28,35 +31,33 @@
   possible because the application layer cannot tell the difference."
   ([] (in-memory {}))
   ([{:keys [clock ids]}]
-   (component/system-map
-    :store  (memory/store)
-    :outbox (memory/outbox)
-    :clock  (or clock (clock/system-clock))
-    :ids    (or ids (clock/random-ids)))))
+   (let [selected-clock (or clock (clock/system-clock))]
+     (component/system-map
+      :clock selected-clock
+      :store (component/using (memory/store) {:clock :clock})
+      :ids   (or ids (clock/random-ids))))))
 
 (defn with-postgres
   "The same system, one line different.
 
-  `store` and `outbox` become Postgres records that need a `datasource`, and
-  Component supplies it — which is the entire difference between this function
-  and the one above."
+  One Postgres adapter owns event, ledger and outbox writes so the command
+  outcome retains a single transaction boundary."
   ([config] (with-postgres config {}))
   ([config {:keys [clock ids]}]
    (component/system-map
     :database (postgres/database config)
     :store    (component/using (postgres/store) {:datasource :database})
-    :outbox   (component/using (postgres/outbox) {:datasource :database})
     :clock    (or clock (clock/system-clock))
     :ids      (or ids (clock/random-ids)))))
 
-(defrecord HttpServer [port store outbox clock ids server]
+(defrecord HttpServer [port store clock ids server]
   component/Lifecycle
   (start [this]
     ;; Jetty is required here and nowhere else — `system.clj` is the only file
     ;; allowed to name a concrete adapter, and a web server is an adapter like
     ;; any other. It has a lifecycle, so Component owns it.
     (let [run (requiring-resolve 'ring.adapter.jetty/run-jetty)
-          deps (select-keys this [:store :outbox :clock :ids])]
+          deps (assoc (select-keys this [:store :clock :ids]) :outbox store)]
       (assoc this :server (run (http/handler deps) {:port port :join? false}))))
   (stop [this]
     (when server (.stop server))
@@ -70,7 +71,7 @@
   supplies them, exactly as it supplies a datasource to a store."
   [base port]
   (assoc base :http (component/using (map->HttpServer {:port port})
-                                     [:store :outbox :clock :ids])))
+                                     [:store :clock :ids])))
 
 (defn app
   "The application layer's dependencies, taken from a started system.
@@ -78,7 +79,7 @@
   `app.clj` receives a plain map — it never sees the system, never calls
   `component/start`, and could not tell you which adapter it was handed."
   [system]
-  (select-keys system [:store :outbox :clock :ids]))
+  (assoc (select-keys system [:store :clock :ids]) :outbox (:store system)))
 
 (defn start [system] (component/start system))
 (defn stop [system] (component/stop system))

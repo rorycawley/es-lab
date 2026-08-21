@@ -2,7 +2,8 @@
   "The domain: what an Ice Cream truck knows.
 
   Nothing in this namespace knows there is a log, a store, or a stream. It
-  takes values and returns values. `evolve` is lab 6's; `decide` is new.")
+  takes values and returns values. `evolve` keeps lab 6's shape; `decide` is
+  new.")
 
 ;; ---------------------------------------------------------------------------
 ;; evolve : state -> event -> state          (lab 6, trimmed to stock)
@@ -21,9 +22,14 @@
   [state event]
   (update state (get-in event [:data :flavour]) (fnil dec 0)))
 
-(defmethod evolve :default
+(defmethod evolve :stock-depleted
   [state _event]
   state)
+
+(defmethod evolve :default
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -32,10 +38,10 @@
 ;; ---------------------------------------------------------------------------
 ;; decide : command -> state -> [event]
 ;;
-;; The only function in these labs that is allowed to say no, because it is
-;; the only one that runs while the answer is still open. Events returned here
-;; carry no identity and no stream — they are what happened, not where it is
-;; recorded. The store stamps the rest.
+;; This is where context-dependent business rules may refuse a valid command,
+;; because it runs while the business answer is still open. Values returned
+;; here are event proposals: they carry no identity, stream, or version. The
+;; application boundary identifies them before the store records them.
 ;; ---------------------------------------------------------------------------
 
 (defmulti decide (fn [command _state] (:command/type command)))

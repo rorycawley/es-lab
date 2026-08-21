@@ -12,7 +12,7 @@ bb demo     # starts a real Postgres with Testcontainers
   One deployment. Two modules. Two database owners.
 
   1. Catalog changes today's vanilla price to €3.00.
-     Catalog committed its product and outbox together.
+     Catalog committed its command, product and outbox together.
 
   2. Ordering cannot peek at Catalog's table.
      Ordering has not received a price for this product
@@ -53,7 +53,7 @@ src/lab25/
   catalog/
     api.clj                    public module surface
     contract.clj               public price-changed message
-    change_price.clj           request + validation shape + transaction + response
+    change_price.clj           request identity + transaction + response
     get_product.clj            request + query + response
     outbox.clj                 Catalog-owned delivery state
 
@@ -70,7 +70,7 @@ src/lab25/
   system.clj                   one composition root, one deployment
 ```
 
-A change to the place-order use case starts and usually ends in `ordering/place_order.clj`. Its schema, SQL, response and small pure calculation are together because they share an axis of change. The architecture fitness test checks that these use-case files exist and that no top-level `controllers`, `services`, `repositories` or `entities` tree has reappeared.
+A change to the place-order use case starts and usually ends in `ordering/place_order.clj`. Its request schema, retry semantics, SQL, response and small pure calculation are together because they share an axis of change. The architecture fitness test checks that these use-case files exist and that no top-level `controllers`, `services`, `repositories` or `entities` tree has reappeared.
 
 ## A slice is not a module
 
@@ -108,6 +108,8 @@ The one application opens two datasource identities. Catalog's slices connect as
 
 Postgres refuses the query. The modules share a server for operational simplicity, but not tables or write authority. Separate databases could strengthen the same boundary later; starting with separate schemas and roles keeps one deployment without pretending table ownership is a comment.
 
+The module values do not expose their datasources either. Tests obtain database identities from deployment configuration when they need to prove permissions; ordinary callers receive only the public operations. Encapsulation would be cosmetic if a caller could reach through the module record and issue arbitrary SQL.
+
 The SQL also stays inside the slice that needs it. There is no generic repository abstraction: `place_order.clj` reads `ordering.price_book` and writes `ordering.orders` directly in one transaction. That is deliberate procedural code, not an architecture failure.
 
 ## Duplicate meaning, not just data
@@ -125,17 +127,28 @@ This duplication is cohesion: each module holds the fact in the form its use cas
 
 ## Communication is a contract, not a table read
 
-When Catalog changes a price it updates `catalog.product` and records a `:catalog/price-changed` integration message in `catalog.outbox` in the same transaction. The relay publishes that public contract. Ordering consumes it into `ordering.price_book` and records the message id in `ordering.inbox` in its own transaction.
+When Catalog changes a price it claims the command in `catalog.command_ledger`, updates `catalog.product` and records a `:catalog/price-changed` integration message in `catalog.outbox` in the same transaction. The relay publishes that public contract. Ordering atomically claims the stable fact identity in `ordering.inbox` and updates `ordering.price_book` in its own transaction.
 
 ```text
 Catalog transaction                 Ordering transaction
 ┌─────────────────────┐             ┌─────────────────────┐
+│ command ledger      │             │ atomic fact claim   │
 │ product             │             │ price_book          │
-│ outbox message      │── publish ─▶│ inbox message id    │
+│ outbox message      │── publish ─▶│                     │
 └─────────────────────┘             └─────────────────────┘
 ```
 
-There is no transaction across the modules. Labs [12](../lab12) and [20](../lab20) already established the consequence: publish-then-mark is at-least-once, so the receiver must be idempotent. A test delivers the same contract twice and gets `:duplicate` on the second attempt.
+There is no transaction across the modules. Labs [12](../lab12) and [20](../lab20) already established the consequence: publish-then-mark is at-least-once, so the receiver must be idempotent. Its `INSERT ... ON CONFLICT DO NOTHING RETURNING` is the decision: exactly one concurrent delivery of a fact owns the projection update; every loser is a duplicate. The inbox is keyed by `fact_id`, not `message_id`, so publishing the same fact in a genuinely new envelope is harmless as well as redelivering the original envelope. Tests cover sequential republication and concurrent delivery.
+
+The public message keeps Lab3's three scopes separate. `:message/id` identifies this delivery. `[:payload :fact-id]` identifies the price-change fact across every publication. `:metadata` carries causation and correlation: Catalog's command id becomes `:causation-id`, while `:correlation-id` follows the wider business flow. Ordering preserves that trace metadata when it claims the fact. The contract, metadata and payload maps are closed: an unsupported shape is rejected at the boundary instead of being partially trusted.
+
+## Retry the intent, not today's procedure
+
+`change-price!` requires a command id. The ledger remembers the command's business intent, its fact id and its one outbox-envelope id. An exact retry returns the first accepted result and cannot create another fact or outbox row. Reusing the id for another product, name or price is a typed `:command-id-collision`. Correlation is trace metadata rather than intent, so changing only the correlation id does not turn a retry into a new command.
+
+`place-order!` applies the same rule with its order id. Once accepted, a retry returns the price captured by that order even if Catalog's current price has since changed. The current price is consulted only for a genuinely new order. Reusing an order id with another product or quantity is an `:order-id-collision`.
+
+These guarantees are slice-owned, not provided by a generic idempotency framework. In each case the identity claim and the state it protects share the module's PostgreSQL transaction. A failed outbox write therefore rolls back the ledger and product change together.
 
 The bus is in-process today. Replacing it with a broker would change delivery mechanics and operational guarantees, not grant permission to bypass the contract. That makes extraction possible; it does not make extraction free.
 
@@ -143,7 +156,7 @@ The bus is in-process today. Replacing it with a broker would change delivery me
 
 Bogard's CQRS rule is small here:
 
-- `change-price!` and `place-order!` are commands. They validate intent, transact and return a command-specific result.
+- `change-price!` and `place-order!` are commands. They validate identified intent, transact and return a command-specific result.
 - `get-product` and `get-order` are queries. They select only the response their caller needs and do not reuse a mutable “Product” or “Order” entity.
 
 Each slice has one request, one handler and one response ([12:03](https://www.youtube.com/watch?v=fc6_NtD9soI&t=723)). CQRS here does not mean two services, two event stores or a framework mediator. It means reads and writes are different acts and do not have to compromise around one shared object model.
@@ -177,13 +190,13 @@ The shared strategy from Lab 21 is still the reference:
 | **Adapter / Integration** | Secondary adapters such as repositories | No | Slower. Proves infrastructure mapping works. |
 | **System / E2E** | Primary adapters such as an HTTP API | No | Very slow. A few smoke tests prove the wiring. |
 
-Lab 25 exposes an intentional variation. `catalog.api` and `ordering.api` are its public use-case surfaces, but their slices talk directly to module-owned Postgres tables. There is no secondary repository port to replace with a fake. Consequently `vertical_slice_test.clj` is both behaviour-focused and integration-speed: it enters only through a module's public contract and observes responses and database-visible outcomes, while real PostgreSQL participates.
+Lab 25 exposes an intentional variation. `catalog.api` and `ordering.api` are its public use-case surfaces, but their slices talk directly to module-owned Postgres tables. There is no secondary repository port to replace with a fake. Consequently `vertical_slice_test.clj` is both behaviour-focused and integration-speed: it enters only through a module's public contract and observes returned behaviour—including retry and collision outcomes—while real PostgreSQL participates. It does not assert SQL call counts or internal choreography.
 
 Inventing `IOrderRepository` solely to make the first row fast would contradict the lab's start-procedural rule. If a slice later earns a driven port, its use-case tests should fake that port and a separate adapter contract should exercise the implementation against Postgres.
 
 `pricing_test.clj` tests the pure `price-order` rule directly with values. More complex invariants would get more such tests. This is a focused supplement to public use-case tests, not permission to assert private call choreography.
 
-There is no separate repository-adapter suite because there is no repository adapter, and no System/E2E suite because this lab has not added a primary HTTP adapter. `database_boundary_test.clj` is a PostgreSQL integration test for schema permissions. `architecture_test.clj` is orthogonal: it verifies the chosen source-dependency policy, not product behaviour.
+There is no separate repository-adapter suite because there is no repository adapter, and no System/E2E suite because this lab has not added a primary HTTP adapter. `database_boundary_test.clj` is a PostgreSQL integration test proving both read and write isolation between module roles. `architecture_test.clj` is orthogonal: it verifies the chosen source-dependency policy and that public module values do not expose database handles, not product behaviour.
 
 ## Refactor before extracting
 

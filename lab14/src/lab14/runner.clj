@@ -1,11 +1,27 @@
 (ns lab14.runner
   "Wiring: the store, the domain, and the process manager, plus a clock.
 
-  Unchanged from lab 11. Compensation needed nothing here either — an undo is
-  a command like any other, dispatched the same way."
+  Compensation needs no special dispatch path: it is a business command like
+  any other. The application still allocates fact identity and attaches
+  causation and correlation before the persistence boundary."
   (:require [lab14.process :as process]
             [lab14.store :as store]
             [lab14.truck :as truck]))
+
+(defn- identify-events
+  [gen-id now command proposals]
+  (mapv (fn [proposal]
+          (let [event-id (gen-id)]
+            (when-not (uuid? event-id)
+              (throw (ex-info "Invalid event id"
+                              {:event/id event-id})))
+            (-> proposal
+                (assoc :event/id event-id
+                       :event/occurred-at now)
+                (update :metadata assoc
+                        :causation-id (:command/id command)
+                        :correlation-id (:correlation-id command)))))
+        proposals))
 
 (defn handle
   "Run one command against the truck it addresses (lab 8)."
@@ -14,22 +30,26 @@
         history   (store/stream log stream-id)
         version   (store/current-version log stream-id)
         state     (truck/replay history)
-        events    (truck/decide command state)]
-    (store/append log stream-id version gen-id now command events)))
+        proposals (truck/decide command state)
+        events    (identify-events gen-id now command proposals)]
+    (store/append log stream-id version events)))
 
 (defn dispatch
   "Run `command` unless the log shows it already ran (lab 10).
 
-  A refused command is caught, not propagated. A refusal records nothing
-  (lab 5), so from the process manager's point of view it is indistinguishable
-  from silence — which is what the timeout exists to handle."
+  The donor's expected `:not-enough-to-spare` refusal records nothing and is
+  converted to silence. The load and return refusals are facts. Every other
+  exception remains visible because it represents invalid semantics, a bug,
+  or an infrastructure failure rather than this one expected outcome."
   [log gen-id now command]
   (if (store/caused-by? log (:command/id command))
     log
     (try
       (handle log gen-id now command)
-      (catch clojure.lang.ExceptionInfo _refused
-        log))))
+      (catch clojure.lang.ExceptionInfo failure
+        (if (= :not-enough-to-spare (:reason (ex-data failure)))
+          log
+          (throw failure))))))
 
 (defn advance-process
   "Fold one conversation, decide what it needs next, and dispatch that."
@@ -38,25 +58,41 @@
         commands (process/decide state correlation-id donor now)]
     (reduce (fn [l c] (dispatch l gen-id now c)) log commands)))
 
-(defn- correlations-in
+(defn- transfer-correlations-in
+  "Conversations started by the event this process subscribes to."
   [events]
   (->> events
+       (filter #(= :stock-depleted (:event/type %)))
        (keep #(get-in % [:metadata :correlation-id]))
        distinct
        vec))
 
-(defn run-once
-  "React to everything appended since `checkpoint`.
+(defn- active-correlations-in
+  "Conversations that still need an event or timer to move forward."
+  [log]
+  (->> (transfer-correlations-in log)
+       (filter (fn [correlation-id]
+                 (-> (store/correlated log correlation-id)
+                     process/replay
+                     process/active?)))
+       vec))
 
-  Unlike lab 10's reactor, this one does not react to events one at a time.
-  It gathers the conversations the new events belong to and re-folds each,
-  because a process manager's next step depends on the whole conversation, not
-  on the message that woke it up."
+(defn run-once
+  "React to new events and poll active conversations for timer wake-ups.
+
+  A process manager re-folds each awakened conversation because its next step
+  depends on the whole history. Active conversations are included even when
+  no new fact exists; otherwise the donor timeout could never fire after the
+  triggering batch had been checkpointed."
   [log checkpoint gen-id now donor]
-  (let [batch (store/since log checkpoint)
-        log'  (reduce (fn [l cid] (advance-process l gen-id now cid donor))
-                      log
-                      (correlations-in batch))]
+  (let [batch        (store/since log checkpoint)
+        correlations (->> (concat (transfer-correlations-in batch)
+                                  (active-correlations-in log))
+                          distinct)
+        log'         (reduce (fn [l cid]
+                               (advance-process l gen-id now cid donor))
+                             log
+                             correlations)]
     {:log        log'
      :checkpoint (->> batch (map :event/position) (apply max checkpoint))}))
 
@@ -66,9 +102,10 @@
    (run-until-quiet log checkpoint gen-id now donor 100))
   ([log checkpoint gen-id now donor max-passes]
    (loop [log log, checkpoint checkpoint, passes 0]
-     (let [{log' :log checkpoint' :checkpoint} (run-once log checkpoint gen-id now donor)]
+     (let [{log' :log checkpoint' :checkpoint} (run-once log checkpoint gen-id now donor)
+           next-passes (inc passes)]
        (cond
          (= log log') {:log log' :checkpoint checkpoint' :passes passes}
-         (>= passes max-passes) (throw (ex-info "Process did not settle"
-                                                {:passes passes}))
-         :else (recur log' checkpoint' (inc passes)))))))
+         (> next-passes max-passes) (throw (ex-info "Process did not settle"
+                                                    {:passes next-passes}))
+         :else (recur log' checkpoint' next-passes))))))

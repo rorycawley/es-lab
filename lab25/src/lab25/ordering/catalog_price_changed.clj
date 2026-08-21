@@ -1,29 +1,29 @@
 (ns lab25.ordering.catalog-price-changed
   "The complete integration-message slice for Catalog's public contract.
 
-  It owns an inbox and Ordering's local price book. Re-delivery is harmless,
-  and no query reaches into Catalog's database."
+  It atomically claims a stable fact id and updates Ordering's local price
+  book in one transaction. Re-delivery or republication is harmless, and no
+  query reaches into Catalog's database."
   (:require [lab25.catalog.contract :as catalog-contract]
-            [next.jdbc :as jdbc]
-            [next.jdbc.result-set :as rs]))
+            [next.jdbc :as jdbc]))
 
 (def Request catalog-contract/PriceChanged)
 
 (defn handle!
   [{:keys [datasource]} message]
-  (let [message-id (:message/id message)
-        {:keys [product-id product-name price-cents]} (:payload message)]
+  (let [message-id     (:message/id message)
+        {:keys [causation-id correlation-id]} (:metadata message)
+        {:keys [fact-id product-id product-name price-cents]} (:payload message)]
     (jdbc/with-transaction [tx datasource]
       (if (jdbc/execute-one!
            tx
-           ["SELECT message_id FROM ordering.inbox WHERE message_id = ?"
-            message-id]
-           {:builder-fn rs/as-unqualified-kebab-maps})
-        {:duplicate message-id}
+           ["INSERT INTO ordering.inbox
+               (fact_id, first_message_id, causation_id, correlation_id)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (fact_id) DO NOTHING
+             RETURNING fact_id"
+            fact-id message-id causation-id correlation-id])
         (do
-          (jdbc/execute-one!
-           tx
-           ["INSERT INTO ordering.inbox (message_id) VALUES (?)" message-id])
           (jdbc/execute-one!
            tx
            ["INSERT INTO ordering.price_book
@@ -33,5 +33,6 @@
                SET product_name = EXCLUDED.product_name,
                    current_price_cents = EXCLUDED.current_price_cents"
             product-id product-name price-cents])
-          {:accepted {:message-id message-id
-                      :product-id product-id}})))))
+          {:accepted {:fact-id fact-id
+                      :product-id product-id}})
+        {:duplicate fact-id}))))

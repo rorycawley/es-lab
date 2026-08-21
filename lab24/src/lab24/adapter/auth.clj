@@ -69,25 +69,32 @@
 ;; fact should carry. A fitness test greps every recorded event for a token.
 ;; ---------------------------------------------------------------------------
 
+(def ^:private known-roles {"driver" :driver "depot" :depot})
+
 (defn- ->principal [claims]
-  {;; The actor is destined for a stream, so both its fields are strings —
-   ;; see the note in `schema/command.clj`. The roles are not: they are
-   ;; consulted in this process and never written anywhere, so a keyword is
-   ;; free. The rule is about what you persist, not about what you hold.
-   :actor {:type "user" :id (:sub claims)}
-   :roles (into #{} (map keyword) (:roles claims))})
+  (let [subject (:sub claims)]
+    (when (and (string? subject) (not (str/blank? subject)))
+      {;; The actor is destined for a stream, so both its fields are strings.
+       ;; Roles stay process-local keywords, selected from a fixed vocabulary
+       ;; rather than interning arbitrary claim values.
+       :actor {:type "user" :id subject}
+       :roles (into #{} (keep known-roles) (:roles claims))})))
 
 (defn- verify
-  "Returns `{:principal …}` or `{:failure reason}`. Never throws, and never
-  says more than the client is owed."
+  "Return a principal or an authentication failure without exposing token
+  details. Failure to obtain verification keys is infrastructure failure and
+  deliberately propagates rather than being mislabeled as a bad credential."
   [{:keys [verification-keys clock issuer audience]} token]
   (if-let [kid (:kid (unverified-header token))]
     (if-let [key (driven/verification-key verification-keys kid)]
       (try
-        {:principal (->principal (jwt/unsign token key {:alg :rs256
-                                                        :iss issuer
-                                                        :aud audience
-                                                        :now (driven/now clock)}))}
+        (if-let [principal (->principal
+                            (jwt/unsign token key {:alg :rs256
+                                                   :iss issuer
+                                                   :aud audience
+                                                   :now (driven/now clock)}))]
+          {:principal principal}
+          {:failure :invalid-claims})
         (catch clojure.lang.ExceptionInfo e
           ;; buddy reports :exp, :iss, :aud or :signature. Worth keeping apart
           ;; internally — an expired token means *refresh and retry*, and every
@@ -127,8 +134,9 @@
                       ;; RFC 6750: say *that* it failed in the body, and what
                       ;; the client should do about it in the challenge.
                       {"www-authenticate"
-                       (if (= :exp failure)
-                         "Bearer error=\"invalid_token\", error_description=\"token expired\""
+                       (case failure
+                         :no-token "Bearer"
+                         :exp "Bearer error=\"invalid_token\", error_description=\"token expired\""
                          "Bearer error=\"invalid_token\"")})))))
 
 (defn principal [request] (get-in request [:authentication :principal]))

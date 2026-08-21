@@ -7,8 +7,9 @@
       the depot cannot go negative
 
   Read this design looking for what it gets right. It is not a strawman: it is
-  the only one of the three that can refuse an over-draw at the moment of the
-  decision, and if that rule has legal force, this is the design you want.
+  one design that can make the depot debit and truck credit one atomic
+  decision. Design C can still guard the depot immediately, but completes the
+  cross-stream handoff separately.
 
   What it costs is measured in `contention.clj`.")
 
@@ -36,8 +37,9 @@
     (update-in state [:trucks truck-id flavour] (fnil dec 0))))
 
 (defmethod evolve :default
-  [state _event]
-  state)
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -47,17 +49,27 @@
 
 (defmethod decide :stock-depot
   [command _state]
-  [{:event/type :depot-stocked :data (:data command)}])
+  (let [quantity (get-in command [:data :quantity])]
+    (when-not (and (int? quantity) (pos? quantity))
+      (throw (ex-info "Quantity must be a positive integer"
+                      {:reason :invalid-quantity
+                       :quantity quantity})))
+    [{:event/type :depot-stocked :data (:data command)}]))
 
 (defmethod decide :load-truck
   [command state]
   (let [{:keys [flavour quantity]} (:data command)
         at-depot (get-in state [:depot flavour] 0)]
+    (when-not (and (int? quantity) (pos? quantity))
+      (throw (ex-info "Quantity must be a positive integer"
+                      {:reason :invalid-quantity
+                       :quantity quantity})))
     ;; The invariant, enforced immediately, because this aggregate can see
     ;; both sides of the movement.
     (when (< at-depot quantity)
       (throw (ex-info "Depot cannot cover that"
-                      {:flavour flavour :at-depot at-depot :asked quantity})))
+                      {:reason :insufficient-depot-stock
+                       :flavour flavour :at-depot at-depot :asked quantity})))
     [{:event/type :truck-loaded :data (:data command)}]))
 
 (defmethod decide :buy-flavour
@@ -65,5 +77,14 @@
   (let [{:keys [truck-id flavour]} (:data command)
         remaining (get-in state [:trucks truck-id flavour] 0)]
     (when-not (pos? remaining)
-      (throw (ex-info "Sold out" {:truck-id truck-id :flavour flavour})))
+      (throw (ex-info "Sold out"
+                      {:reason :sold-out
+                       :truck-id truck-id
+                       :flavour flavour
+                       :remaining remaining})))
     [{:event/type :flavour-sold :data (:data command)}]))
+
+(defmethod decide :default
+  [command _state]
+  (throw (ex-info "Unknown command type"
+                  {:command/type (:command/type command)})))

@@ -15,9 +15,14 @@
   [state event]
   (update state (get-in event [:data :flavour]) (fnil dec 0)))
 
-(defmethod evolve :default
+(defmethod evolve :stock-depleted
   [state _event]
   state)
+
+(defmethod evolve :default
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -37,8 +42,17 @@
   (let [flavour   (get-in command [:data :flavour])
         remaining (get state flavour 0)]
     (when-not (pos? remaining)
-      (throw (ex-info "Sold out" {:flavour flavour :remaining remaining})))
+      (throw (ex-info "Sold out"
+                      {:reason :sold-out
+                       :command/type :buy-flavour
+                       :flavour flavour
+                       :remaining remaining})))
     (if (= 1 remaining)
       [{:event/type :flavour-sold   :data {:flavour flavour}}
        {:event/type :stock-depleted :data {:flavour flavour}}]
       [{:event/type :flavour-sold   :data {:flavour flavour}}])))
+
+(defmethod decide :default
+  [command _state]
+  (throw (ex-info "Unknown command type"
+                  {:command/type (:command/type command)})))

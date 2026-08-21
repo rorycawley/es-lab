@@ -101,9 +101,14 @@
 
 (deftest with-no-concurrency-the-two-agree-test
   (testing "the gap needs an overlapping transaction to open at all"
-    (let [ds (fixture/datasource)]
-      (store/append ds truck-1 0 gen-id t0 {:command/id (random-uuid)}
-                    [{:event/type :flavour-sold :data {:flavour "vanilla"}}])
+    (let [ds  (fixture/datasource)
+          cmd-id (random-uuid)]
+      (store/append ds truck-1 0
+                    [{:event/id          (gen-id)
+                      :event/type        :flavour-sold
+                      :event/occurred-at t0
+                      :data              {:flavour "vanilla"}
+                      :metadata          {:causation-id cmd-id}}])
       (is (= (positions (store/since ds 0))
              (positions (store/since-committed ds 0))
              [1])))))

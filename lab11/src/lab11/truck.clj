@@ -21,9 +21,18 @@
   (let [{:keys [flavour quantity]} (:data event)]
     (update state flavour (fnil - 0) quantity)))
 
-(defmethod evolve :default
+(defmethod evolve :stock-depleted
   [state _event]
   state)
+
+(defmethod evolve :transfer-abandoned
+  [state _event]
+  state)
+
+(defmethod evolve :default
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -43,7 +52,11 @@
   (let [flavour   (get-in command [:data :flavour])
         remaining (get state flavour 0)]
     (when-not (pos? remaining)
-      (throw (ex-info "Sold out" {:flavour flavour :remaining remaining})))
+      (throw (ex-info "Sold out"
+                      {:reason :sold-out
+                       :command/type :buy-flavour
+                       :flavour flavour
+                       :remaining remaining})))
     (if (= 1 remaining)
       [{:event/type :flavour-sold   :data {:flavour flavour}}
        {:event/type :stock-depleted :data {:flavour flavour}}]
@@ -58,7 +71,11 @@
     ;; waiting on this needs a timeout rather than a reply.
     (when (< remaining quantity)
       (throw (ex-info "Not enough to spare"
-                      {:flavour flavour :remaining remaining :asked quantity})))
+                      {:reason :not-enough-to-spare
+                       :command/type :unload-flavour
+                       :flavour flavour
+                       :remaining remaining
+                       :asked quantity})))
     [{:event/type :flavour-unloaded :data {:flavour flavour :quantity quantity}}]))
 
 (defmethod decide :abandon-transfer
@@ -66,3 +83,8 @@
   [{:event/type :transfer-abandoned
     :data       {:flavour (get-in command [:data :flavour])
                  :reason  (get-in command [:data :reason])}}])
+
+(defmethod decide :default
+  [command _state]
+  (throw (ex-info "Unknown command type"
+                  {:command/type (:command/type command)})))

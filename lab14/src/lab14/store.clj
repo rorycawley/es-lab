@@ -1,6 +1,6 @@
 (ns lab14.store
-  "The log, unchanged from lab 11. Compensation needs nothing from the store:
-  undoing a step is just more events, appended like any others.")
+  "The in-memory append-only log. Compensation needs nothing special from the
+  store: its outcomes are facts appended through the ordinary path.")
 
 (defn stream
   [log stream-id]
@@ -36,17 +36,20 @@
        vec))
 
 (defn caused-by?
-  "Has any event already been caused by this command? (lab 10)"
+  "Has any event already been caused by this command?
+
+  This is lab 10's narrow shortcut for commands guaranteed to record an
+  event, not a general command ledger."
   [log command-id]
   (boolean (some #(= command-id (get-in % [:metadata :causation-id])) log)))
 
 (defn append
-  "Append the events `command` produced to `stream-id`.
+  "Model appending identified `events` to `stream-id`.
 
-  The store stamps identity, position, stream coordinates, the occurrence time
-  from the injected clock, and the two ids that place the event in a chain:
-  causation (this command) and correlation (this conversation)."
-  [log stream-id expected-version gen-id now command events]
+  Identity, occurrence time, causation and correlation already exist and are
+  preserved. This store assigns only stream versions and global positions; a
+  production store must make the compare-and-append atomic."
+  [log stream-id expected-version events]
   (let [actual (current-version log stream-id)
         end    (last-position log)]
     (when-not (= expected-version actual)
@@ -57,11 +60,7 @@
     (into log
           (map-indexed (fn [i event]
                          (assoc event
-                                :event/id (gen-id)
-                                :event/occurred-at now
                                 :event/position (+ end 1 i)
                                 :stream/id stream-id
-                                :stream/version (+ actual 1 i)
-                                :metadata {:causation-id   (:command/id command)
-                                           :correlation-id (:correlation-id command)}))
+                                :stream/version (+ actual 1 i)))
                        events))))

@@ -16,18 +16,20 @@ This lab counts.
 one command  →  0..n events  →  0..n messages
 ```
 
-## A command produces zero events
+## A command can leave zero events
 
-The request was refused. Pistachio sold out this morning, so the customer is told no.
+Pistachio sold out this morning, so the request is refused and the customer is told no. This lab chooses not to record that refusal:
 
 ```clojure
 {:command buy-pistachio
  :events  []}
 ```
 
-Nothing happened, so there is no fact to record. This is worth being precise about, because the tempting move is to record the refusal as an event — `:buy-flavour-refused` — and that is usually a mistake. Nothing about the truck changed. Rebuilding state from history would have to know to *skip* that event, which means it isn't really part of the history at all. The refusal is the caller's business, returned to them; it is the absence of an event, not a kind of event.
+Zero recorded events does not by itself say *why*. A request may have been refused without creating a business fact, or it may have been an accepted idempotent no-op because the desired state was already true. The caller still needs an explicit result; an empty vector is the persistence outcome, not the whole response.
 
-(There are exceptions. If the business genuinely cares that people keep asking for pistachio — enough to report on it, or reorder — then "a customer was turned away" is a fact in its own right and earns an event. The test is whether anyone downstream needs it, not whether something failed.)
+Nor does “state did not change” disqualify something from history. [Lab6](../lab6) deliberately ignores event types that do not affect its particular fold. If the business cares that customers were turned away—enough to report on it, investigate it or reorder pistachio—then `:flavour-purchase-refused` is a meaningful fact and should be recorded even if the truck's stock projection ignores it. [Lab14](../lab14) makes exactly that choice when a process needs to observe a refusal.
+
+The rule is therefore: **record a refusal when the refusal itself is a business fact; otherwise return it to the caller without inventing history.** This example takes the second path.
 
 ## A command produces one event
 
@@ -50,13 +52,13 @@ Selling the last chocolate cone is two facts, not one:
 
 Both are true. Both are worth recording. Both were caused by the same request. (Whether they *should* be two events rather than one is a genuine argument, and it gets its own section below.)
 
-This is why `decide` returns a **vector**:
+This is why `decide` returns a **vector of event proposals**:
 
 ```clojure
 (decide command state)   ;; => [] or [event] or [event event]
 ```
 
-Not an event, not a nullable event. A collection, whose empty and multi-element cases are both ordinary.
+Not an event, not a nullable event. A collection, whose empty and multi-element cases are both ordinary. These outcomes have no `:event/id`, stream or version yet; [Lab8](../lab8) puts that recording envelope around them at the store boundary.
 
 ## Order is significant
 
@@ -64,16 +66,16 @@ A vector, specifically — not a set. When a command produces several events, th
 
 **The order is recorded, permanently.** The events are appended in the order given, and a stream is by definition an ordered sequence: state is rebuilt by replaying events in the order they were stored. Nothing downstream can recover the order you *meant*, only the order you wrote. So even when two events are genuinely independent, you are still choosing an order that becomes historical fact. There is no unordered batch.
 
-**Folding is order-sensitive.** State is `(reduce evolve initial events)`, and the two orderings tell different stories:
+**The story is order-sensitive.** These two orderings make different historical claims:
 
 ```text
 flavour-sold → stock-depleted     one cone left, sold, now none            ✓
 stock-depleted → flavour-sold     none left, then a cone was sold          ✗
 ```
 
-The second replays into a truck that sold a cone it didn't have. The final state might even come out the same; the history still asserts something false, and the history is the thing you are keeping.
+The second ordering says the flavour was already depleted and was then sold anyway. In the small fold introduced by Lab 6, `:stock-depleted` does not itself change stock, so both orders deliberately produce the same final state. That is not evidence that the order is interchangeable; it is evidence that final state alone cannot validate the story recorded by the history.
 
-This is explicit in the decider pattern, where `decide : Command -> State -> Event list` and each returned event is folded in turn, [passing the computed state along](https://thinkbeforecoding.com/post/2021/12/17/functional-event-sourcing-decider):
+When events do affect a fold, their application is sequential. The decider pattern uses `decide : Command -> State -> Event list`, then folds each returned event in turn, [passing the computed state along](https://thinkbeforecoding.com/post/2021/12/17/functional-event-sourcing-decider):
 
 ```text
 state1 = evolve state0 event1
@@ -109,34 +111,45 @@ Most facts are nobody else's business.
 
 Publishing is a decision to expose a fact as a contract that other modules will build on, and it is made deliberately, once per event type. **The default is not to publish.** A system that mechanically turns every domain event into an integration message has no boundary left — it has published its internal model, and every future refactor is now a breaking change for someone. That is exactly the coupling [lab3](../lab3) introduced the second shape to prevent.
 
+## An event produces one message
+
+Opening the truck in Smithfield matters to the customer app and nobody else:
+
+```clojure
+{:event    truck-opened-smithfield
+ :messages [{:message/type :truck-opened …}]}
+```
+
+One fact, one deliberately exposed contract. The fact does not need a second consumer to justify the boundary.
+
 ## An event produces many messages
 
 Two modules care that stock ran out, and they want different things:
 
 ```clojure
 {:event    stock-depleted-chocolate
- :messages [{:message/type :stock-depleted       …}   ; purchasing: reorder
-            {:message/type :flavour-unavailable  …}]} ; customer app: grey out the button
+ :messages [{:message/type :flavour-unavailable  …}   ; customer app: grey out the button
+            {:message/type :restock-required     …}]} ; purchasing: reorder
 ```
 
-One fact, two contracts, two audiences, two envelopes — and, from [lab4](../lab4), two `:message/id` values carrying one `:event/id` between them. The consumers are free to evolve independently because neither of them is looking at the domain event.
+One fact, two contracts and two audiences. These message proposals carry no `:message/id`; [Lab12](../lab12) makes the boundary explicit and has the publisher turn them into two transport envelopes. From [Lab4](../lab4), those envelopes receive two distinct `:message/id` values while carrying one `:event/id` between them. The consumers are free to evolve independently because neither of them is looking at the domain event.
 
-## The fan is one-way
+## Cardinality is not causation
 
-Every count above is a fan-**out**. The reverse never happens:
+The two functions this sequence is building both fan out:
 
 ```text
-one command  →  many events      ✓
-many commands →  one event       ✗
-one event    →  many messages    ✓
-many events  →  one message      ✗
+decide    one command + current state  →  zero, one or many event proposals
+announce  one recorded event            →  zero, one or many message proposals
 ```
 
-An event has exactly one cause. So does a message. That asymmetry is what makes history explicable: from any fact you can name the single request that produced it, and from any delivery the single fact it announces. A merged event — one caused jointly by two commands — would leave "why did this happen?" with no single answer.
+That is a statement about these function boundaries, not a claim that software may never combine inputs. A projection can fold many events into a summary, and a process manager can observe several facts before asking for the next action. [Lab11](../lab11) exists for exactly that larger conversation.
+
+Causation is a separate concern introduced later. At the recording boundary, every event produced by one command receives that command's id as its immediate `:causation-id` ([Lab10](../lab10)). That groups the facts from one decision, but it does not preserve the original request body; doing that requires retaining the command separately. Correlation then connects a process spanning several immediate causes. This lab counts outputs and does not pretend its nested example values are durable causation metadata.
 
 ## What's next
 
-Counting the events is not the same as *deciding* them. Every `:events` vector in this lab was written by hand; what determines its contents is state — how much chocolate is left — and that means a history has to be folded into state first.
+Counting the events is not the same as *deciding* them. Every unstamped `:events` vector in this lab was written by hand; what determines its contents is state—how much chocolate is left—and that means a history has to be folded into state first.
 
 [Lab6](../lab6) folds a history into state with `evolve`. `decide` — the function that turns a command into the events this lab has been counting — follows once there is a state to decide against.
 

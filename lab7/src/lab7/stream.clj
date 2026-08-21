@@ -7,6 +7,11 @@
 (def truck-1 #uuid "0f1c2b3a-0000-4000-8000-000000000001")
 (def truck-2 #uuid "0f1c2b3a-0000-4000-8000-000000000002")
 
+(def truck-1-loaded-id #uuid "018f7a3e-0000-7000-8000-000000000701")
+(def truck-2-loaded-id #uuid "018f7a3e-0000-7000-8000-000000000702")
+(def truck-1-sold-id #uuid "018f7a3e-0000-7000-8000-000000000703")
+(def truck-2-sold-id #uuid "018f7a3e-0000-7000-8000-000000000704")
+
 ;; ---------------------------------------------------------------------------
 ;; Two new keys on the envelope.
 ;;
@@ -19,8 +24,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- event
-  [stream-id version type data]
-  {:event/id       (random-uuid)
+  [event-id stream-id version type data]
+  {:event/id       event-id
    :event/type     type
    :stream/id      stream-id
    :stream/version version
@@ -29,15 +34,19 @@
 (def log
   "Every event from both trucks, in the order they were appended.
 
-  Truck 1 loaded one vanilla and sold it. Truck 2 loaded three and sold one."
-  [(event truck-1 1 :truck-loaded {:flavour "vanilla" :quantity 1})
-   (event truck-2 1 :truck-loaded {:flavour "vanilla" :quantity 3})
-   (event truck-1 2 :flavour-sold {:flavour "vanilla"})
-   (event truck-2 2 :flavour-sold {:flavour "vanilla"})])
+  Truck 1 loaded three vanilla and sold one. Truck 2 loaded two and sold one."
+  [(event truck-1-loaded-id truck-1 1 :truck-loaded
+          {:flavour "vanilla" :quantity 3})
+   (event truck-2-loaded-id truck-2 1 :truck-loaded
+          {:flavour "vanilla" :quantity 2})
+   (event truck-1-sold-id truck-1 2 :flavour-sold
+          {:flavour "vanilla"})
+   (event truck-2-sold-id truck-2 2 :flavour-sold
+          {:flavour "vanilla"})])
 
 ;; ---------------------------------------------------------------------------
-;; Lab 6's fold, trimmed to stock. It is unchanged by any of this: a fold
-;; still takes a plain sequence of events. What changes is which events.
+;; Lab 6's fold shape, trimmed to stock. A fold still takes a plain sequence
+;; of events. What changes is which events are selected for it.
 ;; ---------------------------------------------------------------------------
 
 (def initial-state {})
@@ -54,8 +63,9 @@
   (update state (get-in event [:data :flavour]) (fnil dec 0)))
 
 (defmethod evolve :default
-  [state _event]
-  state)
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -92,11 +102,12 @@
        (apply max 0)))
 
 (defn append
-  "Append `event` to `stream-id`, but only if the stream is still at
-  `expected-version`.
+  "Model appending `event` to `stream-id`, on the condition that the supplied
+  log is still at `expected-version`.
 
-  Returns the new log, or throws if the stream moved on underneath the writer.
-  Nothing is locked between reading and writing — hence *optimistic*."
+  Returns a new immutable log, or throws if the supplied value has moved on.
+  This deterministic function demonstrates the compare-and-append contract;
+  a real store must enforce the check and write atomically."
   [events stream-id expected-version event]
   (let [actual (current-version events stream-id)]
     (when-not (= expected-version actual)

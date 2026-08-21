@@ -34,9 +34,13 @@
   [state event]
   (assoc state :driver (get-in event [:data :driver-id])))
 
-(defmethod evolve :default
+(defmethod evolve :stock-depleted
   [state _event]
   state)
+
+(defmethod evolve :default
+  [_state event]
+  (throw (ex-info "Unknown event type" {:event/type (:event/type event)})))
 
 (defn replay [events] (reduce evolve initial-state events))
 
@@ -78,16 +82,31 @@
 
 (defmethod decide :assign-driver
   [command _state]
-  [{:event/type :driver-assigned :data {:driver-id (get-in command [:data :driver-id])}}])
+  (let [driver-id (get-in command [:data :driver-id])]
+    (when-not (and (string? driver-id) (not-empty driver-id))
+      (refuse :invalid-driver "Driver id must be a non-empty string"
+              {:driver-id driver-id}))
+    [{:event/type :driver-assigned :data {:driver-id driver-id}}]))
 
 (defmethod decide :load-truck
   [command _state]
-  (let [{:keys [quantity]} (:data command)]
-    ;; Loading nothing onto the truck is not a fact. Nothing happened, and
-    ;; nothing went wrong either.
-    (if (pos? quantity)
-      [{:event/type :truck-loaded :data (:data command)}]
-      [])))
+  (let [{:keys [flavour quantity]} (:data command)]
+    (when-not (and (int? quantity) (pos? quantity))
+      (refuse :invalid-quantity "Quantity must be a positive integer"
+              {:quantity quantity}))
+    [{:event/type :truck-loaded :data {:flavour flavour :quantity quantity}}]))
+
+(defmethod decide :ensure-stock
+  [command state]
+  (let [{:keys [flavour quantity]} (:data command)
+        current (get-in state [:stock flavour] 0)]
+    (when-not (and (int? quantity) (pos? quantity))
+      (refuse :invalid-quantity "Quantity must be a positive integer"
+              {:quantity quantity}))
+    (if (>= current quantity)
+      []
+      [{:event/type :truck-loaded
+        :data {:flavour flavour :quantity (- quantity current)}}])))
 
 (defmethod decide :buy-flavour
   [command state]
@@ -117,3 +136,8 @@
       [{:event/type :flavour-sold   :data {:flavour flavour}}
        {:event/type :stock-depleted :data {:flavour flavour}}]
       [{:event/type :flavour-sold   :data {:flavour flavour}}])))
+
+(defmethod decide :default
+  [command _state]
+  (throw (ex-info "Unknown command type"
+                  {:command/type (:command/type command)})))

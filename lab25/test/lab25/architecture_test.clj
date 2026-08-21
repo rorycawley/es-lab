@@ -63,6 +63,12 @@
     (is (str/includes? source "behaviour/validation"))
     (is (str/includes? source "behaviour/observation"))))
 
+(deftest module-public-surfaces-do-not-expose-database-handles-test
+  (doseq [api ["src/lab25/catalog/api.clj" "src/lab25/ordering/api.clj"]
+          :let [source (slurp (io/file api))]]
+    (is (not (re-find #"\(defrecord\s+\w+\s+\[[^\]]*datasource" source))
+        (str api " exposes its database handle through the public module value"))))
+
 (deftest the-database-declares-separate-owners-test
   (let [schema (slurp (io/file "resources/schema.sql"))]
     (is (str/includes? schema "SCHEMA catalog AUTHORIZATION catalog_module"))

@@ -11,9 +11,9 @@
 ;; ---------------------------------------------------------------------------
 ;; announce : event -> [message]
 ;;
-;; Zero, one, or many (lab 5) — and the default is zero. Most facts are the
-;; truck's own business, and publishing one is a decision to let other modules
-;; build on it forever.
+;; Zero, one, or many (lab 5). Known private facts explicitly produce zero;
+;; unknown semantics fail so a relay cannot checkpoint past a fact that might
+;; need a contract.
 ;;
 ;; Note what the messages do NOT carry: a :message/id. That identifies a
 ;; delivery, not a fact, so it is stamped at send time — a redelivery of the
@@ -28,23 +28,37 @@
   (let [flavour  (get-in event [:data :flavour])
         truck-id (:stream/id event)
         event-id (:event/id event)]
+    (when-not (uuid? event-id)
+      (throw (ex-info "Invalid event id"
+                      {:event/id event-id})))
     ;; One fact, two audiences, two contracts. Neither consumer is looking at
     ;; the domain event, so the two can evolve apart.
     [{:message/type :flavour-unavailable          ; the customer app: grey out a button
+      :recipient    :customer-app
       :payload      {:event/id event-id
                      :truck-id truck-id
                      :flavour  flavour}}
      {:message/type :restock-required             ; purchasing: order more
+      :recipient    :purchasing
       :payload      {:event/id event-id
                      :truck-id truck-id
                      :flavour  flavour}}]))
 
 ;; Selling a cone is nobody else's business. Neither is loading the truck.
-(defmethod announce :default
+(defmethod announce :flavour-sold
   [_event]
   [])
 
+(defmethod announce :truck-loaded
+  [_event]
+  [])
+
+(defmethod announce :default
+  [event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
+
 (defn announce-all
-  "The messages announcing a batch of events, in the order the events happened."
+  "Messages for a batch, preserving the supplied event and contract order."
   [events]
   (into [] (mapcat announce) events))

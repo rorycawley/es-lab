@@ -20,9 +20,18 @@
   [model event]
   (update model (get-in event [:data :flavour]) (fnil inc 0)))
 
-(defmethod popularity :default
+(defmethod popularity :truck-loaded
   [model _event]
   model)
+
+(defmethod popularity :stock-depleted
+  [model _event]
+  model)
+
+(defmethod popularity :default
+  [_model event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 ;; ---------------------------------------------------------------------------
 ;; Projection 2: stock across the fleet, keyed by truck.
@@ -44,9 +53,14 @@
   (update-in model [(:stream/id event) (get-in event [:data :flavour])]
              (fnil dec 0)))
 
-(defmethod fleet-stock :default
+(defmethod fleet-stock :stock-depleted
   [model _event]
   model)
+
+(defmethod fleet-stock :default
+  [_model event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 ;; ---------------------------------------------------------------------------
 ;; A read model is its data plus the position it has consumed up to.
@@ -56,25 +70,31 @@
 ;; ---------------------------------------------------------------------------
 
 (defn empty-model
-  [project]
-  {:project    project
-   :state      {}
+  "A persistable read-model value. The projection function is runtime wiring,
+  not stored data."
+  [initial-state]
+  {:state      initial-state
    :checkpoint 0})
 
 (defn advance
-  "Fold everything appended since the checkpoint, and move the checkpoint.
+  "Fold everything appended since the checkpoint, then move the checkpoint to
+  the greatest position actually consumed.
 
   Called repeatedly with no new events, this changes nothing — which is what
   lets a projection poll."
-  [model log]
-  (let [new-events (store/since log (:checkpoint model))]
+  [model project log]
+  (let [new-events      (store/since log (:checkpoint model))
+        next-checkpoint (reduce max (:checkpoint model)
+                                (map :event/position new-events))]
     (-> model
-        (update :state #(reduce (:project model) % new-events))
-        (assoc :checkpoint (max (:checkpoint model) (store/last-position log))))))
+        (update :state #(reduce project % new-events))
+        (assoc :checkpoint next-checkpoint))))
 
 (defn rebuild
   "Throw the read model away and fold the log from the beginning.
 
   Always available, because the read model holds nothing the events don't."
-  [project log]
-  (advance (empty-model project) log))
+  ([project log]
+   (rebuild project {} log))
+  ([project initial-state log]
+   (advance (empty-model initial-state) project log)))

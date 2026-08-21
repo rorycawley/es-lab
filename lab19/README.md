@@ -6,18 +6,14 @@ This lab is that evidence. It runs against a real Postgres 18 in a container, an
 
 ## The claim: the domain does not change
 
-`truck.clj` is **copied from [lab8](../lab8), unchanged.** Not adapted, not parameterised, not handed a repository. It was written against an in-memory vector and it now runs against Postgres, because it was never told the difference.
+`truck.clj` retains the technology-independent decision model introduced in [lab8](../lab8). It is not handed a repository: the domain consumes and returns values while the application and store surround it. That is why the same model can run with an in-memory log first and PostgreSQL later without learning SQL.
 
 ```clojure
 (defn handle [ds cmd]
-  (let [history (store/stream ds truck-1)
-        version (store/current-version ds truck-1)
-        state   (truck/replay history)
-        events  (truck/decide cmd state)]
-    (store/append ds truck-1 version gen-id t0 cmd events)))
+  (application/handle ds truck-1 cmd gen-id occurred-at))
 ```
 
-That is lab 8's four steps with `ds` where `log` used to be. Selling the last cone still produces two events; the fold still answers `{"vanilla" 0}`.
+The application still performs lab 8's load, fold, decide, identify and append loop. It reads one exact history so the expected version matches the state used for the decision. Selling the last cone still produces two events; the fold still answers `{"vanilla" 0}`.
 
 ## The claim is not free, and this is the part that surprised me
 
@@ -62,24 +58,30 @@ One `keyword` call, at the only place the code needs a symbol to dispatch on. Ev
 
 | encoding | round-trips Clojure values | readable in `psql` |
 |---|---|---|
-| JSONB, writing only what JSON can hold | yes | yes |
+| JSONB, with an explicit JSON-shaped contract | for those modeled values | yes |
 | JSONB + a coercion list | with a list somebody maintains | yes |
 | EDN in a text column | losslessly, including keywords | no |
 | Transit | losslessly | barely |
 
-The first row is the one to want, and it is a **modelling** choice rather than an encoding one. Reach for rows three and four when you genuinely need to store values JSON cannot express — and notice that JSON still cannot hold a UUID, an instant or a decimal, which is a loss no amount of care avoids. [Lab22](../lab22) handles that residue with a schema, and draws the line between a loss you cannot avoid and one you chose.
+The first row is the one to want, and it is a **modelling** choice rather than an encoding one. It does not mean every Clojure value round-trips: UUIDs, instants, decimal semantics and namespaced keys require an explicit mapping. This adapter restores the known causation and correlation UUID fields at the envelope boundary; [Lab22](../lab22) generalises that residue with schemas.
 
-And a reason to worry less about the second column than you might: if you find yourself querying `data` in SQL, that is a projection you have not built ([lab9](../lab9)).
+Operational inspection and selective replay may legitimately query `data`, but recurring business reads usually deserve the projection [lab9](../lab9) introduced.
 
-## Two things move into the database
+## Storage guarantees move into the database
 
-**The version check becomes a constraint.**
+**The version check becomes an atomic database compare-and-set.**
 
 ```sql
-UNIQUE (stream_id, stream_version)
+UPDATE stream_head
+   SET stream_version = stream_version + :event_count
+ WHERE stream_id = :stream_id
+   AND stream_version = :expected_version
+RETURNING stream_version
 ```
 
-No `if` in the application. `append` inserts at `expected-version + 1` and translates SQLSTATE `23505` into the same `ex-info` every earlier lab threw. Which means [lab16](../lab16)'s caveat can finally be retired — it measured contention *structurally*, deterministically, because a vector cannot race. Here eight threads go at one stream at once:
+The insert branch creates a missing head only when the expected version is zero. This matters because `UNIQUE (stream_id, stream_version)` alone is incomplete: it rejects a stale writer that collides with an existing version, but a caller claiming a future expected version could otherwise create a gap. The head update and event inserts share one transaction; the event-table unique constraint remains a defense-in-depth integrity check.
+
+[Lab16](../lab16) measured contention structurally because a vector cannot race. Here eight threads go at one real stream at once:
 
 ```clojure
 (is (= 1 (count (filter #{:won} results))))
@@ -87,7 +89,9 @@ No `if` in the application. `append` inserts at `expected-version + 1` and trans
 (is (= [1 2] (map :stream/version (store/stream ds truck-1))))
 ```
 
-Exactly one wins, seven are refused, and the stream has no gap and no duplicate. Not simulated.
+Exactly one wins, seven receive typed optimistic-concurrency conflicts, and the stream has no version gap or duplicate. These are not business refusals. The test also proves a future expected version is rejected for existing and brand-new streams.
+
+An exact retry of an already identified append batch is idempotent: if every event id already names the same fact at the intended stream coordinate, `append` returns the recorded events. Reusing an id for different content is a distinct `:duplicate-event-id` error. Retrying the whole command handler is a separate concern because it must retain or deterministically reproduce the same identified batch; [lab20](../lab20) adds the command ledger needed for the zero-event case.
 
 **The position becomes a sequence.** Which brings a problem a vector could not have.
 
@@ -118,7 +122,7 @@ REFERENCE names three fixes; this implements the second — hold back anything a
 AND xid < pg_snapshot_xmin(pg_current_snapshot())
 ```
 
-`pg_snapshot_xmin` is the oldest transaction still open. Rows at or above it may yet be joined by a lower-positioned sibling, so they wait.
+`pg_snapshot_xmin` is the lowest transaction id still active in the current snapshot. PostgreSQL documents every lower xid as either committed and visible or rolled back and dead. Rows written by xids at or above that boundary are conservatively held back because an active lower xid may still publish an earlier sequence value.
 
 ```clojure
 (store/since           ds 0)  ; => [2]   sees B, will skip A
@@ -127,7 +131,7 @@ AND xid < pg_snapshot_xmin(pg_current_snapshot())
 (store/since-committed ds 0)  ; => [1 2] both, in order
 ```
 
-The trade is explicit and tested: **an event that is committed and perfectly readable is deliberately withheld.** A reader lags the writer by the longest open transaction. That is the price of never stepping over a gap, and it is the right price — but it is a price, and a system with long-running write transactions will feel it.
+The trade is explicit and tested: **an event that is committed and perfectly readable is deliberately withheld.** Lag follows the oldest relevant assigned transaction id, so long-running write transactions can make the conservative window large. Whether that cost is acceptable depends on the workload and projection latency requirement.
 
 A fourth test pins the case that makes it matter: with no overlapping transaction the two reads agree exactly, which is why this never shows up in development.
 
@@ -135,12 +139,25 @@ A fourth test pins the case that makes it matter: with no overlapping transactio
 
 Every column in [`resources/schema.sql`](resources/schema.sql) is argued for in REFERENCE, and the file cross-references where:
 
-- `global_position BIGSERIAL` — assigned by the single writer, for resumption only ([lab9](../lab9))
+- `stream_head` — the atomic expected-version token; both stale and future claims fail
+- `global_position BIGSERIAL` — assigned by the database authority, for resumption only ([lab9](../lab9)); rollback gaps are allowed
 - `xid xid8 DEFAULT pg_current_xact_id()` — not domain data; the thing that distinguishes *committed* from *assigned and still in flight*
-- `event_id UUID UNIQUE` — minted by the application before the write ([lab4](../lab4)), so an ambiguous retry is idempotent rather than duplicated. There is a test for that.
-- `occurred_at` from the application, `recorded_at DEFAULT now()` from the store — [lab1](../lab1)'s two timestamps, and `now()` rather than `clock_timestamp()` so a batch shares one value. Tested: the sale and the depletion have the same `recorded_at`, because they committed together.
+- `event_id UUID UNIQUE` — minted by the application before the write ([lab4](../lab4)); exact identified-batch retries return the original rows, while conflicting reuse fails
+- `occurred_at` from the application, `recorded_at DEFAULT now()` from Postgres — [lab1](../lab1)'s two axes. `now()` is transaction-start time, not commit time; the batch shares it because the value is stable throughout one transaction.
 
 Postgres 18 also has `uuidv7()`, which makes `DEFAULT uuidv7()` tempting in the DDL. The schema does not use it, for [the reason REFERENCE gives](../REFERENCE.md#who-generates-it--the-application-or-postgres): a database-generated id cannot survive an ambiguous retry.
+
+## Testing the behavior and the adapter
+
+Pure domain tests call `decide` and `replay` directly for stock rules and strict semantics. Behavior tests enter through `application/handle`; the real Postgres store is used here deliberately because persistence is the subject of the lab, while deterministic identity and occurrence time remain injected application effects.
+
+Focused adapter tests prove the atomic head compare-and-set, stale and future conflicts, batch rollback, exact retry idempotency, JSON/envelope round-trips and database-owned transaction time. The visibility tests control two real connections and commit order. They are integration tests, not end-to-end tests: there is no HTTP or process wiring to smoke-test yet.
+
+## Sources
+
+- PostgreSQL 18, [Sequence Manipulation Functions](https://www.postgresql.org/docs/18/functions-sequence.html)—sequence allocation is not rolled back and gaps are expected.
+- PostgreSQL 18, [System Information Functions](https://www.postgresql.org/docs/18/functions-info.html)—snapshot `xmin` and transaction visibility.
+- PostgreSQL, [Date/Time Types](https://www.postgresql.org/docs/current/datatype-datetime.html)—`now()` means transaction-start time.
 
 ## What's next
 

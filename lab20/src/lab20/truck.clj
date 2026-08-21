@@ -1,9 +1,9 @@
 (ns lab20.truck
   "The domain: what an Ice Cream truck knows.
 
-  Still lab 8's, unchanged — lab 19 made that argument and this lab inherits
-  it. Worth noticing anyway: nothing about an outbox, an inbox or a ledger
-  reaches this file either.")
+  This retains the technology-independent decision model introduced in lab 8.
+  Worth noticing: nothing about an outbox, an inbox or a ledger reaches this
+  file either.")
 
 ;; ---------------------------------------------------------------------------
 ;; evolve : state -> event -> state          (lab 6, trimmed to stock)
@@ -22,9 +22,14 @@
   [state event]
   (update state (get-in event [:data :flavour]) (fnil dec 0)))
 
-(defmethod evolve :default
+(defmethod evolve :stock-depleted
   [state _event]
   state)
+
+(defmethod evolve :default
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay
   [events]
@@ -36,7 +41,7 @@
 ;; The only function in these labs that is allowed to say no, because it is
 ;; the only one that runs while the answer is still open. Events returned here
 ;; carry no identity and no stream — they are what happened, not where it is
-;; recorded. The store stamps the rest.
+;; recorded. The application identifies them; the store adds coordinates.
 ;; ---------------------------------------------------------------------------
 
 (defmulti decide (fn [command _state] (:command/type command)))
@@ -44,11 +49,22 @@
 (defmethod decide :load-truck
   [command _state]
   (let [{:keys [quantity]} (:data command)]
-    ;; Loading nothing onto the truck is not a fact. Nothing happened, and
-    ;; nothing went wrong either.
-    (if (pos? quantity)
-      [{:event/type :truck-loaded :data (:data command)}]
-      [])))
+    (when-not (and (int? quantity) (pos? quantity))
+      (throw (ex-info "Quantity must be a positive integer"
+                      {:reason :invalid-quantity :quantity quantity})))
+    [{:event/type :truck-loaded :data (:data command)}]))
+
+(defmethod decide :ensure-stock
+  [command state]
+  (let [{:keys [flavour quantity]} (:data command)
+        current (get state flavour 0)]
+    (when-not (and (int? quantity) (pos? quantity))
+      (throw (ex-info "Quantity must be a positive integer"
+                      {:reason :invalid-quantity :quantity quantity})))
+    (if (>= current quantity)
+      []
+      [{:event/type :truck-loaded
+        :data {:flavour flavour :quantity (- quantity current)}}])))
 
 (defmethod decide :buy-flavour
   [command state]
@@ -64,3 +80,8 @@
       [{:event/type :flavour-sold   :data {:flavour flavour}}
        {:event/type :stock-depleted :data {:flavour flavour}}]
       [{:event/type :flavour-sold   :data {:flavour flavour}}])))
+
+(defmethod decide :default
+  [command _state]
+  (throw (ex-info "Unknown command type"
+                  {:command/type (:command/type command)})))

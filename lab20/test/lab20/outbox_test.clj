@@ -64,9 +64,10 @@
 (deftest the-ledger-records-commands-that-produced-nothing-test
   (testing "the case lab 10's causation check cannot see"
     (let [ds  (fixture/datasource)
-          cmd (command :load-truck {:flavour "vanilla" :quantity 0})]
-      (is (= [] (go! ds cmd)) "loading nothing is not a fact (lab 5)")
-      (is (empty? (store/stream ds truck-1)))
+          _   (go! ds (command :load-truck {:flavour "vanilla" :quantity 3}))
+          cmd (command :ensure-stock {:flavour "vanilla" :quantity 3})]
+      (is (= [] (go! ds cmd)) "the requested stock condition already holds")
+      (is (= 1 (count (store/stream ds truck-1))))
       (testing "no event carries this command's causation id"
         (is (zero? (:count (jdbc/execute-one!
                             ds ["SELECT count(*) AS count FROM event
@@ -76,6 +77,33 @@
         (is (some? (ledger/entry ds (:command/id cmd))) "the ledger saw it anyway")
         (is (zero? (:event-count (ledger/entry ds (:command/id cmd)))))
         (is (= :already-handled (go! ds cmd)))))))
+
+(deftest invalid-load-is-refused-rather-than-disguised-as-a-no-op-test
+  (let [ds  (fixture/datasource)
+        cmd (command :load-truck {:flavour "vanilla" :quantity 0})]
+    (is (= :invalid-quantity
+           (:reason (ex-data (try (go! ds cmd)
+                                  (catch clojure.lang.ExceptionInfo e e))))))
+    (is (nil? (ledger/entry ds (:command/id cmd))))
+    (is (empty? (store/stream ds truck-1)))))
+
+(deftest reusing-a-command-id-for-a-different-request-is-rejected-test
+  (let [ds (fixture/datasource)
+        first-command (command :load-truck {:flavour "vanilla" :quantity 2})
+        collision (assoc first-command :data {:flavour "chocolate" :quantity 2})]
+    (go! ds first-command)
+    (is (= :command-id-collision
+           (:reason (ex-data (try (go! ds collision)
+                                  (catch clojure.lang.ExceptionInfo e e))))))
+    (is (= 1 (count (store/stream ds truck-1))))))
+
+(deftest trace-correlation-is-not-part-of-command-idempotency-test
+  (let [ds (fixture/datasource)
+        cmd (command :load-truck {:flavour "vanilla" :quantity 2})]
+    (go! ds cmd)
+    (is (= :already-handled
+           (go! ds (assoc cmd :correlation-id (random-uuid)))))
+    (is (= 1 (count (store/stream ds truck-1))))))
 
 (deftest the-ledger-row-shares-the-commands-transaction-test
   (let [ds  (fixture/datasource)

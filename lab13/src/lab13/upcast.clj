@@ -19,7 +19,12 @@
   {:flavour-sold       4
    :flavour-sold-gross 2})
 
-(defn current-version-of [event-type] (get current-version event-type 1))
+(defn current-version-of
+  "The reader's current schema version for a known event type."
+  [event-type]
+  (or (get current-version event-type)
+      (throw (ex-info "Unknown event type"
+                      {:event/type event-type}))))
 
 (def vat-rate 0.20M)
 
@@ -89,6 +94,35 @@
       (update-in [:data :flavour] name)
       (assoc-in [:metadata :schema-version] 2)))
 
+(def ^:private immutable-envelope-keys
+  [:event/id :event/type :event/occurred-at
+   :stream/id :stream/version :event/position])
+
+(defn- schema-version-of
+  [event]
+  (let [version (get-in event [:metadata :schema-version])]
+    (when-not (pos-int? version)
+      (throw (ex-info "Invalid schema version"
+                      {:event/type (:event/type event)
+                       :schema-version version})))
+    version))
+
+(defn- assert-valid-step
+  [before after]
+  (let [before-version (schema-version-of before)
+        after-version  (schema-version-of after)]
+    (when-not (= (inc before-version) after-version)
+      (throw (ex-info "Upcaster must advance exactly one version"
+                      {:event/type (:event/type before)
+                       :before before-version
+                       :after after-version})))
+    (when-not (= (select-keys before immutable-envelope-keys)
+                 (select-keys after immutable-envelope-keys))
+      (throw (ex-info "Upcaster changed the recorded event envelope"
+                      {:before (select-keys before immutable-envelope-keys)
+                       :after  (select-keys after immutable-envelope-keys)})))
+    after))
+
 (defn read-event
   "Walk an event up the ladder to the current version.
 
@@ -96,15 +130,26 @@
   a fact, and rewriting it to a newer shape is the last-resort migration that
   costs you the audit trail."
   [event]
-  (loop [event event, steps 0]
-    (let [version (get-in event [:metadata :schema-version] 1)]
-      (cond
-        ;; Types that were never versioned past 1 are already current.
-        (nil? (get-method upcast-step [(:event/type event) version])) event
-        (> steps 10) (throw (ex-info "Upcaster chain did not terminate"
-                                     {:event/type (:event/type event)
-                                      :schema-version version}))
-        :else (recur (upcast-step event) (inc steps))))))
+  (let [event-type (:event/type event)
+        target     (current-version-of event-type)]
+    (loop [event event]
+      (let [version (schema-version-of event)]
+        (cond
+          (= version target) event
+
+          (> version target)
+          (throw (ex-info "Unsupported future schema version"
+                          {:event/type event-type
+                           :schema-version version
+                           :current-version target}))
+
+          :else
+          (if-let [step (get-method upcast-step [event-type version])]
+            (recur (assert-valid-step event (step event)))
+            (throw (ex-info "Missing upcaster step"
+                            {:event/type event-type
+                             :schema-version version
+                             :current-version target}))))))))
 
 (defn read-all
   [events]

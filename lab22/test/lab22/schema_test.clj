@@ -1,16 +1,21 @@
 (ns lab22.schema-test
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is testing]]
+            [lab22.core.policy :as policy]
             [lab22.core.truck :as truck]
             [lab22.schema.command :as command]
             [lab22.schema.event :as event]
             [malli.core :as m]))
 
+(def truck-1 #uuid "0f1c2b3a-0000-4000-8000-000000000001")
+
 (defn- buy [flavour]
-  {:command/id (random-uuid) :command/type :buy-flavour :data {:flavour flavour}})
+  {:command/id (random-uuid) :command/type :buy-flavour
+   :correlation-id (random-uuid) :data {:flavour flavour}})
 
 (defn- load-truck [flavour quantity]
   {:command/id (random-uuid) :command/type :load-truck
+   :correlation-id (random-uuid)
    :data {:flavour flavour :quantity quantity}})
 
 ;; ---------------------------------------------------------------------------
@@ -60,7 +65,15 @@
 
 (deftest a-well-formed-command-passes-test
   (is (nil? (command/validate (buy "chocolate"))))
-  (is (nil? (command/validate (load-truck "vanilla" 12)))))
+  (is (nil? (command/validate (load-truck "vanilla" 12))))
+  (let [[restock] (policy/react
+                   {:event/id (random-uuid)
+                    :event/type :stock-depleted
+                    :stream/id truck-1
+                    :metadata {:correlation-id (random-uuid)}
+                    :data {:flavour "vanilla"}})]
+    (is (nil? (command/validate restock))
+        "an internally addressed policy command matches the command schema")))
 
 (deftest malformed-commands-are-explained-not-just-rejected-test
   (testing "a flavour the truck has never heard of"
@@ -69,6 +82,7 @@
     (is (some? (command/validate (load-truck "vanilla" 0)))))
   (testing "a missing field"
     (is (some? (command/validate {:command/id (random-uuid)
+                                  :correlation-id (random-uuid)
                                   :command/type :buy-flavour
                                   :data {}}))))
   (testing "an id that is not an id"
@@ -81,6 +95,7 @@
 
 (deftest an-unknown-command-type-is-refused-test
   (is (some? (command/validate {:command/id (random-uuid)
+                                :correlation-id (random-uuid)
                                 :command/type :steal-truck
                                 :data {}}))))
 
@@ -108,18 +123,16 @@
     (is (event/valid-data? :truck-repainted {:colour "pink"}))
     (is (= {:colour "pink"} (event/decode-data :truck-repainted {:colour "pink"})))))
 
-(def truck-1 #uuid "0f1c2b3a-0000-4000-8000-000000000001")
-
 ;; ---------------------------------------------------------------------------
 ;; Decoding, and which losses are worth it
 ;; ---------------------------------------------------------------------------
 
-(deftest the-loss-worth-decoding-is-the-one-you-cannot-avoid-test
+(deftest event-envelope-uuid-loss-is-decoded-from-its-schema-test
   (testing "JSON has no UUID type, and no design decision changes that"
-    (is (= {:flavour "vanilla" :quantity 20 :truck-id truck-1}
-           (event/decode-data :truck-loaded {:flavour "vanilla" :quantity 20
-                                             :truck-id (str truck-1)}))
-        "a policy stamps :truck-id (lab 10); the store hands it back as a string")))
+    (is (= {:causation-id truck-1 :correlation-id truck-1 :future-field "kept"}
+           (event/decode-metadata {:causation-id (str truck-1)
+                                   :correlation-id (str truck-1)
+                                   :future-field "kept"})))))
 
 (deftest the-loss-not-worth-decoding-is-the-one-you-declined-to-have-test
   (testing "nothing else here needs a decoder, because nothing else was lost"
@@ -143,6 +156,6 @@
     (is (contains? event/by-type :truck-loaded)
         "adding an event type adds its coercion, because they are the same statement")))
 
-(deftest decoding-an-already-decoded-value-is-harmless-test
-  (is (= {:flavour "vanilla" :truck-id truck-1}
-         (event/decode-data :truck-loaded {:flavour "vanilla" :truck-id truck-1}))))
+(deftest decoding-already-decoded-metadata-is-harmless-test
+  (is (= {:causation-id truck-1}
+         (event/decode-metadata {:causation-id truck-1}))))

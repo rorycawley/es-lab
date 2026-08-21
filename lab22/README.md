@@ -35,7 +35,7 @@ closed schema ──▶ internal command ──▶ app/handle ──▶ truck/de
   boundary          business intent      use case       invariants
 ```
 
-The outside shape is `{:type … :data …}`. The internal shape is `{:command/id … :command/type … :data …}`. The adapter owns that translation and allocates the identifier only after the external value passes validation. The use case remains callable without Malli, HTTP or a database, and the pure core still contains the rule that decides what may happen.
+The outside shape is `{:type … :data …}`. The internal shape is `{:command/id … :command/type … :correlation-id … :data …}`. The adapter owns that translation and allocates command and correlation identifiers only after the external value passes validation. The use case remains callable without Malli, HTTP or a database, and the pure core still contains the rule that decides what may happen.
 
 This is the inward dependency rule from Lab 21 in motion: intake depends on the application; the application does not depend on intake or Malli. Replacing the schema library or adding a new delivery mechanism therefore leaves the use case and domain decisions intact.
 
@@ -78,14 +78,14 @@ The moment a state-dependent business rule goes in an inbound schema, lab 2's di
 
 That's the same shape as [lab10](../lab10)'s causation-based dedupe: a mechanism that works right up until the case it structurally cannot see.
 
-## Closed on the way in, open on the way out
+## Closed commands, field-tolerant known events
 
 The non-obvious part. Both directions use Malli; they use it with opposite settings.
 
 | | direction | openness | because |
 |---|---|---|---|
 | **messages / commands** | inbound, from a client | `{:closed true}` | an unexpected key is a bug or an attack |
-| **events** | outbound, from your own store | open | a stream outlives its readers |
+| **known event data** | outbound, from your own store | open to extra fields | a stream outlives its readers |
 
 ```clojure
 (command/validate-message (assoc message :admin? true)) ; => rejected
@@ -93,9 +93,9 @@ The non-obvious part. Both directions use Malli; they use it with opposite setti
                    {:flavour "vanilla" :loyalty-card "C-9"})  ; => true
 ```
 
-That second one is [lab13](../lab13)'s tolerant reads, no longer a principle you have to remember but a setting you can point at. A test shows what closing the event schemas would do — reject an event carrying a field added after the code was deployed, which is precisely the reader-that-crashes-on-its-own-history lab 13 spends its length warning about.
+That second one is [lab13](../lab13)'s tolerant reading of a **known type and version**, no longer a principle you have to remember but a setting you can point at. A test shows what closing the event schemas would do — reject an event carrying a compatible field added after the code was deployed.
 
-Unknown *event types* pass through for the same reason.
+The generic storage decoder also passes an unregistered event type through unchanged because it has no schema with which to decode or reject its payload. That is not semantic acceptance. The fold, policy, projection or contract that consumes the result must understand the type or explicitly classify it as known and irrelevant; otherwise it fails before checkpointing, as Labs6, 9, 10, 12 and 13 require.
 
 ## Which losses are worth a decoder
 
@@ -116,10 +116,11 @@ That is what this lab used to do, and it was the right answer to the wrong quest
 What survives is the loss JSON hands you whether you like it or not:
 
 ```clojure
-[:truck-id {:optional true} :uuid]     ; a policy stamps this — lab 10
+[:causation-id {:optional true} :uuid]
+[:correlation-id {:optional true} :uuid]
 ```
 
-JSON has no UUID type. A `#uuid` goes into `data` and a string comes back, and no decision at design time avoids it. That is what `decode-data` is for now, and the distinction is worth more than the machinery:
+JSON has no UUID type. The application-owned causation and correlation UUIDs in the event metadata envelope come back from JSONB as strings, and no design decision can make JSON hold a UUID. `decode-metadata` derives their restoration from the open metadata schema. Routing `truck-id` is no longer copied into `truck-loaded` data merely to manufacture a decoder example; stream identity already has its own envelope field.
 
 | loss | example | fix |
 |---|---|---|
@@ -128,7 +129,7 @@ JSON has no UUID type. A `#uuid` goes into `data` and a string comes back, and n
 
 A schema-driven decoder is the right tool for the second row and the wrong tool for the first — where it works perfectly, and quietly props up a decision you should have taken differently. Same code; only one of the two uses is a good idea.
 
-Three tests hold the line: the uuid is restored, the flavour needs no restoring, and a keyword value *would* have been lost — demonstrated directly, so the reason for the rule is visible rather than asserted.
+Three tests hold the line: envelope UUIDs are restored, flavour needs no restoring, and a keyword value *would* have been lost — demonstrated directly, so the reason for the rule is visible rather than asserted.
 
 ## A new driver, not a new centre
 
@@ -143,10 +144,18 @@ Lab 21's tests and demo were already **driving** adapters: they called the appli
     (let [command (->command ids message)]
       (try {:accepted (app/handle deps truck-id command)}
            (catch ExceptionInfo e
-             {:rejected :refused :because (ex-message e)})))))
+             (if (= :sold-out (:reason (ex-data e)))
+               {:rejected :refused :because (ex-message e)}
+               (throw e))))))
 ```
 
-The adapter validates the raw message before allocating `:command/id` or constructing the command. A test supplies an ID generator that counts calls and proves malformed input leaves that count at zero. Only then does the adapter invoke `app/handle`, where current state can turn a well-formed request into either facts or a business refusal.
+The adapter validates the raw message before allocating `:command/id`, allocating `:correlation-id`, or constructing the command. A test supplies an ID generator that counts calls and proves malformed input leaves that count at zero. Only then does the adapter invoke `app/handle`, where current state can turn a well-formed request into either facts or a named business refusal. The catch is deliberately narrow: concurrency, command-id collisions, corruption and infrastructure failures propagate rather than being mislabeled as `:refused`.
+
+## Lab21's transaction survives the new driver
+
+Adding a driving adapter does not weaken the driven side. Both persistence adapters still implement the corrected Lab21 contract: a stream-head compare-and-set, command ledger, facts and outgoing messages form one atomic command outcome. Exact retries return the original facts before re-deciding against changed state, zero-event results remain visible to the ledger, and stale or future expected versions fail. The in-memory fake keeps those records in one atom; PostgreSQL keeps them in one transaction.
+
+This is important architecturally: validation answers whether an external value may become a command. It does not replace command idempotency, aggregate concurrency or transactional delivery, and the intake adapter cannot repair those guarantees after the application has crossed the persistence boundary.
 
 `app.clj` still requires no schema namespace, so Lab 21's inward dependency rule holds. The tests also remain drivers in their own right; adding an intake adapter does not force trusted in-process callers through an external-data boundary.
 
@@ -162,7 +171,7 @@ The architectural testing split is:
 | **Adapter / Integration** | Secondary adapters—`EventStore`, `Outbox` | No | Slower. Proves infrastructure mapping works. |
 | **System / E2E** | Primary adapters such as an HTTP API | No | Very slow. A few smoke tests prove the wiring. |
 
-`app_test.clj` enters through the use cases with in-memory store and outbox fakes. It observes facts, query state and outgoing messages, never which helper called which other helper. `adapter_test.clj` separately runs a neutral port contract against memory and real Postgres; no truck rule is repeated there.
+`app_test.clj` enters through the use cases with one in-memory persistence fake implementing the store and outbox ports atomically. It observes facts, query state and outgoing messages, never which helper called which other helper. `adapter_test.clj` separately runs a neutral port contract against memory and real Postgres, including idempotency, stale and future versions, and rollback after an outbox identity conflict; no truck rule is repeated there.
 
 The pure core remains directly testable. `core_test.clj` specifies invariants, replay, policies and contract mapping as input → output with no fixture or test double. Those tests supplement the public use-case suite with precise, cheap feedback; they do not assert interaction choreography.
 
@@ -180,5 +189,5 @@ Malli's **generators**, which would give property-based tests of the core from t
 
 ```bash
 bb demo     # the whole system, in memory
-bb test     # 46 tests; the Postgres adapter contract needs Docker
+bb test     # the Postgres adapter contract needs Docker
 ```

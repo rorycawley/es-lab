@@ -13,12 +13,16 @@
   (:require [clojure.data.json :as json]))
 
 (defn read-body
-  "The request body as data, or nil. A JSON body has no keywords, so what
-  comes out of here is wire-shaped and must be decoded before it is trusted."
+  "The request body as JSON-shaped data, or nil. Invalid JSON is a typed
+  boundary failure; intake handles schema validation separately."
   [request]
   (when-let [body (:body request)]
     (let [text (slurp body)]
-      (when (seq text) (json/read-str text :key-fn keyword)))))
+      (when (seq text)
+        (try
+          (json/read-str text :key-fn keyword)
+          (catch Exception failure
+            (throw (ex-info "Malformed JSON" {:reason :malformed-json} failure))))))))
 
 (defn respond
   ([status body] (respond status body {}))

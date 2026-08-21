@@ -22,8 +22,12 @@
 
 (defn derived-command-id
   ^UUID [policy-name event]
-  (UUID/nameUUIDFromBytes (.getBytes (str policy-name "/" (:event/id event))
-                                     "UTF-8")))
+  (let [event-id (:event/id event)]
+    (when-not (uuid? event-id)
+      (throw (ex-info "Invalid event id"
+                      {:event/id event-id})))
+    (UUID/nameUUIDFromBytes (.getBytes (str policy-name "/" event-id)
+                                       "UTF-8"))))
 
 ;; ---------------------------------------------------------------------------
 ;; react : event -> [command]
@@ -39,21 +43,33 @@
   [event]
   ;; Whenever a truck runs out of a flavour, ask for more.
   ;;
-  ;; Note what this does NOT do: it does not check whether restocking is
-  ;; allowed, whether the depot has stock, or whether the truck is off shift.
-  ;; A policy routes; `decide` decides. Business logic here would put the
-  ;; rules in two places and let them disagree.
+  ;; This policy owns the reaction "depleted -> request a restock of 20". It
+  ;; does NOT pre-judge whether the target can accept that request. Copying the
+  ;; target aggregate's invariant here would put that rule in two places.
   [{:command/id   (derived-command-id :restock-when-depleted event)
     :command/type :load-truck
     :data         {:truck-id (:stream/id event)
                    :flavour  (get-in event [:data :flavour])
                    :quantity restock-quantity}}])
 
-;; Every other event type. A policy has an opinion about a handful of facts
-;; and shrugs at the rest, exactly as a fold does (lab 6).
-(defmethod react :default
+(defmethod react :truck-loaded
   [_event]
   [])
+
+(defmethod react :flavour-sold
+  [_event]
+  [])
+
+(defmethod react :truck-repainted
+  [_event]
+  [])
+
+;; Known irrelevant facts are explicit. Unknown semantics may require a new
+;; reaction, so an old reader must not checkpoint past them silently.
+(defmethod react :default
+  [event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
 
 (defn react-to-all
   "The commands asked for by a batch of events, in order."

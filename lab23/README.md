@@ -1,6 +1,6 @@
 # Lab 23: intentful endpoints
 
-[Lab 21](../lab21) made the use-case surface explicit: tests and the demo drove ordinary application functions, while store, outbox and clock sat behind driven ports. [Lab 22](../lab22) added an intake adapter for untrusted data, still called as a Clojure function. This lab adds HTTP as another delivery boundary, and the thing to notice is how little changes below the adapter.
+[Lab 21](../lab21) made the use-case surface explicit: tests and the demo drove ordinary application functions, while atomic persistence, time and identity sat behind driven ports. [Lab 22](../lab22) added an intake adapter for untrusted data, still called as a Clojure function. This lab adds HTTP as another delivery boundary, and the thing to notice is how little changes below the adapter.
 
 ```bash
 bb serve
@@ -46,6 +46,7 @@ No `/api/commands/` prefix. Stripe's shape, and Stripe's underlying rule:
 ```text
 POST /v1/sales          a sale happened
 POST /v1/restocks       the truck was restocked
+POST /v1/replenishments stock was brought up to a requested level
 GET  /v1/stock          a query
 GET  /health            operational
 ```
@@ -67,7 +68,7 @@ Where the repository's central distinction finally reaches a client:
 | **200** | accepted, here are the facts | |
 | **400** | malformed — the schema refused it; the domain never saw it | [lab22](../lab22) |
 | **422** | well-formed, and the domain said no | [lab2](../lab2), [lab8](../lab8) |
-| **409** | the stream moved under you; re-read and retry | [lab7](../lab7) |
+| **409** | the stream moved under you; re-read and re-decide | [lab7](../lab7) |
 
 ```console
 $ curl -o /dev/null -w '%{http_code}\n' :3000/v1/sales -d '{"flavour":"tarmac"}'
@@ -78,7 +79,7 @@ $ curl -o /dev/null -w '%{http_code}\n' :3000/v1/sales -d '{"flavour":"chocolate
 
 Most APIs collapse those into one number, and in doing so tell the client nothing useful. **A 400 will never succeed unchanged. A 422 might, tomorrow.** A test asserts exactly that: the 422 becomes a 200 once the truck is restocked, and the 400 stays a 400 forever.
 
-409 is optimistic concurrency arriving at a client, with the advice lab 7 gave — read again, decide again — now an HTTP contract.
+409 is optimistic concurrency arriving at a client, with the advice lab 7 gave — read again, decide again — now an HTTP contract. It is selected from the store's typed `:concurrent-modification` reason, not by matching exception text. Command-id collisions, corrupt ledgers and infrastructure failures are not relabelled as malformed requests or business refusals.
 
 ## A command returns facts, not the resource
 
@@ -98,11 +99,11 @@ The architectural testing split is:
 | **Adapter / Integration** | Secondary adapters—`EventStore`, `Outbox` | No | Slower. Proves infrastructure mapping works. |
 | **System / E2E** | Primary adapters—the HTTP API | No | Very slow. A few smoke tests prove the wiring. |
 
-`app_test.clj` drives the use cases with in-memory driven fakes. Its assertions concern facts, state and messages, so a structural refactoring inside the hexagon does not rewrite the suite. `adapter_test.clj` separately runs the EventStore and Outbox contracts against memory and real Postgres. Infrastructure mapping no longer masquerades as a business test.
+`app_test.clj` drives the use cases with an in-memory driven fake. Its assertions concern facts, state and messages, so a structural refactoring inside the hexagon does not rewrite the suite. `adapter_test.clj` separately runs the atomic `EventStore`/`Outbox` contract against memory and real Postgres. Facts, the command ledger and outgoing messages either all commit or all roll back; infrastructure mapping no longer masquerades as a business test.
 
 The pure core is also tested directly in `core_test.clj`: important invariants, replay, policies and contract mappings are plain input → output. This is cheap, precise behaviour testing, not interaction testing.
 
-`intake_test.clj` and most of `http_test.clj` are focused primary-adapter component tests with driven fakes. They answer boundary questions such as 400 versus 422 and route coverage without paying for a whole deployed system. The final smoke test crosses a real socket, Jetty, the application and real PostgreSQL with no driven fake. `architecture_test.clj` remains orthogonal to this split because it deliberately asserts source structure.
+`intake_test.clj` and most of `http_test.clj` are focused primary-adapter component tests with driven fakes. They answer boundary questions such as 400 versus 422, malformed JSON, typed 409 mapping and route coverage without paying for a whole deployed system. The final smoke test crosses a real socket, Jetty, the application and real PostgreSQL with no driven fake. `architecture_test.clj` remains orthogonal to this split because it deliberately asserts source structure.
 
 ## A ring handler is a function from a map to a map
 
@@ -131,26 +132,15 @@ And the one I most wanted, in `http_test.clj` — **bidirectional**:
 
 Add a command without exposing it, or expose one that doesn't exist, and the build fails. The endpoint list and the domain's command vocabulary become the same list, enforced rather than remembered.
 
-## The wire and the domain now agree
+## Validate the external message before constructing the command
 
-Writing this lab, the first request came back **400 on a perfectly good body**. The domain wanted `:vanilla` and `{"flavour":"vanilla"}` arrives as a string, so every well-formed request was malformed.
-
-The fix at the time was [lab22](../lab22)'s decoder, pointed the other way — coerce the body before validating it. The fix now is that there is nothing to coerce: a flavour is a string on the wire, in the command, in the event and in the store, because [lab19](../lab19) stopped writing keywords into streams and the rule reached back through every lab.
+The HTTP adapter parses JSON into ordinary JSON-shaped domain data: flavours remain strings from request through command, event and storage. It then hands intake a closed external message:
 
 ```clojure
-(let [wire {:command/type :buy-flavour :data {:flavour "vanilla"}}]
-  (is (nil? (command/validate wire)))    ; valid exactly as it arrived
-  (is (= wire (command/decode wire))))   ; and decoding is the identity
+{:type :buy-flavour :data {:flavour "vanilla"}}
 ```
 
-The decode step stays in the pipeline anyway:
-
-```clojure
-(let [command (schema/decode (->command ids message))]   ; decode, then
-  (if-let [problems (schema/validate command)] …))       ; validate
-```
-
-It costs one line, it is where a coercion belongs the day a command grows a field JSON does damage, and the **ordering** it demonstrates is still worth having: validating the wire form rejects every well-formed request; decoding without validating coerces nonsense into plausible values.
+That shape deliberately has no command id, correlation id, stream address or actor. Intake validates it first and allocates internal identity only after it passes. This is stronger than constructing a partly trusted command and validating afterwards: malformed clients consume no identifiers, cannot inject internal envelope fields and never create a command object. Syntax-invalid JSON is likewise a 400 at the HTTP boundary; a filesystem, identity or persistence failure is allowed to remain a server failure.
 
 ### One place the loss is still real
 
@@ -197,5 +187,5 @@ It also adds the pair of status codes this table is missing. 401 says *try again
 ```bash
 bb serve    # HTTP on :3000, in memory, no Docker
 bb demo     # the same system, printing rather than listening
-bb test     # 57 tests; adapter contracts and one E2E smoke need Docker
+bb test     # 75 tests; adapter contracts and one E2E smoke need Docker
 ```

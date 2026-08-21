@@ -1,5 +1,6 @@
 (ns lab17.snapshot-test
   (:require [clojure.test :refer [deftest is testing]]
+            [lab17.application :as application]
             [lab17.snapshot :as snapshot]
             [lab17.store :as store]
             [lab17.truck :as truck]))
@@ -14,9 +15,7 @@
    :correlation-id (random-uuid) :data data})
 
 (defn- handle [log cmd]
-  (let [state (truck/replay (store/stream log truck-1))]
-    (store/append log truck-1 (store/current-version log truck-1)
-                  gen-id t0 cmd (truck/decide cmd state))))
+  (application/handle log truck-1 cmd gen-id t0))
 
 (def fold
   {:evolve       truck/evolve
@@ -83,9 +82,10 @@
             :fold-version 1}})
 
 (deftest a-snapshot-from-an-older-fold-is-not-usable-test
-  (is (not (snapshot/usable? (get stale truck-1) truck/fold-version)))
+  (is (not (snapshot/usable? (get stale truck-1) truck/fold-version 25)))
   (is (snapshot/usable? (get (snapshot/take-snapshot snapshot/none log truck-1 fold) truck-1)
-                        truck/fold-version)))
+                        truck/fold-version
+                        25)))
 
 (deftest trusting-a-stale-fold-is-silently-wrong-test
   (testing "no exception, no warning — a plausible answer that is not the truth"
@@ -106,7 +106,7 @@
         (is (thrown? NullPointerException
                      (truck/evolve {"vanilla" 26} sale))))
       (testing "which is luck, not a safety net — the fold-version check is the safety net"
-        (is (not (snapshot/usable? (get stale truck-1) truck/fold-version)))))))
+        (is (not (snapshot/usable? (get stale truck-1) truck/fold-version 25)))))))
 
 (deftest the-check-discards-it-and-rebuilds-test
   (let [loaded (snapshot/load-state stale log truck-1 fold)]
@@ -114,7 +114,7 @@
     (is (= truth (:state loaded)))
     (is (= 25 (:folded loaded)) "the full fold, which is the correct price")))
 
-(deftest there-is-no-upcaster-for-a-snapshot-test
+(deftest a-stale-snapshot-is-rebuilt-instead-of-upcast-test
   (testing "lab 13 upcasts events because they are facts; this is derived"
     (let [rebuilt (snapshot/take-snapshot stale log truck-1 fold)]
       (is (= truck/fold-version (get-in rebuilt [truck-1 :fold-version])))
@@ -143,11 +143,11 @@
 
 (deftest snapshotting-is-due-only-after-enough-events-test
   (let [short-log (vec (take 5 log))]
-    (is (not (snapshot/due? snapshot/none short-log truck-1)))
-    (is (snapshot/due? snapshot/none log truck-1)))
+    (is (not (snapshot/due? snapshot/none short-log truck-1 truck/fold-version)))
+    (is (snapshot/due? snapshot/none log truck-1 truck/fold-version)))
   (testing "and not again until the stream has moved on"
     (let [snaps (snapshot/take-snapshot snapshot/none log truck-1 fold)]
-      (is (not (snapshot/due? snaps log truck-1))))))
+      (is (not (snapshot/due? snaps log truck-1 truck/fold-version))))))
 
 (deftest taking-a-snapshot-twice-is-harmless-test
   (let [once  (snapshot/take-snapshot snapshot/none log truck-1 fold)
@@ -158,3 +158,74 @@
   (testing "every question this lab asks is answerable with none at all"
     (is (= truth (:state (snapshot/load-state snapshot/none log truck-1 fold))))
     (is (= truth (truck/replay (store/stream log truck-1))))))
+
+(deftest an-impossible-snapshot-position-is-rejected-test
+  (let [from-the-future {truck-1 {:state        {:stock {"vanilla" 999}
+                                                 :sold  999}
+                                  :version      26
+                                  :fold-version truck/fold-version}}
+        loaded         (snapshot/load-state from-the-future log truck-1 fold)]
+    (is (not (:from-snapshot? loaded)))
+    (is (= truth (:state loaded)))
+    (is (snapshot/due? from-the-future log truck-1 truck/fold-version)
+        "the optional worker should replace a rejected snapshot immediately")))
+
+(deftest malformed-snapshot-envelopes-are-rejected-test
+  (doseq [bad [{:state truth :version -1 :fold-version truck/fold-version}
+               {:state truth :version 1.5 :fold-version truck/fold-version}
+               {:version 25 :fold-version truck/fold-version}
+               {:state truth :version 25}]]
+    (let [loaded (snapshot/load-state {truck-1 bad} log truck-1 fold)]
+      (is (not (:from-snapshot? loaded)))
+      (is (= truth (:state loaded))))))
+
+(deftest an-old-fold-snapshot-is-due-immediately-test
+  (is (snapshot/due? stale log truck-1 truck/fold-version)
+      "otherwise every read would keep paying for a full replay"))
+
+(deftest envelope-checks-cannot-detect-arbitrary-state-corruption-test
+  (let [corrupt {truck-1 {:state        {:stock {"vanilla" 999}
+                                         :sold  24}
+                          :version      25
+                          :fold-version truck/fold-version}}
+        trusted (snapshot/load-state corrupt log truck-1 fold)
+        rebuilt (snapshot/load-state (snapshot/discard corrupt truck-1)
+                                     log truck-1 fold)]
+    (is (:from-snapshot? trusted))
+    (is (not= truth (:state trusted))
+        "fold and position versions are compatibility checks, not checksums")
+    (is (= truth (:state rebuilt))
+        "because events remain authoritative, rejection or deletion recovers")))
+
+(deftest application-identifies-facts-before-persistence-test
+  (let [event-id #uuid "018f7a3e-0000-7000-8000-000000001701"
+        cmd      {:command/id     #uuid "0f1c2b3a-0000-4000-8000-000000001701"
+                  :command/type   :load-truck
+                  :correlation-id #uuid "cc79c083-0000-4000-8000-000000001701"
+                  :data           {:flavour "vanilla" :quantity 10}}
+        event    (first (application/handle [] truck-1 cmd
+                                            (constantly event-id) t0))]
+    (is (= event-id (:event/id event)))
+    (is (= t0 (:event/occurred-at event)))
+    (is (= (:command/id cmd) (get-in event [:metadata :causation-id])))
+    (is (= (:correlation-id cmd) (get-in event [:metadata :correlation-id])))
+    (is (= 1 (:stream/version event)))
+    (is (= 1 (:event/position event))))
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo #"Invalid event id"
+       (application/handle [] truck-1
+                           (command :load-truck {:flavour "vanilla" :quantity 10})
+                           (constantly "not-a-uuid") t0))))
+
+(deftest domain-invariants-and-unknown-semantics-fail-directly-test
+  (doseq [quantity [0 -1 1.5 nil]]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"Quantity must be"
+         (truck/decide (command :load-truck
+                                {:flavour "vanilla" :quantity quantity})
+                       truck/initial-state))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown command type"
+                        (truck/decide (command :teleport {})
+                                      truck/initial-state)))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                        (truck/replay [{:event/type :freezer-failed}]))))

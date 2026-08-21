@@ -27,7 +27,7 @@ Three things about that signature, each settled by an earlier lab.
 
 **It returns a vector**, because [lab5](../lab5) counted: zero events, one, or several, and the order of several is significant.
 
-**It is the only function allowed to say no.** [Lab 6](../lab6) made the point from the other side — `evolve` can never refuse, because by the time an event exists the thing already happened. `decide` runs while the answer is still open. That is the whole division of labour between them.
+**It is where context-dependent business rules may say no.** [Lab 6](../lab6) made the point from the other side: `evolve` does not re-judge a supported recorded fact, because by the time that event exists the thing already happened. `decide` runs while the business answer is still open. Boundary validation, authorisation and an optimistic-concurrency conflict may also reject work, but those are different questions at different boundaries.
 
 ## What decide returns, and what it doesn't
 
@@ -38,14 +38,16 @@ Look closely at the event above. No `:event/id`, no `:stream/id`, no `:stream/ve
  :data       {:flavour "vanilla"}}
 ```
 
-`decide` produces *what happened*. Where it gets recorded is not its business — the store stamps the identity, the stream, and the version when the event is appended. That's also where minting an id lives, which keeps `decide` pure exactly as [lab4](../lab4) argued: an id generator is an effect, so it belongs at the edge, and `decide` stays a function you can test by comparing two values.
+`decide` produces proposals describing *what happened*. Where they get recorded is not its business. The application handler gives each proposal an `:event/id` before append; the store preserves that identity and assigns the stream and consecutive versions it owns.
+
+That placement keeps `decide` pure exactly as [lab4](../lab4) argued: an id generator is an effect, so it belongs at the event-recording application boundary. It also means the identified batch exists before the write. If an append result is ambiguous, the same event values — with the same ids — are the retry unit; rerunning identity allocation would describe different facts.
 
 The namespaces make the direction visible:
 
 ```text
 lab8.truck     the domain     knows nothing about a log
 lab8.store     the log        knows nothing about ice cream
-lab8.handler   the loop       the only namespace that knows both
+lab8.handler   the application boundary that knows both and identifies facts
 ```
 
 `truck.clj` has no reference to `store`. That isn't tidiness for its own sake: it's what lets the same domain logic run against an in-memory vector here and a database later, and it falls out naturally once `decide` returns plain values.
@@ -65,7 +67,7 @@ The first and last both put nothing in the log, and they are **not the same thin
 
 Loading zero cones onto the truck is a request that legitimately did nothing. Nothing happened; nothing went wrong; the caller has no problem. Buying from an empty truck also records nothing — but the customer must not be told their cone is coming. A refusal that returns `[]` is indistinguishable from success at the call site, which is how a system quietly lies to its users.
 
-So `decide` throws, and the exception carries the reason:
+This lab chooses not to record that sold-out attempt, so `decide` throws and the exception carries the reason:
 
 ```clojure
 {:command/type :buy-flavour :flavour "pistachio" :remaining 0}
@@ -73,24 +75,27 @@ So `decide` throws, and the exception carries the reason:
 
 This is a design choice with a real alternative: return a result value — `[:ok events]` / `[:refused reason]` — rather than throwing. That composes better and makes refusal impossible to ignore, at the cost of every caller unwrapping it. Throwing is used here because it keeps the signature to one shape while the point being made is about `decide` itself. What matters is not which you pick but that **refusal is distinguishable from a no-op**.
 
-Note also what `decide` does *not* do: emit a `:buy-flavour-refused` event. Nothing about the truck changed, so replaying such an event would have to skip it — which means it was never part of the history. Lab5 made this argument; here it's a line of code that isn't written.
+That is a local modelling choice, not a rule that refusals never belong in history. If the business cares that a purchase was refused — for fraud analysis, customer friction or a coordinating process — the refusal itself is a fact worth recording. A stock fold could handle that known event with an explicit no-op while another projection consumes it. [Lab5](../lab5) establishes the choice and [lab14](../lab14) shows a refusal that must become observable. Here, no requirement needs the fact, so no `:buy-flavour-refused` proposal is produced.
 
 ## The loop
 
-`handle` is the whole of an event-sourced write, and it is six lines:
+`handle` now closes the minimal event-sourced decision loop:
 
 ```clojure
 (defn handle [log gen-id stream-id command]
   (let [history (store/stream log stream-id)          ; 1. read
-        version (store/current-version log stream-id)
+        version (store/current-version history stream-id)
         state   (truck/replay history)                ; 2. fold
-        events  (truck/decide command state)]         ; 3. decide
-    (store/append log stream-id version gen-id events))) ; 4. append
+        proposals (truck/decide command state)        ; 3. decide
+        events  (identify-events gen-id proposals)]   ; identify at the edge
+    (store/append log stream-id version events)))     ; 4. append
 ```
 
 Every lab since 5 contributed one line. Read the stream ([lab7](../lab7)), fold it ([lab6](../lab6)), decide against it (here), append it on the condition that the stream hasn't moved ([lab7](../lab7)).
 
-The version is read *before* deciding and offered back *at* the append. That gap is the whole of optimistic concurrency: two tills read version 1, both fold, both decide the sale is fine, and the second append is refused because the stream is at 2 by then. The loser's decision was made against a truck that no longer exists, so the decision is void — not the sale. It reads again, folds again, decides again, and this time gets the right answer:
+The expected version is derived from the **exact history that was folded**, then offered back at the append. That detail matters once reads use a database: reading history and current version in two independent snapshots could pair stale state with a newer version and allow a stale decision to commit.
+
+The gap after the consistent read is where optimistic concurrency matters. Two tills read version 1, both fold, both decide the sale is fine, and the second append is refused because the stream is at 2 by then. The loser's decision was made against a truck that no longer exists, so the decision is void — not the sale. It reads again, folds again, decides again, and this time gets the right answer:
 
 ```clojure
 (-> log
@@ -100,13 +105,17 @@ The version is read *before* deciding and offered back *at* the append. That gap
 
 Note the second sale correctly emits `stock-depleted`, which the stale decision would have missed entirely. Retrying is not a formality — the answer genuinely changed.
 
-**The batch lands together.** `append` takes all of `decide`'s events and gives them consecutive versions under one version check. Lab5 established that a command's events are ordered and belong together; a store that appended them one at a time, each with its own check, could interleave another writer's event between `flavour-sold` and `stock-depleted`.
+As in Lab7, the immutable log is a deterministic model of compare-and-append rather than concurrent storage. It detects the stale version only when the second call receives the winner's updated log. A real store must make the version condition and write atomic.
+
+**The batch must land together.** `append` takes all of `decide`'s events and gives them consecutive versions under one version check. With immutable values that is naturally all-or-nothing: either a new value is returned or the old one remains. A production adapter needs a transaction providing the same guarantee. Otherwise another writer could interleave an event between `flavour-sold` and `stock-depleted`, or only half the decision could be recorded.
+
+The pure-core tests call `decide` and `evolve` directly as value-to-value functions. The handler tests enter through the use case with an in-memory log and a deterministic ID fake, then assert on recorded facts and resulting state. They do not mock domain internals or assert call choreography.
 
 ## What's next
 
-The write side is complete: a command goes in, history comes out, and nothing is stored but events.
+The four-step decision loop is complete, not the production write side. A command can now be read against one history, decided, identified and conditionally appended as an ordered batch. Later labs add global ordering, causation, time, durable PostgreSQL enforcement, idempotency and the transactional outbox.
 
-Everything after this is the read side and the world outside — [lab9](../lab9) turns the log into something queryable with projections, and adds the global position that lets them resume. The integration messages of [lab3](../lab3) being published to somebody comes after that.
+[Lab9](../lab9) next turns the log into something queryable with projections and adds the global position that lets them resume. The integration messages of [lab3](../lab3) being published to somebody comes after that.
 
 ## Running it
 

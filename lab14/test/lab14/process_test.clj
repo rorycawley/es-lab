@@ -8,6 +8,8 @@
 
 (def t0 #inst "2026-08-16T09:00:00.000-00:00")
 (def within #inst "2026-08-16T09:20:00.000-00:00")
+(def deadline #inst "2026-08-16T09:30:00.000-00:00")
+(def beyond #inst "2026-08-16T09:31:00.000-00:00")
 
 (def depleted
   {:event/type :stock-depleted :event/occurred-at t0
@@ -25,11 +27,15 @@
   {:event/type :flavour-returned :stream/id truck-2
    :data {:flavour "vanilla" :quantity process/transfer-quantity}})
 
-(def compensation-failed
-  {:event/type :compensation-failed :stream/id truck-2
+(def stock-return-refused
+  {:event/type :stock-return-refused :stream/id truck-2
    :data {:flavour "vanilla" :reason "no-room-to-return"}})
 
 (defn- status [events] (:status (process/replay events)))
+
+(deftest a-process-with-no-history-has-not-started-test
+  (is (= {:status :not-started} (process/replay [])))
+  (is (= [] (process/decide (process/replay []) conversation truck-2 t0))))
 
 (deftest the-happy-path-still-completes-test
   (is (= :complete (status [depleted unloaded
@@ -47,7 +53,13 @@
 
 (deftest a-failed-compensation-needs-a-human-test
   (is (= :needs-attention
-         (status [depleted unloaded load-refused compensation-failed]))))
+         (status [depleted unloaded load-refused stock-return-refused]))))
+
+(deftest the-fold-ignores-known-context-and-rejects-unknown-semantics-test
+  (is (= :awaiting-unload
+         (status [{:event/type :flavour-sold} depleted])))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown event type"
+                        (process/replay [{:event/type :freezer-failed}]))))
 
 (deftest the-fold-remembers-who-gave-the-stock-up-test
   (testing "compensation has to know where to put it back, and history says"
@@ -71,7 +83,7 @@
 
 (deftest every-terminal-state-asks-for-nothing-test
   (doseq [events [[depleted unloaded load-refused returned]
-                  [depleted unloaded load-refused compensation-failed]
+                  [depleted unloaded load-refused stock-return-refused]
                   [depleted {:event/type :transfer-abandoned :stream/id truck-1 :data {}}]]]
     (is (= [] (process/decide (process/replay events) conversation truck-2 within)))))
 
@@ -82,3 +94,31 @@
                                   :stream/id truck-1 :data {}}])]
       (is (= :abandoned (:status state)))
       (is (nil? (:donor state)) "no step completed, so nothing to undo"))))
+
+(deftest the-timeout-includes-the-deadline-test
+  (let [state (process/replay [depleted])]
+    (is (not (process/timeout-reached? state within)))
+    (is (process/timeout-reached? state deadline))
+    (is (process/timeout-reached? state beyond))))
+
+(deftest command-identity-is-stable-valid-and-distinct-per-step-test
+  (is (= (process/derived-command-id conversation :return)
+         (process/derived-command-id conversation :return)))
+  (is (= 4 (count (distinct (map #(process/derived-command-id conversation %)
+                                 [:unload :load :return :abandon])))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid correlation id"
+                        (process/derived-command-id nil :return)))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid process step"
+                        (process/derived-command-id conversation "return"))))
+
+(deftest only-waiting-states-are-active-test
+  (is (process/active? (process/replay [depleted])))
+  (is (process/active? (process/replay [depleted unloaded])))
+  (is (process/active? (process/replay [depleted unloaded load-refused])))
+  (is (not (process/active? (process/replay []))))
+  (is (not (process/active? (process/replay [depleted unloaded load-refused returned])))))
+
+(deftest an-unknown-process-status-is-not-treated-as-terminal-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown process status"
+                        (process/decide {:status :wedged}
+                                        conversation truck-2 within))))

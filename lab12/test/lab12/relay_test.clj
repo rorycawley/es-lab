@@ -1,103 +1,176 @@
 (ns lab12.relay-test
   (:require [clojure.test :refer [deftest is testing]]
             [lab12.consumer :as consumer]
-            [lab12.relay :as relay]
-            [lab12.store :as store]
-            [lab12.truck :as truck]))
+            [lab12.handler :as handler]
+            [lab12.relay :as relay]))
 
 (def truck-1 #uuid "0f1c2b3a-0000-4000-8000-000000000001")
+(def conversation #uuid "cc79c083-0000-4000-8000-000000000012")
+
+(def load-command-id
+  #uuid "0f1c2b3a-0000-4000-8000-000000001201")
+
+(def buy-command-id
+  #uuid "0f1c2b3a-0000-4000-8000-000000001202")
+
+(def load-chocolate-command-id
+  #uuid "0f1c2b3a-0000-4000-8000-000000001203")
+
+(def buy-chocolate-command-id
+  #uuid "0f1c2b3a-0000-4000-8000-000000001204")
+
+(def depletion-event-id
+  #uuid "018f7a3e-0000-7000-8000-000000001003")
+
+(def first-message-id
+  #uuid "018f7a3e-0000-7000-8000-000000002001")
+
 (def t0 #inst "2026-08-16T09:00:00.000-00:00")
 
-(defn- gen-id [] (random-uuid))
+(defn- counting-ids
+  "A deterministic fake for an identifier port."
+  [start]
+  (let [counter (atom start)]
+    (fn []
+      (java.util.UUID/fromString
+       (format "018f7a3e-0000-7000-8000-%012d" (swap! counter inc))))))
 
-(defn- command [type conversation data]
-  {:command/id (random-uuid) :command/type type
-   :correlation-id conversation :data data})
+(defn- command [command-id type data]
+  {:command/id     command-id
+   :command/type   type
+   :correlation-id conversation
+   :data           data})
 
-(defn- handle [log cmd]
-  (let [stream-id (get-in cmd [:data :truck-id])
-        state     (truck/replay (store/stream log stream-id))]
-    (store/append log stream-id (store/current-version log stream-id)
-                  gen-id t0 cmd (truck/decide cmd state))))
+(defn- sold-out-log []
+  ;; One cone loaded and sold. The depletion is the only fact with an
+  ;; integration contract.
+  (let [gen-id (counting-ids 1000)]
+    (-> []
+        (handler/handle gen-id t0
+                        (command load-command-id
+                                 :load-truck
+                                 {:truck-id truck-1
+                                  :flavour "vanilla"
+                                  :quantity 1}))
+        (handler/handle gen-id t0
+                        (command buy-command-id
+                                 :buy-flavour
+                                 {:truck-id truck-1
+                                  :flavour "vanilla"})))))
 
-(def conversation (random-uuid))
+(deftest the-log-holds-three-facts-and-publishes-two-addressed-messages-test
+  (let [log (sold-out-log)
+        {:keys [sent checkpoint]}
+        (relay/run-once log 0 relay/empty-broker (counting-ids 2000))]
+    (is (= [:truck-loaded :flavour-sold :stock-depleted]
+           (map :event/type log)))
+    (is (= 3 checkpoint))
+    (is (= [:flavour-unavailable :restock-required]
+           (map :message/type sent)))
+    (is (= [:customer-app :purchasing] (map :recipient sent)))))
 
-;; One cone loaded and sold. The sale empties the truck, so the log ends with
-;; a depletion — the only fact in it that anybody outside is told about.
-(def log
-  (-> []
-      (handle (command :load-truck conversation
-                       {:truck-id truck-1 :flavour "vanilla" :quantity 1}))
-      (handle (command :buy-flavour conversation {:truck-id truck-1 :flavour "vanilla"}))))
-
-(deftest the-log-holds-three-facts-and-publishes-two-messages-test
-  (is (= [:truck-loaded :flavour-sold :stock-depleted] (map :event/type log)))
-  (let [{:keys [sent]} (relay/run-once log 0 relay/empty-broker gen-id)]
-    (is (= 2 (count sent)) "only the depletion is anyone else's business")
-    (is (= [:flavour-unavailable :restock-required] (map :message/type sent)))))
-
-(deftest the-relay-stamps-a-delivery-identity-test
-  (let [{:keys [sent]} (relay/run-once log 0 relay/empty-broker gen-id)]
-    (doseq [message sent]
-      (is (uuid? (:message/id message)))
-      (is (uuid? (get-in message [:payload :event/id]))))
+(deftest the-relay-creates-complete-envelope-identities-test
+  (let [{:keys [sent]}
+        (relay/run-once (sold-out-log) 0 relay/empty-broker (counting-ids 2000))]
+    (is (= first-message-id (:message/id (first sent))))
+    (is (every? uuid? (map :message/id sent)))
     (testing "two messages about one fact: two envelopes, one event id"
       (is (= 2 (count (distinct (map :message/id sent)))))
-      (is (= 1 (count (distinct (map #(get-in % [:payload :event/id]) sent))))))))
+      (is (= #{depletion-event-id}
+             (set (map #(get-in % [:payload :event/id]) sent)))))))
 
-(deftest the-relay-carries-the-conversation-across-the-boundary-test
-  (let [{:keys [sent]} (relay/run-once log 0 relay/empty-broker gen-id)]
+(deftest the-relay-propagates-correlation-and-adds-immediate-causation-test
+  (let [{:keys [sent]}
+        (relay/run-once (sold-out-log) 0 relay/empty-broker (counting-ids 2000))]
     (doseq [message sent]
-      (is (= conversation (get-in message [:metadata :correlation-id]))))))
+      (is (= conversation (get-in message [:metadata :correlation-id])))
+      (is (= depletion-event-id (get-in message [:metadata :causation-id]))))))
 
 (deftest nothing-new-means-nothing-published-test
-  (let [{:keys [broker checkpoint]} (relay/run-once log 0 relay/empty-broker gen-id)
-        again (relay/run-once log checkpoint broker gen-id)]
+  (let [log (sold-out-log)
+        {:keys [broker checkpoint]}
+        (relay/run-once log 0 relay/empty-broker (counting-ids 2000))
+        again (relay/run-once log checkpoint broker (counting-ids 3000))]
     (is (= [] (:sent again)))
     (is (= broker (:broker again)))))
 
-(deftest a-crash-before-the-checkpoint-publishes-twice-test
-  (testing "sent, then died before recording how far it got"
-    (let [first-pass  (relay/run-once log 0 relay/empty-broker gen-id)
-          second-pass (relay/run-once log 0 (:broker first-pass) gen-id)
+(deftest a-crash-before-the-checkpoint-republishes-in-new-envelopes-test
+  (testing "published, then died before recording how far it got"
+    (let [log         (sold-out-log)
+          first-pass  (relay/run-once log 0 relay/empty-broker (counting-ids 2000))
+          second-pass (relay/run-once log 0 (:broker first-pass) (counting-ids 3000))
           delivered   (get-in second-pass [:broker :delivered])]
-      (is (= 4 (count delivered)) "the same two facts, delivered twice")
-      (testing "each delivery has its own envelope id"
-        (is (= 4 (count (distinct (map :message/id delivered))))))
-      (testing "but they announce only one fact"
-        (is (= 1 (count (distinct (map #(get-in % [:payload :event/id]) delivered)))))))))
+      (is (= 4 (count delivered)) "two contracts for one fact, published twice")
+      (is (= 4 (count (distinct (map :message/id delivered))))
+          "each new envelope has its own identity")
+      (is (= #{depletion-event-id}
+             (set (map #(get-in % [:payload :event/id]) delivered)))))))
 
-(deftest the-consumer-absorbs-the-duplicates-test
-  (let [first-pass  (relay/run-once log 0 relay/empty-broker gen-id)
-        second-pass (relay/run-once log 0 (:broker first-pass) gen-id)
+(deftest the-customer-consumer-absorbs-only-its-duplicate-test
+  (let [log         (sold-out-log)
+        first-pass  (relay/run-once log 0 relay/empty-broker (counting-ids 2000))
+        second-pass (relay/run-once log 0 (:broker first-pass) (counting-ids 3000))
         delivered   (get-in second-pass [:broker :delivered])
         once  (consumer/receive-all consumer/initial-model (take 2 delivered))
         twice (consumer/receive-all consumer/initial-model delivered)]
     (is (= #{"vanilla"} (:unavailable once)))
-    (is (= once twice) "four deliveries, same model as two")))
+    (is (= #{depletion-event-id} (:seen once)))
+    (is (= once twice))))
 
-(deftest deduplicating-on-the-envelope-would-not-work-test
-  (testing "the two deliveries of one fact have different :message/id values"
-    (let [first-pass  (relay/run-once log 0 relay/empty-broker gen-id)
-          second-pass (relay/run-once log 0 (:broker first-pass) gen-id)
-          delivered   (get-in second-pass [:broker :delivered])
-          by-envelope (fn [model message]
-                        (if (contains? (:seen model) (:message/id message))
-                          model
-                          (-> model
-                              (update :unavailable conj (get-in message [:payload :flavour]))
-                              (update :seen conj (:message/id message)))))]
-      (is (= 4 (count (:seen (reduce by-envelope consumer/initial-model delivered))))
-          "every delivery looks new, so nothing is suppressed"))))
+(deftest another-recipients-message-cannot-poison-this-consumers-inbox-test
+  (let [{:keys [sent]}
+        (relay/run-once (sold-out-log) 0 relay/empty-broker (counting-ids 2000))
+        purchasing-first (reverse sent)
+        model (consumer/receive-all consumer/initial-model purchasing-first)]
+    (is (= #{"vanilla"} (:unavailable model)))
+    (is (= #{depletion-event-id} (:seen model)))))
+
+(deftest deduplicating-on-the-envelope-would-not-suppress-a-republish-test
+  (let [log         (sold-out-log)
+        first-pass  (relay/run-once log 0 relay/empty-broker (counting-ids 2000))
+        second-pass (relay/run-once log 0 (:broker first-pass) (counting-ids 3000))
+        delivered   (->> (get-in second-pass [:broker :delivered])
+                         (filter #(= :customer-app (:recipient %))))
+        seen-envelope-ids (set (map :message/id delivered))]
+    (is (= 2 (count seen-envelope-ids))
+        "both envelopes look new although they carry the same fact")))
 
 (deftest the-relay-catches-up-incrementally-test
-  (testing "a second sale, published on the next pass only"
-    (let [{:keys [broker checkpoint]} (relay/run-once log 0 relay/empty-broker gen-id)
-          log' (-> log
-                   (handle (command :load-truck conversation
-                                    {:truck-id truck-1 :flavour "chocolate" :quantity 1}))
-                   (handle (command :buy-flavour conversation
-                                    {:truck-id truck-1 :flavour "chocolate"})))
-          next-pass (relay/run-once log' checkpoint broker gen-id)]
-      (is (= 2 (count (:sent next-pass))) "only the new depletion")
-      (is (= #{"chocolate"} (set (map #(get-in % [:payload :flavour]) (:sent next-pass))))))))
+  (let [log (sold-out-log)
+        {:keys [broker checkpoint]}
+        (relay/run-once log 0 relay/empty-broker (counting-ids 2000))
+        event-ids (counting-ids 1100)
+        log' (-> log
+                 (handler/handle event-ids t0
+                                 (command load-chocolate-command-id
+                                          :load-truck
+                                          {:truck-id truck-1
+                                           :flavour "chocolate"
+                                           :quantity 1}))
+                 (handler/handle event-ids t0
+                                 (command buy-chocolate-command-id
+                                          :buy-flavour
+                                          {:truck-id truck-1
+                                           :flavour "chocolate"})))
+        next-pass (relay/run-once log' checkpoint broker (counting-ids 3000))]
+    (is (= 2 (count (:sent next-pass))))
+    (is (= #{"chocolate"}
+           (set (map #(get-in % [:payload :flavour]) (:sent next-pass)))))))
+
+(deftest invalid-envelope-or-consumer-semantics-fail-loudly-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid message id"
+                        (relay/run-once (sold-out-log)
+                                        0
+                                        relay/empty-broker
+                                        (constantly "not-a-uuid"))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown message type"
+                        (consumer/receive consumer/initial-model
+                                          {:message/type :flavour-renamed
+                                           :recipient :customer-app
+                                           :payload {:event/id depletion-event-id}})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid event id"
+                        (consumer/receive consumer/initial-model
+                                          {:message/type :flavour-unavailable
+                                           :recipient :customer-app
+                                           :payload {:event/id nil
+                                                     :flavour "vanilla"}}))))

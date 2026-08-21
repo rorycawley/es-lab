@@ -92,6 +92,10 @@
     (fn [{:keys [deps]}]
       (is (= :no-token (:failure (verdict deps nil))))
       (is (= 401 (status deps nil)))
+      (is (= "Bearer"
+             (get-in ((http/handler deps) {:request-method :get :uri "/v1/stock"})
+                     [:headers "www-authenticate"]))
+          "an absent credential is challenged without calling it invalid")
       (testing "and health does not ask"
         (is (= 200 (:status ((http/handler deps) {:request-method :get :uri "/health"}))))))))
 

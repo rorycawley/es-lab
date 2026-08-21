@@ -24,7 +24,8 @@
 (defn- rule [] (say "  " (apply str (repeat 62 "─"))))
 
 (defn- command [type data]
-  {:command/id (random-uuid) :command/type type :data data})
+  {:command/id (random-uuid) :command/type type
+   :correlation-id (random-uuid) :data data})
 
 (defn- show-events [events]
   (doseq [e events]
@@ -62,7 +63,7 @@
 
   (say)
   (say "  5. A policy notices the depletion and asks for a restock (lab 10).")
-  (let [{:keys [commands events]} (app/react app 0 truck-1)]
+  (let [{:keys [commands events]} (app/react app 0)]
     (doseq [c commands]
       (say "     command " (name (:command/type c))
            "  " (pr-str (select-keys (:data c) [:flavour :quantity]))))
@@ -71,7 +72,7 @@
 
   (say)
   (say "  6. Nothing new happened, so the reactor does nothing (lab 10).")
-  (let [{:keys [commands]} (app/react app 99 truck-1)]
+  (let [{:keys [commands]} (app/react app 99)]
     (say "     commands issued: " (count commands)))
 
   (rule)

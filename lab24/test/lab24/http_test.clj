@@ -46,6 +46,13 @@
 (defn- post [handler uri tokens body] (call handler :post uri tokens body))
 (defn- GET  [handler uri tokens]      (call handler :get uri tokens nil))
 
+(defn- post-raw [handler uri tokens body]
+  (let [response (handler (cond-> {:request-method :post :uri uri
+                                   :body (java.io.StringReader. body)}
+                            tokens (assoc :headers
+                                          {"authorization" (mock-idp/bearer tokens)})))]
+    (assoc response :parsed (json/read-str (:body response) :key-fn keyword))))
+
 (defn- post-over-http [url tokens body]
   (let [request (-> (HttpRequest/newBuilder (URI/create url))
                     (.header "content-type" "application/json")
@@ -95,6 +102,16 @@
           (is (= {:vanilla 2}
                  (:stock (json/read-str body :key-fn keyword)))))))))
 
+(deftest replenishing-an-already-satisfied-level-is-an-audited-no-op-test
+  (with-handler
+    (fn [{:keys [handler login]}]
+      (let [depot (login :rudi)]
+        (post handler "/v1/restocks" depot {:flavour "vanilla" :quantity 3})
+        (let [response (post handler "/v1/replenishments" depot
+                             {:flavour "vanilla" :quantity 2})]
+          (is (= 200 (:status response)))
+          (is (= [] (:recorded (:parsed response)))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Five status codes, and what each one tells a client to do next
 ;; ---------------------------------------------------------------------------
@@ -110,7 +127,7 @@
           (is (some? (get-in response [:headers "www-authenticate"]))
               "and RFC 6750 says how to say so")))
 
-      (testing "403 by role — I know who you are, and a better token will not help"
+      (testing "403 by role — valid identity, insufficient grant"
         (is (= 403 (:status (post handler "/v1/sales" (login :rudi) {:flavour "vanilla"})))))
 
       (testing "403 by ownership — right role, wrong truck"
@@ -141,6 +158,42 @@
             "a perfectly good token, and it will never be the right one")
         (is (= 200 (:status (post handler "/v1/sales" (login :dana) {:flavour "vanilla"})))
             "the right one")))))
+
+(deftest malformed-json-is-400-test
+  (with-handler
+    (fn [{:keys [handler login]}]
+      (let [response (post-raw handler "/v1/restocks" (login :rudi) "{not-json")]
+        (is (= 400 (:status response)))
+        (is (= "malformed" (:error (:parsed response))))))))
+
+(defn- faulting-store [failure]
+  (reify driven/EventStore
+    (command-result [_ _ _] nil)
+    (commit-command [_ _ _ _ _ _] (throw failure))
+    (read-stream [_ _] [])
+    (stream-version [_ _] 0)
+    (read-since [_ _] [])))
+
+(deftest concurrency-is-409-but-identity-failures-are-not-client-errors-test
+  (with-handler
+    (fn [{:keys [app login]}]
+      (let [depot (login :rudi)
+            conflict-handler (http/handler
+                              (assoc app :store
+                                     (faulting-store
+                                      (ex-info "moved" {:reason :concurrent-modification}))))
+            response (post conflict-handler "/v1/restocks" depot
+                           {:flavour "vanilla" :quantity 1})]
+        (is (= 409 (:status response)))
+        (is (= "conflict" (:error (:parsed response))))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"collision"
+             (post (http/handler
+                    (assoc app :store
+                           (faulting-store
+                            (ex-info "collision" {:reason :command-id-collision}))))
+                   "/v1/restocks" depot
+                   {:flavour "vanilla" :quantity 1})))))))
 
 (deftest an-unknown-endpoint-is-404-even-without-a-token-test
   (with-handler
@@ -213,30 +266,16 @@
             "same underlying events, one of them shaped down")))))
 
 ;; ---------------------------------------------------------------------------
-;; The wire loses the same things the store loses
+;; The external message is not an internal command
 ;; ---------------------------------------------------------------------------
 
-(deftest the-wire-form-is-already-the-domain-form-test
-  (testing "the body a client sends needs no translating"
-    ;; This test used to assert the opposite: that a JSON body arrived as
-    ;; strings, the schema wanted keywords, and a decode step stood between
-    ;; them. The decode step is still here — see below — but it has nothing
-    ;; to do for these commands, because the domain no longer writes anything
-    ;; JSON cannot carry.
-    (let [wire {:command/id    (random-uuid)
-                :command/type  :buy-flavour
-                :command/actor {:type "user" :id "USR-83721"}
-                :data          {:flavour "vanilla"}}]
-      (is (nil? (command/validate wire))
-          "valid exactly as it arrived off the wire")
-      (is (= wire (command/decode wire))
-          "and decoding it is the identity")))
-
-  (testing "the decode step stays at the boundary anyway"
-    ;; It costs one line and it is where a coercion belongs the day a command
-    ;; grows a field JSON does damage — a uuid, an instant, a decimal. Lab 22
-    ;; still needs it on the way *out*, for :truck-id.
-    (is (some? (command/decode {:command/type :buy-flavour :data {:flavour "vanilla"}})))))
+(deftest the-wire-shape-cannot-name-internal-identity-or-authority-test
+  (is (nil? (command/validate-message
+             {:type :buy-flavour :data {:flavour "vanilla"}})))
+  (is (some? (command/validate-message
+              {:type :buy-flavour
+               :data {:flavour "vanilla"
+                      :actor {:type "user" :id "USR-83721"}}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; The API surface and the command vocabulary are one list
@@ -303,15 +342,17 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest the-authenticated-system-serves-through-real-infrastructure-test
-  (testing "one smoke test crosses OIDC, HTTP, the application and real Postgres"
-    (let [idp (mock-idp/start!)
-          sys (system/start (system/serving
-                             (fixture/postgres-system
-                              {:oidc (mock-idp/oidc-config idp)}) 0))]
-      (try
-        (let [port (.getLocalPort (aget (.getConnectors (:server (:http sys))) 0))
-              response (post-over-http (str "http://localhost:" port "/v1/restocks")
-                                       (mock-idp/login idp :rudi)
-                                       {:flavour "vanilla" :quantity 2})]
-          (is (= 200 (.statusCode response))))
-        (finally (system/stop sys) (mock-idp/stop! idp))))))
+  (if (System/getenv "ESLAB_SKIP_DOCKER")
+    (is true "real-infrastructure smoke test explicitly skipped")
+    (testing "one smoke test crosses OIDC, HTTP, the application and real Postgres"
+      (let [idp (mock-idp/start!)
+            sys (system/start (system/serving
+                               (fixture/postgres-system
+                                {:oidc (mock-idp/oidc-config idp)}) 0))]
+        (try
+          (let [port (.getLocalPort (aget (.getConnectors (:server (:http sys))) 0))
+                response (post-over-http (str "http://localhost:" port "/v1/restocks")
+                                         (mock-idp/login idp :rudi)
+                                         {:flavour "vanilla" :quantity 2})]
+            (is (= 200 (.statusCode response))))
+          (finally (system/stop sys) (mock-idp/stop! idp)))))))

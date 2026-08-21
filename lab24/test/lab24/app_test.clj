@@ -15,7 +15,8 @@
 (defn- command
   ([type data] (command rudi type data))
   ([actor type data]
-   {:command/id (random-uuid) :command/type type :command/actor actor :data data}))
+   {:command/id (random-uuid) :command/type type
+    :correlation-id (random-uuid) :command/actor actor :data data}))
 (defn- with-app [f]
   (let [sys (system/start (system/in-memory {:clock (clock/fixed-clock t0)}))]
     (try (f (system/app sys)) (finally (system/stop sys)))))
@@ -56,7 +57,7 @@
               (rostered a)
               (app/handle a truck-1 (command :load-truck {:flavour "vanilla" :quantity 1}))
               (app/handle a truck-1 (command dana :buy-flavour {:flavour "vanilla"}))
-              (let [{:keys [commands]} (app/react a 0 truck-1)]
+              (let [{:keys [commands]} (app/react a 0)]
                 (is (= [:load-truck] (map :command/type commands)))
                 (is (= [{:type "system" :id "restock-when-depleted"}]
                        (map :command/actor commands)))
@@ -69,3 +70,27 @@
               (is (= [rudi rudi dana dana]
                      (map (comp :actor :metadata)
                           (driven/read-stream (:store a) truck-1)))))))
+
+(deftest an-exact-command-retry-returns-the-original-audited-outcome-test
+  (with-app
+    (fn [a]
+      (rostered a)
+      (app/handle a truck-1 (command :load-truck {:flavour "vanilla" :quantity 1}))
+      (let [sale (command dana :buy-flavour {:flavour "vanilla"})
+            first-result (app/handle a truck-1 sale)]
+        (is (= first-result (app/handle a truck-1 sale)))
+        (is (= {"vanilla" 0} (app/stock a truck-1)))
+        (is (= dana (get-in (first first-result) [:metadata :actor])))
+        (is (= 2 (count (driven/pending (:outbox a)))))))))
+
+(deftest the-reactor-routes-system-commands-to-the-fact-stream-test
+  (with-app
+    (fn [a]
+      (let [truck-2 #uuid "0f1c2b3a-0000-4000-8000-000000000002"]
+        (doseq [truck [truck-1 truck-2]]
+          (app/handle a truck (command :assign-driver {:driver-id (:id dana)}))
+          (app/handle a truck (command :load-truck {:flavour "vanilla" :quantity 1}))
+          (app/handle a truck (command dana :buy-flavour {:flavour "vanilla"})))
+        (app/react a 0)
+        (is (= {"vanilla" 20} (app/stock a truck-1)))
+        (is (= {"vanilla" 20} (app/stock a truck-2)))))))

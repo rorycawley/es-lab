@@ -80,3 +80,19 @@
         (is (= :malformed (:rejected result)))
         (is (zero? @id-calls)
             "validation happens before command/id allocation")))))
+
+(deftest infrastructure-and-identity-failures-are-not-labelled-business-refusals-test
+  (with-app
+    (fn [app]
+      (let [same-id #uuid "0f1c2b3a-0000-4000-8000-000000000099"
+            ids (reify port/Ids (new-id [_] same-id))
+            deps (assoc app :ids ids)]
+        (intake/submit deps truck-1
+                       {:type :load-truck
+                        :data {:flavour "vanilla" :quantity 1}})
+        (let [failure (try
+                        (intake/submit deps truck-1
+                                       {:type :load-truck
+                                        :data {:flavour "chocolate" :quantity 1}})
+                        (catch clojure.lang.ExceptionInfo e e))]
+          (is (= :command-id-collision (:reason (ex-data failure)))))))))

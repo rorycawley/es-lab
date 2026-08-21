@@ -171,3 +171,31 @@
         (intake/submit app truck-1 dana {:type :buy-flavour :data {:flavour "vanilla"}})
         (is (= {:type "user" :id "USR-83721"}
                (-> (driven/read-stream (:store app) truck-1) last :metadata :actor)))))))
+
+(deftest malformed-input-is-rejected-before-command-identity-is-allocated-test
+  (with-app
+    (fn [app]
+      (let [id-calls (atom 0)
+            ids (reify driven/Ids
+                  (new-id [_] (swap! id-calls inc) (random-uuid)))
+            result (intake/submit (assoc app :ids ids) truck-1 rudi
+                                  {:type :load-truck
+                                   :data {:flavour "tarmac" :quantity 3}})]
+        (is (= :malformed (:rejected result)))
+        (is (zero? @id-calls))))))
+
+(deftest identity-and-infrastructure-failures-are-not-business-refusals-test
+  (with-app
+    (fn [app]
+      (let [same-id #uuid "0f1c2b3a-0000-4000-8000-000000000099"
+            ids (reify driven/Ids (new-id [_] same-id))
+            deps (assoc app :ids ids)]
+        (intake/submit deps truck-1 rudi
+                       {:type :load-truck
+                        :data {:flavour "vanilla" :quantity 1}})
+        (let [failure (try
+                        (intake/submit deps truck-1 rudi
+                                       {:type :load-truck
+                                        :data {:flavour "chocolate" :quantity 1}})
+                        (catch clojure.lang.ExceptionInfo e e))]
+          (is (= :command-id-collision (:reason (ex-data failure)))))))))

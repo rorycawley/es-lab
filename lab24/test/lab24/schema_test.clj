@@ -14,10 +14,12 @@
 
 (defn- buy [flavour]
   {:command/id (random-uuid) :command/type :buy-flavour :command/actor dana
+   :correlation-id (random-uuid)
    :data {:flavour flavour}})
 
 (defn- load-truck [flavour quantity]
   {:command/id (random-uuid) :command/type :load-truck :command/actor dana
+   :correlation-id (random-uuid)
    :data {:flavour flavour :quantity quantity}})
 
 ;; ---------------------------------------------------------------------------
@@ -59,6 +61,15 @@
 ;; Closed on the way in
 ;; ---------------------------------------------------------------------------
 
+(deftest an-external-message-is-validated-before-internal-identity-exists-test
+  (is (nil? (command/validate-message
+             {:type :assign-driver :data {:driver-id "USR-83721"}})))
+  (is (some? (command/validate-message
+              {:type :buy-flavour
+               :data {:flavour "vanilla" :actor dana}}))
+      "the closed body cannot supply an actor")
+  (is (some? (command/validate-message {:type :steal-truck :data {}}))))
+
 (deftest a-well-formed-command-passes-test
   (is (nil? (command/validate (buy "chocolate"))))
   (is (nil? (command/validate (load-truck "vanilla" 12)))))
@@ -70,6 +81,7 @@
     (is (some? (command/validate (load-truck "vanilla" 0)))))
   (testing "a missing field"
     (is (some? (command/validate {:command/id (random-uuid)
+                                  :correlation-id (random-uuid)
                                   :command/type :buy-flavour
                                   :data {}}))))
   (testing "an id that is not an id"
@@ -94,6 +106,7 @@
 
 (deftest an-unknown-command-type-is-refused-test
   (is (some? (command/validate {:command/id (random-uuid)
+                                :correlation-id (random-uuid)
                                 :command/type :steal-truck
                                 :data {}}))))
 
@@ -127,12 +140,12 @@
 ;; Decoding, and which losses are worth it
 ;; ---------------------------------------------------------------------------
 
-(deftest the-loss-worth-decoding-is-the-one-you-cannot-avoid-test
+(deftest event-envelope-uuid-loss-is-decoded-without-changing-the-actor-test
   (testing "JSON has no UUID type, and no design decision changes that"
-    (is (= {:flavour "vanilla" :quantity 20 :truck-id truck-1}
-           (event/decode-data :truck-loaded {:flavour "vanilla" :quantity 20
-                                             :truck-id (str truck-1)}))
-        "a policy stamps :truck-id (lab 10); the store hands it back as a string")))
+    (is (= {:causation-id truck-1 :correlation-id truck-1 :actor dana}
+           (event/decode-metadata {:causation-id (str truck-1)
+                                   :correlation-id (str truck-1)
+                                   :actor dana})))))
 
 (deftest the-loss-not-worth-decoding-is-the-one-you-declined-to-have-test
   (testing "nothing else here needs a decoder, because nothing else was lost"
@@ -156,6 +169,6 @@
     (is (contains? event/by-type :truck-loaded)
         "adding an event type adds its coercion, because they are the same statement")))
 
-(deftest decoding-an-already-decoded-value-is-harmless-test
-  (is (= {:flavour "vanilla" :truck-id truck-1}
-         (event/decode-data :truck-loaded {:flavour "vanilla" :truck-id truck-1}))))
+(deftest decoding-already-decoded-metadata-is-harmless-test
+  (is (= {:causation-id truck-1 :actor dana}
+         (event/decode-metadata {:causation-id truck-1 :actor dana}))))

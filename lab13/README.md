@@ -2,13 +2,15 @@
 
 Every lab so far has assumed one schema, forever. It's the assumption that breaks first.
 
-## You cannot migrate an event store
+## Do not casually rewrite an event store
 
-In a CRUD system, a shape change is a migration: rewrite the rows, and the old shape is gone. That option isn't available here. Rewriting history destroys the thing the store is *for* — [lab1](../lab1) spent a section on why an event is immutable, and "except when the schema changes" is not a footnote you can add to that.
+In a CRUD system, a shape change commonly rewrites rows and removes the old representation. Doing that in place to an event store changes the historical record, can invalidate signatures and audit evidence, and makes replay depend on whether it happened before or after the rewrite. [Lab1](../lab1) treated recorded facts as immutable, so schema evolution starts by preserving their original bytes and adapting on read.
+
+Physical migration is possible as a controlled last resort — for example, copying into a new store while retaining the original, recording provenance, verifying counts and hashes, and switching readers deliberately. It is not the routine answer to an application-level rename. The important rule is that an operator must never mistake a rewritten representation for the untouched fact that was originally recorded.
 
 So the old shape stays. Which means the real requirement is stronger than it first sounds:
 
-> Your deserialiser must handle **every schema you have ever written** — not the current one.
+> A supported history reader must handle **every schema version it claims to support** — not only the version written today — and must reject versions or event semantics it does not understand.
 
 That's the year-three problem, and nothing about it gets easier with time.
 
@@ -89,6 +91,8 @@ Two properties keep that boundary honest, both tested:
 - **Reading doesn't write back.** The stored event is unchanged after `read-event`. Writing the upgraded shape back is the last-resort migration, and it costs the audit trail.
 - **Upcasting is idempotent.** Reading twice is reading once. A ladder that accumulated changes would corrupt anything that read an event more than once — which, given projections and relays, is everything.
 
+The edge is also strict about what it claims to understand. An unregistered event type, missing or malformed schema version, future writer version, or missing ladder rung fails before the domain fold runs. Tolerant reading means accepting compatible additions to a **known** schema; it does not mean pretending unknown semantics are safe.
+
 ## The ladder chains
 
 One step per version, each small:
@@ -99,7 +103,7 @@ v1 --add :price--> v2 --rename--> v3
 
 `read-event` walks the chain until no step applies. You never write v1 → v3 directly, so adding a fourth version costs one function rather than revisiting three.
 
-It also has a guard. The easiest upcaster bug to write is a step that transforms the data and forgets to raise the version — which loops forever. A bounded loop turns that into a test failure instead of a hung process, and there's a test that registers a deliberately forgetful step to prove it.
+Each rung is checked as it runs. It must advance exactly one version and preserve the fact's event id, type, occurrence time, stream id, stream version and global position. A step that forgets the version bump fails immediately rather than looping; a step that changes the recorded envelope is rejected rather than silently moving or renaming history.
 
 ## The rung that was not hypothetical
 
@@ -138,11 +142,13 @@ Four lines, on read, and the corpus keeps its keyword forever:
 
 **Versions are per type.** The single number worked for as long as only one type had ever changed, which is exactly how that kind of mistake survives to production.
 
+The map is also the semantic reader's registry. A type absent from it is not silently assumed to be version 1; it is unknown and stops replay. A generic storage adapter may carry an unknown event through unchanged so another module can read it, but the consumer that folds, projects, publishes or checkpoints it must explicitly understand or deliberately ignore that type.
+
 ## Deploy readers before writers
 
 You can upcast backwards. You cannot upcast *forwards*: a v4 event arriving at code that only knows v3 has no fix, because the function that would raise it hasn't been written yet.
 
-So the ordering is forced. Ship the readers that understand the new version, then start writing it. In a rolling deploy that means two releases, not one.
+So the ordering is forced. Ship every relevant reader — aggregate folds, projections, policies, relays and rebuild tools — with support for the new version, then start writing it. In a rolling deployment that is an expand-then-write sequence, often two releases. A future-version event fails loudly in this lab rather than being mistaken for current data.
 
 ## Keep a corpus
 
@@ -150,22 +156,28 @@ So the ordering is forced. Ship the readers that understand the new version, the
 
 That's not a convenience fixture — it's the fitness function for *we can still read our history*. Without it, an upcaster chain rots silently: someone deletes a step that "nothing uses", and the only thing that would have noticed was a five-year-old event nobody thought to try.
 
-The namespace carries one rule: **nothing in it may ever be edited.** Correcting a shape in the corpus is precisely the mistake the corpus exists to catch, because the events in production won't have been corrected.
+The specimen values are append-only: add a newly written shape, but do not "correct" an old specimen to match today's model. Comments and test organization may evolve; the captured representation must continue to match the bytes or decoded value that production actually wrote. In a real system, build this corpus from anonymised production samples and keep fixtures free of secrets and personal data.
 
 ## Two notes
 
-**Snapshots are the easy case.** [Lab6](../lab6) mentioned them as an optimisation on replay and [lab17](../lab17) builds them. They're derived state in a stored shape, so they have a versioning problem too — on a different axis, and with a much better answer: delete and rebuild. Derived things never need upcasters. That's the tell for whether something is really derived.
+**Snapshots are the easy case.** [Lab6](../lab6) mentioned them as an optimisation on replay and [lab17](../lab17) builds them. They are derived state in a stored shape, so they have a versioning problem on a different axis and a safer answer: discard and rebuild from retained events. You may transform a snapshot for performance, but correctness never requires preserving it the way it requires preserving source facts.
 
-**The published contract is the hard case.** [Lab12](../lab12) put the translation to integration messages in one file, and internal upcasting works because you own every reader. You cannot run an upcaster in someone else's process. So a breaking contract change means publishing *both* versions during a transition and retiring the old one when usage reaches zero — an operational problem, on someone else's schedule.
+**The published contract is the hard case.** [Lab12](../lab12) put translation in one file and noted that deriving envelopes at relay time requires historical translation behavior to remain available. Internal upcasting works because you own every reader; you cannot install an upcaster in someone else's process. A breaking contract change therefore needs an explicit strategy: publish old and new versions during a transition, introduce a new message type or endpoint, and retire the old contract only when its consumers have moved. A transactional outbox can freeze what was intended at write time, but it does not make a breaking consumer contract compatible.
 
 ## Where this leaves the ladder
 
 [REFERENCE.md](../REFERENCE.md#layer-2--envelope) lists Microsoft's four strategies in order of preference. This lab uses the first three and names the fourth:
 
-1. **Tolerant reads** — ignore unknown fields, default missing ones. Handles additive change with no transformation at all. ([Lab22](../lab22) makes this a setting you can point at rather than a principle you have to remember.)
+1. **Tolerant reads** — for a known event type and version, ignore compatible extra fields and apply deliberate defaults where the old meaning is unambiguous. This handles many additive changes without transformation; it does **not** authorize unknown event types or future schema versions. ([Lab22](../lab22) makes field openness a setting you can point at.)
 2. **A version identifier** — here in `[:metadata :schema-version]`. The alternative is the type name (`:flavour-sold-v2`), which has the advantage of being impossible to ignore and the cost of a type name that means two things.
 3. **Upcasters** — this lab.
-4. **In-place migration** — rewriting stored events. A last resort, because it breaks immutability and undermines the audit trail.
+4. **In-place migration** — rewriting stored events. A controlled last resort that needs retained originals, provenance and verification because it replaces the representation the store originally preserved.
+
+## Testing the compatibility boundary
+
+The corpus tests are behavior tests for the reader's public promise: every supported historical specimen reaches the current domain shape and folds correctly. Focused pure tests cover each ladder rung, the explicit unknown marker, per-type version targets, future-version rejection and envelope preservation. No database, mock or interaction assertion is needed because the compatibility boundary is a value transformation.
+
+A real serializer and event-store adapter still need integration tests against the actual bytes and database types they use. Those tests prove decoding; the corpus proves historical meaning remains readable. Keep both, because a Clojure map fixture alone cannot catch a wire-format regression.
 
 ## What's next
 

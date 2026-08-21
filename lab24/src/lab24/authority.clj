@@ -37,7 +37,7 @@
 (def permissions
   "Role → the command types it may issue."
   {:driver #{:buy-flavour}
-   :depot  #{:load-truck :assign-driver}})
+   :depot  #{:load-truck :ensure-stock :assign-driver}})
 
 (def all-command-types
   (into #{} (mapcat val) permissions))
@@ -46,4 +46,3 @@
   "May any of `roles` issue `command-type`?"
   [roles command-type]
   (contains? (into #{} (mapcat permissions) roles) command-type))
-

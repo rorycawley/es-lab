@@ -12,11 +12,11 @@
 
 (defn start
   ([config] (start config {}))
-  ([{:keys [catalog ordering]} {:keys [new-id]
-                                :or   {new-id random-uuid}}]
+  ([{catalog-config :catalog ordering-config :ordering} {:keys [new-id]
+                                                         :or   {new-id random-uuid}}]
    (let [messages  (bus/bus)
-         orders    (ordering/new-module (jdbc/get-datasource ordering))
-         catalogue (catalog/new-module (jdbc/get-datasource catalog)
+         orders    (ordering/new-module (jdbc/get-datasource ordering-config))
+         catalogue (catalog/new-module (jdbc/get-datasource catalog-config)
                                        {:new-id new-id})]
      (bus/subscribe! messages catalog-contract/price-changed-type
                      #(ordering/receive! orders %))

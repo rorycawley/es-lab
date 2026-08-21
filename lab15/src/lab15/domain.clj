@@ -8,9 +8,8 @@
 
   That split is the *first* answer to erasure, and the better one: keep
   personal data out of the events that don't need it. Thousands of sales
-  reference a subject without describing them, so erasing a customer never
-  has to touch a single sale."
-  (:require [lab15.vault :as vault]))
+  reference a subject without repeating their direct identifiers, so a change
+  to those attributes never has to rewrite every sale.")
 
 ;; ---------------------------------------------------------------------------
 ;; The loyalty card. The one place a person is described.
@@ -31,8 +30,9 @@
   (assoc state :status :cancelled))
 
 (defmethod evolve-card :default
-  [state _event]
-  state)
+  [_state event]
+  (throw (ex-info "Unknown card event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay-card
   [events]
@@ -41,19 +41,29 @@
 (defmulti decide-card (fn [command _state] (:command/type command)))
 
 (defmethod decide-card :issue-card
-  [command _state]
-  (let [{:keys [customer-id key personal]} (:data command)]
-    ;; The name and email are part of this fact — there is no version of
-    ;; "a card was issued to someone" that omits who. So they are sealed
-    ;; rather than separated, which is the second answer to erasure and the
-    ;; one you reach for when the first will not stretch.
+  [command state]
+  (when-not (= :none (:status state))
+    (throw (ex-info "Card already issued"
+                    {:reason :card-already-issued})))
+  (let [{:keys [customer-id personal]} (:data command)]
+    ;; The domain proposes plaintext business data. Protection is an edge
+    ;; concern applied before append, so this pure decision knows nothing of
+    ;; keys, algorithms or ciphertext.
     [{:event/type :card-issued
       :data       {:customer-id customer-id
-                   :personal    (vault/seal key personal)}}]))
+                   :personal    personal}}]))
 
 (defmethod decide-card :cancel-card
-  [_command _state]
+  [_command state]
+  (when-not (= :active (:status state))
+    (throw (ex-info "Card is not active"
+                    {:reason :card-not-active})))
   [{:event/type :card-cancelled :data {}}])
+
+(defmethod decide-card :default
+  [command _state]
+  (throw (ex-info "Unknown card command type"
+                  {:command/type (:command/type command)})))
 
 ;; ---------------------------------------------------------------------------
 ;; The truck. Sales name a customer and describe nobody.
@@ -73,8 +83,9 @@
   (update state (get-in event [:data :flavour]) (fnil dec 0)))
 
 (defmethod evolve-truck :default
-  [state _event]
-  state)
+  [_state event]
+  (throw (ex-info "Unknown truck event type"
+                  {:event/type (:event/type event)})))
 
 (defn replay-truck
   [events]
@@ -85,6 +96,10 @@
 (defmethod decide-truck :load-truck
   [command _state]
   (let [{:keys [flavour quantity]} (:data command)]
+    (when-not (and (int? quantity) (pos? quantity))
+      (throw (ex-info "Quantity must be a positive integer"
+                      {:reason :invalid-quantity
+                       :quantity quantity})))
     [{:event/type :truck-loaded :data {:flavour flavour :quantity quantity}}]))
 
 (defmethod decide-truck :buy-flavour
@@ -92,7 +107,15 @@
   (let [{:keys [flavour customer-id]} (:data command)
         remaining (get state flavour 0)]
     (when-not (pos? remaining)
-      (throw (ex-info "Sold out" {:flavour flavour})))
+      (throw (ex-info "Sold out"
+                      {:reason :sold-out
+                       :flavour flavour
+                       :remaining remaining})))
     ;; A customer id, and nothing that describes the customer.
     [{:event/type :flavour-sold
       :data       {:flavour flavour :customer-id customer-id}}]))
+
+(defmethod decide-truck :default
+  [command _state]
+  (throw (ex-info "Unknown truck command type"
+                  {:command/type (:command/type command)})))

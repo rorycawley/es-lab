@@ -1,42 +1,26 @@
 (ns lab23.port.driven
-  "The **driven** ports: what the application asks the world for.
+  "The driven/output ports: what the use cases ask the world for.
 
-  Driving and driven describe a relationship to the application, not a
-  technology. The application *calls* these, so they are driven. An inbound
-  HTTP request arrives through a **driving** adapter and calls the application
-  — same protocol, opposite side of the hexagon. A Stripe client would be a
-  driven adapter over the very same HTTP.
+  Four protocols name capabilities needed by the application but supplied at
+  its edge: event storage, an outbox, time and identifier allocation. The core
+  remains plain functions and values; the application coordinates these
+  effects around it.
 
-  There is no `port/driving.clj`, and that is deliberate — but not because
-  there is only one driving adapter. There are several: HTTP, the demo, and
-  every test namespace. **A test is a driving adapter.**
+  The driving/input ports are the callable use-case functions in `app.clj`.
+  Tests and the demo drive them directly; `adapter/intake.clj` drives them
+  after translating and validating an untrusted message.
 
-  The asymmetry is elsewhere. A protocol buys substitutability of the thing
-  *behind* a port:
-
-    driven   one port, many implementations   memory or Postgres, swapped
-    driving  one implementation, many callers HTTP, demo, tests, all calling
-
-  On the driven side what varies is the implementation, so a protocol is the
-  mechanism. On the driving side the thing behind the port is your
-  application, and there is one of those; what varies is who calls it, and a
-  caller needs no protocol to call a function.
-
-  Four protocols, and every one of them names something the *core* must never
-  do — read, write, look at a clock, invent a number. Twenty labs argued those
-  belong at the edge one at a time; this is where they become a boundary you
-  can point at.
-
-  Note what is not here. There is no `TruckRepository`, no `save-truck`, no
-  `find-by-id`. A port describes what the outside world can *do for you*, not
-  a shape borrowed from the domain — an event store appends and reads streams,
-  and that is the whole of its vocabulary.")
+  Output ports name required capabilities, not current vendors: `EventStore`,
+  not `PostgresClient`. A domain-shaped repository could still be appropriate
+  where the use case genuinely reasons in aggregates; the diagram alone does
+  not require one protocol per entity.")
 
 (defprotocol EventStore
-  "Somewhere durable to put facts and get them back."
-  (append [this stream-id expected-version command events]
-    "Append `events` to `stream-id` if it is still at `expected-version`.
-     Throws on conflict. Returns the events as recorded.")
+  "Durable facts and the atomic command-outcome transaction."
+  (command-result [this stream-id command]
+    "The original recorded events for a handled command, or nil when unseen.")
+  (commit-command [this stream-id expected-version command events messages]
+    "Atomically append events, record command idempotency, and enqueue messages.")
   (read-stream [this stream-id]
     "One stream's history, oldest first.")
   (stream-version [this stream-id]
@@ -45,9 +29,7 @@
     "Everything appended after `position`, across all streams."))
 
 (defprotocol Outbox
-  "Somewhere to leave a message for another module."
-  (enqueue [this messages]
-    "Record outgoing messages. Called inside the store's transaction.")
+  "The outgoing messages committed with command outcomes."
   (pending [this]
     "Messages not yet delivered."))
 
@@ -56,5 +38,5 @@
   (now [this]))
 
 (defprotocol Ids
-  "Fresh identity, as an input rather than an ambient fact (lab 4)."
+  "A fresh identifier, as an input rather than an ambient fact (lab 4)."
   (new-id [this]))

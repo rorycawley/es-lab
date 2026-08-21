@@ -103,11 +103,11 @@ This is not the interaction-testing trap. The test asserts a business rule as `i
 
 ## Fake the exits; do not mock the journey
 
-The behaviour suite uses the in-memory `EventStore` and `Outbox` adapters, plus a fixed clock. These are **fakes**: small working implementations of the secondary/driven ports. They let the real use case and domain run without a server or database.
+The behaviour suite uses one in-memory persistence adapter implementing both `EventStore` and `Outbox`, plus a fixed clock. These are **fakes**: small working implementations of the secondary/driven ports. Events, the command ledger and outgoing messages share one atom, so the fake preserves the same atomic outcome contract as PostgreSQL rather than weakening it for tests.
 
-A fake is not an interaction mock. The tests never ask whether `append` was called exactly once or `read-stream` twice. They assert the observable result: stock changed, the right facts came back, the refusal left business state unchanged, or the fake outbox contains the announcements another module would receive. That leaves the use case free to change its internal journey.
+A fake is not an interaction mock. The tests never ask whether `commit-command` was called exactly once or `read-stream` twice. They assert the observable result: stock changed, the right facts came back, the refusal left business state unchanged, or the fake outbox contains the announcements another module would receive. That leaves the use case free to change its internal journey.
 
-Real infrastructure still needs proof, but it answers a different question. `adapter_test.clj` runs one neutral port contract against memory and Postgres: can an event be appended and read with its identity and metadata intact, is expected version enforced, and does an outbox message survive mapping? It deliberately contains no ice-cream rule.
+Real infrastructure still needs proof, but it answers a different question. `adapter_test.clj` runs one neutral port contract against memory and Postgres: are event identity and metadata preserved, are stale and future versions rejected, do exact command retries return their original result, are identity collisions distinct, and does an outbox constraint failure roll back the event and ledger with it? It deliberately contains no ice-cream rule.
 
 The architectural testing split is:
 
@@ -149,23 +149,25 @@ That last measurement is not a joke. **Thinness is the measure of a shell**, so 
 Every function has the same three-part shape:
 
 ```clojure
-(defn handle [{:keys [store outbox clock ids]} truck-id command]
+(defn handle [{:keys [store clock ids]} truck-id command]
   (let [history (port/read-stream store truck-id)      ; read   — a port
         state   (truck/replay history)                 ; core
         decided (truck/decide command state)           ; core
-        events  (port/append store truck-id version …) ; write  — a port
-        messages (into [] (mapcat contract/announce) events)]  ; core
-    (when (seq messages) (port/enqueue outbox …))))    ; write  — a port
+        events   (identify decided clock ids)          ; shell effects
+        messages (announce-and-envelope events ids)]   ; core + shell
+    (port/commit-command store truck-id version command events messages)))
 ```
 
 Read it looking for a business rule. There isn't one—and the structural fitness test that forbids `if`, `cond` and `case` here keeps it that way. The behaviour suite would catch a broken outcome wherever the rule lived; the fitness test adds a different guarantee, that rules do not quietly migrate into coordination code and acquire a second home.
+
+The single write port is deliberate. An earlier version exposed event append and outbox enqueue as separate methods and then called them in sequence. With PostgreSQL, the append committed before enqueue began—the dual write Lab20 exists to prevent. `commit-command` describes the capability the use case actually needs: atomically compare the stream head, append the facts, record the command even for a zero-event result, and enqueue every outgoing message. `command-result` checks that ledger before re-deciding, which matters when retrying a successful sale would now be refused against the changed state; `commit-command` repeats the check transactionally to settle a race. A port boundary must preserve a business transaction; drawing more interfaces is not decoupling if it tears that transaction apart.
 
 ## Ports point both ways
 
 Cooper describes ports as the places where the application exposes its use cases, independently of any delivery mechanism ([32:00](https://www.youtube.com/watch?v=SxJPQ5qXisw&t=1920)). There are two directions:
 
 - A **driving/input port** exposes something the application can do. In Clojure, `app/handle`, `app/stock` and `app/react` are already callable boundaries; they need no protocol merely to be ports. The demo and tests drive them directly. Lab22 adds an intake adapter, and Lab23 adds HTTP.
-- A **driven/output port** states what a use case needs from the world. `EventStore`, `Outbox`, `Clock` and `Ids` are the four protocols in `port.clj`; the application calls them and adapters fulfil them.
+- A **driven/output port** states what a use case needs from the world. `EventStore`, `Outbox`, `Clock` and `Ids` are the four protocols in `port.clj`; the application calls them and adapters fulfil them. One persistence adapter implements the first two because their state shares a transaction boundary.
 
 An output port should name the capability the application needs, not the vendor that currently supplies it: `EventStore`, not `PostgresClient`. That does not prohibit a domain-shaped repository when a use case genuinely reasons in aggregates. It prohibits manufacturing one protocol per entity just because an architecture template has a “repositories” ring.
 
@@ -188,9 +190,10 @@ The adapter contract then runs against both memory and Postgres using neutral ex
 ```clojure
 (each-adapter
   (fn [{:keys [store]}]
-    (let [[recorded] (port/append store stream-1 0 command [event])]
+    (let [[recorded] (port/commit-command
+                      store stream-1 0 command [event] [message])]
       (is (= [recorded] (port/read-stream store stream-1)))
-      (is (= 1 (port/stream-version store stream-1))))))
+      (is (= [message] (port/pending store))))))
 ```
 
 All of labs 19 and 20's impedance—JSON losing namespaces, `java.util.Date` needing conversion, a UUID arriving back as a string—is contained in `adapter/postgres.clj` and exercised at that edge. A persistence mapping failure names the adapter contract; a stock-rule failure names the use case. Neither suite has to impersonate the other.
@@ -207,7 +210,6 @@ Twenty labs passed `gen-id` and `now` down through every call, because there was
 (component/system-map
  :database (postgres/database config)
  :store    (component/using (postgres/store)  {:datasource :database})
- :outbox   (component/using (postgres/outbox) {:datasource :database})
  :clock    (clock/system-clock)
  :ids      (clock/random-ids))
 ```
@@ -219,6 +221,18 @@ Three things that a global atom would not give:
 - **The composition root is one file.** Search the source for `postgres/store` and it appears in `system.clj` and nowhere else — a test asserts that. Swapping an adapter is a one-line change rather than an audit.
 
 And the rule that keeps Component from spreading: **no core namespace requires it.** It is a composition tool and belongs at the edge, with everything else that is not a function of its inputs.
+
+## Lab20's guarantees survive the boundary
+
+Technology isolation is useful only if adapters are substitutable in semantics, not merely in method names. Both implementations therefore preserve the command outcome as one unit:
+
+- The expected version comes from the exact history the application folded. A stream-head compare-and-set rejects stale and future versions under concurrency.
+- The application supplies event ids, occurrence time, causation and correlation. Persistence supplies stream/global coordinates and recorded time.
+- The command ledger records zero-, one- and many-event outcomes. Exact retries return the original events before the domain re-decides against changed state; reusing an id for another target, type or request data fails.
+- Facts, the ledger and outgoing envelopes commit atomically. Message causation names the fact; correlation follows the business conversation.
+- Known irrelevant facts are explicit in folds and policies, while unknown semantics fail closed.
+
+The adapter contract runs those promises against the working fake and real PostgreSQL. This is the testability value of the hexagon: use cases run quickly through fakes, while technology-specific mapping and transaction guarantees are proved separately at the edge.
 
 ## What the demo shows
 

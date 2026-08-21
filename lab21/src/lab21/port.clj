@@ -15,10 +15,14 @@
   one adapter that can do so.")
 
 (defprotocol EventStore
-  "Somewhere durable to put facts and get them back."
-  (append [this stream-id expected-version command events]
-    "Append `events` to `stream-id` if it is still at `expected-version`.
-     Throws on conflict. Returns the events as recorded.")
+  "Durable facts and the atomic command-outcome transaction."
+  (command-result [this stream-id command]
+    "The original recorded events for a handled command, or nil when unseen.
+     Throws if the command id belongs to a different request.")
+  (commit-command [this stream-id expected-version command events messages]
+    "Atomically append identified `events`, record command idempotency and
+     enqueue `messages`. Exact retries return the original recorded events;
+     command-id collisions and version conflicts throw.")
   (read-stream [this stream-id]
     "One stream's history, oldest first.")
   (stream-version [this stream-id]
@@ -27,9 +31,7 @@
     "Everything appended after `position`, across all streams."))
 
 (defprotocol Outbox
-  "Somewhere to leave a message for another module."
-  (enqueue [this messages]
-    "Record outgoing messages. Called inside the store's transaction.")
+  "The outgoing messages committed with command outcomes."
   (pending [this]
     "Messages not yet delivered."))
 

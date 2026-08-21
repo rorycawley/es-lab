@@ -32,7 +32,8 @@ The provider is not in the system map either, and `system.clj` says why:
 
 > If those two strings are all your application knows about your provider, swapping Keycloak for Entra ID is a configuration change. If your provider is in your system map, it is a project.
 
-The two strings are a discovery URL and an issuer.
+The resource-server configuration is a discovery URL, the expected issuer and
+the expected audience. None names a provider product.
 
 ## The provider is on both sides of the hexagon
 
@@ -112,7 +113,7 @@ v6   truck-loaded     system restock-when-depleted
 | **access token** | a signed JWT | **no** | minutes |
 | **refresh token** | an opaque string | **yes** | weeks |
 
-An access token is a **value** — self-contained, verifiable by anyone holding the public key, and therefore impossible to recall. Nothing the issuer does stops a valid signature from validating. Its short life is the *price* of that property, not a detail.
+An access token is a **value** — self-contained and verifiable by anyone holding the public key. Under local JWT validation it cannot be recalled: revocation needs an additional online lookup or deny-list. Its short life is the *price* of offline verification, not a detail.
 
 A refresh token is a **reference** — meaningless without the issuer, and therefore revocable. That is why it is the one allowed to live for weeks.
 
@@ -141,9 +142,9 @@ This is also the reason to use a library rather than the JDK primitives directly
 | **409** | the stream moved under you | [7](../lab7) |
 | **422** | well-formed, permitted, and the domain said no | [2](../lab2), [8](../lab8) |
 
-**401 says try again with a better token. 403 says a better token will not help.** That difference is worth as much as lab 23's 400-versus-422: a client that cannot tell them apart either retries what can never work, or gives up on what one refresh would have fixed. 401 carries a `WWW-Authenticate` challenge, and says `token expired` when that is why.
+**401 says authentication is missing or invalid; 403 says the authenticated principal is not authorised for this request.** Refreshing an expired token can repair a 401. Replaying the same valid token cannot repair a 403, although a genuinely different principal or grant may be authorised. That difference is worth as much as lab 23's 400-versus-422. A missing credential gets a plain `Bearer` challenge; an invalid or expired credential gets RFC 6750's `invalid_token` form.
 
-The middleware is split in two to make the same distinction structurally. `authenticate` **annotates and never rejects**; `require-authentication` **fails closed**. Whether a request carries a valid token is a *fact*; whether an endpoint demands one is a *policy*, and `/health` wants the first without the second.
+The middleware is split in two to make the distinction structural. `authenticate` **annotates and never rejects**; `require-authentication` **fails closed**. Whether a request carries a valid token is a *fact*; whether an endpoint demands one is a *policy*. The entire `/v1` subtree gets both middleware functions, while `/health` needs neither.
 
 ## Lab 1's warning, finally testable
 
@@ -158,7 +159,7 @@ Twenty-four labs had no token to be tempted by. Now there is one, and a test gre
     "nothing JWT-shaped anywhere in the stream")
 ```
 
-A bearer credential in append-only storage can never be revoked, proves only that somebody once pasted a string, and drags a bundle of personal claims into the one store designed to resist deletion — the store [lab 15](../lab15) had to build crypto-shredding for. What is kept instead is the `sub`, and nothing else.
+A bearer credential in append-only storage can never be removed from that record; later expiry or revocation does not erase the leaked secret. It proves only that somebody once pasted a string and drags a bundle of personal claims into the one store designed to resist deletion — the store [lab 15](../lab15) had to build crypto-shredding for. What is kept instead is the `sub`, and nothing else.
 
 ## The closed schema turned out to be a security control
 
@@ -178,49 +179,26 @@ POST /v1/sales  {"flavour":"vanilla","actor":{"id":"USR-83721"}}
 Not the obvious order, and deliberate:
 
 ```text
-1. may this caller issue this KIND of command?   roles      — needs nothing fetched
+1. may this caller issue this KIND of command?   roles      — needs no body or stream
 2. is this a well-formed command at all?         the schema — needs the message
 3. should it happen, given what is true?         decide     — needs the stream
 ```
 
 Each gate needs strictly more than the last. Putting roles first costs nothing, because **the command type comes from the route, not the body** — and it means a caller with no permission cannot map your schema by watching which malformed bodies come back 400. A test asserts a forbidden caller gets byte-identical answers for a good body and a garbage one.
 
-## The fourth time JSON ate a keyword, and the first time it got fixed
+## JSON-shaped facts, with schema-driven envelope restoration
 
-Writing this, the Postgres adapter contract failed where the in-memory adapter passed:
-
-```clojure
-{:type :user}   ; in memory
-{:type "user"}  ; out of JSONB
-```
-
-[Lab 19](../lab19) found this and fixed `:data` with a hand-maintained list of field names. [Lab 22](../lab22) replaced the list with per-event-type schemas and called it derived rather than remembered. Both were about `:data`, because `:metadata` held only a causation id — a uuid, which JSON happens not to damage. Adding an actor put a keyword in there and the same boundary took the same bite.
-
-My reflex was the fourth patch: a `Metadata` schema, decoded like `:data`. It worked. It was the wrong repair, and [andfadeev/clojure-event-sourcing](https://github.com/andfadeev/clojure-event-sourcing) shows why — that codebase has this problem **zero** times, and calls `keyword` exactly twice:
+The actor is deliberately JSON-shaped from the moment authentication creates it:
 
 ```clojure
-(defmulti apply-event (fn [_ event] (mapv keyword [(:aggregate_type event) (:type event)])))
-(defn- row->resource [row] (-> row (update :payload <-jsonb) (update :type keyword)))
+{:type "user" :id "USR-83721"}
 ```
 
-Both are **discriminators**, both live in their own `TEXT` column rather than inside the JSON, and both are coerced at the point the code branches on them. Everything else is a string all the way down — including in the Malli schema, where the enums read `[:enum "pending" "paid" "dispatched"]` rather than the keywords a Clojure programmer reaches for by reflex.
+Neither field is a program symbol, so memory and PostgreSQL return the same actor without guessing which strings should become keywords. Event type remains a keyword inside the program because code dispatches on it; persistence stores that discriminator in its own `TEXT` column and restores it at the adapter.
 
-So the rule is not *coerce carefully on the way out*. It is:
+UUIDs are different. JSON has no UUID type, so causation and correlation identifiers in the metadata envelope necessarily return as strings. `schema/event.clj` declares those fields and `decode-metadata` restores exactly them. The actor passes through unchanged. This keeps schema-driven coercion for an inherent representation loss while avoiding self-inflicted keyword-valued domain data.
 
-> **Do not put a keyword in a stream.** A keyword is a program symbol; a stored fact is data. The only keyword worth persisting is one the code dispatches on, and that one belongs in a column of its own.
-
-Three labs of this repository fixed the symptom. The actor is `{:type "user" :id "USR-83721"}` now, `decode-metadata` is deleted, and `schema/event.clj` is shorter than it was.
-
-That rule then reached back through the whole sequence. Every lab from 1 to 24 now writes `"vanilla"` rather than `:vanilla`, [lab19](../lab19)'s coercion list and [lab21](../lab21)'s copy of it are deleted, and [lab13](../lab13) — whose corpus may never be edited — gained a genuine **v4** on its upcast ladder, because the events already written cannot be corrected and a reader has to tolerate both.
-
-And the check that replaces all of it is a **property**, not a rule per field:
-
-```clojure
-(is (= actor (json/read-str (json/write-str actor) :key-fn keyword))
-    "a keyword here would not come back as one")
-```
-
-That fails in memory as loudly as against Postgres, so the next keyword anybody adds to metadata is caught without Docker and without a fourth investigation.
+The persistence contract now checks more than a round trip. The command actor is part of command-ledger identity, including a legitimate zero-event result: reusing one command id with another actor is a collision, not an exact retry. Facts, the actor-bearing ledger row and outgoing messages commit atomically in both memory and PostgreSQL. No token, role set or credential enters any of them.
 
 ## What a mock cannot prove
 
@@ -253,10 +231,10 @@ The architectural testing split remains:
 | Test Type | Target | Uses Fakes? | Speed & Scope |
 |---|---|---|---|
 | **Behavior / Use Case** | Primary ports—command handlers and queries | Yes, for secondary ports only | Fast. Covers all business logic and domain rules. |
-| **Adapter / Integration** | Secondary adapters—repositories, outbox and verification-key provider | No | Slower. Proves infrastructure mapping works. |
+| **Adapter / Integration** | Secondary adapters—atomic event persistence and verification keys | No | Slower. Proves infrastructure mapping works. |
 | **System / E2E** | Primary adapters—the authenticated HTTP API | No | Very slow. A few smoke tests prove the wiring. |
 
-`app_test.clj` enters the use cases with in-memory store and outbox fakes. Authentication is not involved because the actor is already a plain verified value at this boundary. The test observes facts, state, messages and audit metadata—not internal calls. `adapter_test.clj` runs a neutral persistence contract against memory and real Postgres, including the actor's JSON round trip.
+`app_test.clj` enters the use cases with one in-memory persistence fake. Authentication is not involved because the actor is already a plain verified value at this boundary. The test observes facts, state, messages and audit metadata—not internal calls. `adapter_test.clj` runs the atomic command-outcome contract against memory and real Postgres, including actor identity, zero-event retries and rollback.
 
 The security-sensitive invariants still benefit from a pure core. `core_test.clj` calls `truck/decide`, replay, the policy and contract mapping directly with values. Ownership and authority propagation therefore get fast, precise tests without a system, token, fake or mock.
 
@@ -291,5 +269,5 @@ The event-sourcing counterweight is still worth building. It is deferred because
 ```bash
 bb demo     # the whole thing, including a login and an expiry, no Docker
 bb serve    # two servers: the truck on :3000, the provider on its own port
-bb test     # 92 tests; adapter contracts and one E2E smoke need Docker
+bb test     # 110 tests; real OIDC sockets, adapter contracts and E2E need local networking/Docker
 ```

@@ -5,12 +5,13 @@
   transaction timing and a stray connection from another run would make them
   lie. The container is the fixture."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [next.jdbc :as jdbc])
   (:import (org.testcontainers.containers PostgreSQLContainer)
            (org.testcontainers.utility DockerImageName)))
 
 (def image
-  "Postgres 18 specifically: `uuidv7()` and `xid8` both matter to this lab."
+  "Postgres 18, matching the schema and transaction behavior in this lab."
   (-> (DockerImageName/parse "postgres:18.4-alpine")
       (.asCompatibleSubstituteFor "postgres")))
 
@@ -30,16 +31,18 @@
 (defn migrate!
   [ds]
   (doseq [statement (->> (slurp (io/resource "schema.sql"))
+                         (#(str/replace % #"(?m)--.*$" ""))
                          (re-seq #"(?s)CREATE[^;]+;")
                          (map str))]
     (jdbc/execute! ds [statement])))
 
 (defn truncate!
   [ds]
-  (jdbc/execute! ds ["TRUNCATE event, outbox, inbox, command_ledger RESTART IDENTITY"]))
+  (jdbc/execute! ds ["TRUNCATE event, stream_head, outbox, inbox,
+                      command_ledger, customer_notification RESTART IDENTITY"]))
 
 (defn with-store
-  "Fixture: a migrated, empty `event` table for each test."
+  "Fixture: a migrated, empty database for each test."
   [f]
   (let [ds (datasource)]
     (migrate! ds)

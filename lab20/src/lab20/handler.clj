@@ -10,6 +10,13 @@
             [lab20.truck :as truck]
             [next.jdbc :as jdbc]))
 
+(defn- identify [gen-id now command event]
+  (assoc event
+         :event/id (gen-id)
+         :event/occurred-at now
+         :metadata {:causation-id (:command/id command)
+                    :correlation-id (:correlation-id command)}))
+
 (defn announce
   "Which outgoing messages a fact produces (lab 12's contract, recapped).
 
@@ -21,33 +28,50 @@
   should not be carrying Clojure namespaces anyway: other modules read it, and
   they may not be Clojure at all."
   [event]
-  (when (= :stock-depleted (:event/type event))
+  (case (:event/type event)
+    :stock-depleted
     [{:message-type :flavour-unavailable
       :recipient    :customer-app
-      :payload      {:fact-id  (:event/id event)
-                     :truck-id (:stream/id event)
+      :payload      {:fact-id  (str (:event/id event))
+                     :truck-id (str (:stream/id event))
                      :flavour  (get-in event [:data :flavour])}}
      {:message-type :restock-required
       :recipient    :purchasing
-      :payload      {:fact-id  (:event/id event)
-                     :truck-id (:stream/id event)
-                     :flavour  (get-in event [:data :flavour])}}]))
+      :payload      {:fact-id  (str (:event/id event))
+                     :truck-id (str (:stream/id event))
+                     :flavour  (get-in event [:data :flavour])}}]
+
+    :truck-loaded []
+    :flavour-sold []
+
+    (throw (ex-info "Unknown event type"
+                    {:event/type (:event/type event)}))))
 
 (defn handle!
   "Read, fold, decide, append — and enqueue, and record. One transaction.
 
   Returns `:already-handled` if the ledger has seen this command before."
   [ds stream-id gen-id now command]
-  (if (ledger/recorded? ds (:command/id command))
-    :already-handled
-    (jdbc/with-transaction [tx ds]
-      (let [history (store/stream tx stream-id)
-            version (store/current-version tx stream-id)
-            state   (truck/replay history)
-            decided (truck/decide command state)
-            events  (store/append tx stream-id version gen-id now command decided)]
-        (ledger/record! tx command (count events))
-        (doseq [event events
-                message (announce event)]
-          (outbox/enqueue! tx (assoc message :message-id (gen-id))))
-        events))))
+  (letfn [(already-handled []
+            (when-let [entry (ledger/entry ds (:command/id command))]
+              (ledger/assert-same-command! entry stream-id command)
+              :already-handled))]
+    (or (already-handled)
+        (try
+          (jdbc/with-transaction [tx ds]
+            (let [history  (store/stream tx stream-id)
+                  version  (or (:stream/version (peek history)) 0)
+                  state    (truck/replay history)
+                  decided  (truck/decide command state)
+                  proposed (mapv #(identify gen-id now command %) decided)
+                  events   (store/append-in-transaction!
+                            tx stream-id version proposed)]
+              (ledger/record! tx stream-id command (count events))
+              (doseq [event events
+                      message (announce event)]
+                (outbox/enqueue! tx (assoc message :message-id (gen-id))))
+              events))
+          (catch Exception failure
+            ;; A competing execution can commit while this transaction waits
+            ;; on the stream head or ledger uniqueness constraint.
+            (or (already-handled) (throw failure)))))))

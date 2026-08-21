@@ -48,6 +48,7 @@
 
 (deftest roles-do-not-overlap-by-accident-test
   (is (false? (authority/permits? #{:driver} :load-truck)))
+  (is (true?  (authority/permits? #{:depot} :ensure-stock)))
   (is (false? (authority/permits? #{:depot} :buy-flavour)))
   (is (true?  (authority/permits? #{:driver} :buy-flavour)))
   (is (true?  (authority/permits? #{:depot} :assign-driver)))
@@ -63,7 +64,8 @@
     (let [depletion {:event/type :stock-depleted
                      :event/id   (random-uuid)
                      :stream/id  truck-1
-                     :metadata   {:actor {:type "user" :id "USR-83721"}}
+                     :metadata   {:actor {:type "user" :id "USR-83721"}
+                                  :correlation-id (random-uuid)}
                      :data       {:flavour "vanilla"}}
           [restock] (policy/react depletion)]
       (is (= {:type "system" :id "restock-when-depleted"} (:command/actor restock))
@@ -75,7 +77,7 @@
       (intake/submit app truck-1 rudi {:type :assign-driver :data {:driver-id "USR-83721"}})
       (intake/submit app truck-1 rudi {:type :load-truck :data {:flavour "vanilla" :quantity 1}})
       (intake/submit app truck-1 dana {:type :buy-flavour :data {:flavour "vanilla"}})
-      (app/react app 0 truck-1)
+      (app/react app 0)
 
       (let [actors (map (comp :actor :metadata) (driven/read-stream (:store app) truck-1))]
         (is (= [{:type "user" :id "USR-11902"}            ; Rudi rostered
@@ -88,14 +90,18 @@
 
 (deftest correlation-travels-where-authority-does-not-test
   (testing "the causal link survives the handover the actor does not"
-    (let [depletion {:event/type :stock-depleted :event/id (random-uuid)
-                     :stream/id truck-1 :data {:flavour "vanilla"}}
+    (let [correlation-id (random-uuid)
+          depletion {:event/type :stock-depleted :event/id (random-uuid)
+                     :stream/id truck-1 :metadata {:correlation-id correlation-id}
+                     :data {:flavour "vanilla"}}
           [restock] (policy/react depletion)]
       (is (= (policy/derived-command-id :restock-when-depleted depletion)
              (:command/id restock))
           "still derived from the triggering event (lab 10)")
       (is (not= {:type "user" :id "USR-83721"} (:command/actor restock))
-          "but not performed by the person who triggered it"))))
+          "but not performed by the person who triggered it")
+      (is (= correlation-id (:correlation-id restock))
+          "the conversation still propagates"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Why the second layer has to exist
@@ -112,7 +118,7 @@
         (is (false? (authority/permits? #{} :load-truck))))
 
       (testing "and the restock happens anyway, because the reactor is not a caller"
-        (let [{:keys [commands]} (app/react app 0 truck-1)]
+        (let [{:keys [commands]} (app/react app 0)]
           (is (= [:load-truck] (map :command/type commands)))
           (is (= {"vanilla" 20} (app/stock app truck-1)))))
 
@@ -123,6 +129,7 @@
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo #"Not this truck's driver"
              (app/handle app truck-1 {:command/id (random-uuid)
+                                      :correlation-id (random-uuid)
                                       :command/type :buy-flavour
                                       :command/actor {:type "system" :id "some-job"}
                                       :data {:flavour "vanilla"}})))))))

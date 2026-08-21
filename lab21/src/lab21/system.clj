@@ -29,24 +29,24 @@
   possible because the application layer cannot tell the difference."
   ([] (in-memory {}))
   ([{:keys [clock ids]}]
-   (component/system-map
-    :store  (memory/store)
-    :outbox (memory/outbox)
-    :clock  (or clock (clock/system-clock))
-    :ids    (or ids (clock/random-ids)))))
+   (let [selected-clock (or clock (clock/system-clock))]
+     (component/system-map
+      :clock selected-clock
+      :store (component/using (memory/store) {:clock :clock})
+      :ids   (or ids (clock/random-ids))))))
 
 (defn with-postgres
   "The same system, one line different.
 
-  `store` and `outbox` become Postgres records that need a `datasource`, and
-  Component supplies it — which is the entire difference between this function
-  and the one above."
+  The store becomes a Postgres record that needs a `datasource`, and Component
+  supplies it. The same adapter owns event, ledger and outbox writes because
+  splitting one transaction across adapter instances would recreate a dual
+  write."
   ([config] (with-postgres config {}))
   ([config {:keys [clock ids]}]
    (component/system-map
     :database (postgres/database config)
     :store    (component/using (postgres/store) {:datasource :database})
-    :outbox   (component/using (postgres/outbox) {:datasource :database})
     :clock    (or clock (clock/system-clock))
     :ids      (or ids (clock/random-ids)))))
 
@@ -56,7 +56,7 @@
   `app.clj` receives a plain map — it never sees the system, never calls
   `component/start`, and could not tell you which adapter it was handed."
   [system]
-  (select-keys system [:store :outbox :clock :ids]))
+  (assoc (select-keys system [:store :clock :ids]) :outbox (:store system)))
 
 (defn start [system] (component/start system))
 (defn stop [system] (component/stop system))

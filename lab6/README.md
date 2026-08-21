@@ -2,20 +2,20 @@
 
 Labs [1](../lab1)–[5](../lab5) built shapes. Nothing has done anything with them. This lab folds a history of events into state, which is the idea the whole repository is named after.
 
-## State you don't store
+## State is derived, not authoritative
 
-Ask an ordinary program how many vanilla cones are left and it reads a number out of a row. That number is the truth, and the history of how it got there — if it was kept at all — is a log file nobody reads.
+Ask an ordinary program how many vanilla cones are left and it may read a number out of a row. In that model the row is the source of record, and the history of how it got there — if it was kept at all — is often only a diagnostic log.
 
-Event sourcing inverts it. The events are the truth. State is a *question you ask of them*:
+In this event-sourced model, the event history is the source of record. Current state is a *question you ask of it*:
 
 ```clojure
-(replay [(truck-loaded "vanilla" 3)
-         (flavour-sold "vanilla")
-         (flavour-sold "vanilla")])
+(replay [(truck-loaded load-id "vanilla" 3)
+         (flavour-sold sale-1-id "vanilla")
+         (flavour-sold sale-2-id "vanilla")])
 ;; => {:stock {"vanilla" 1} :last-sold "vanilla"}
 ```
 
-Nothing stores `{"vanilla" 1}`. It is recomputed whenever it's needed, and it can be thrown away without losing anything, because the events that produced it are still there.
+Lab6 does not store `{"vanilla" 1}`. It recomputes the state from the history. Later, a snapshot may cache that derived state for speed, but the cache can be discarded and rebuilt while the event history remains the source of record.
 
 ## The shape
 
@@ -35,38 +35,51 @@ Two definitions, and the second is three lines:
 
 **The initial state is part of the definition.** An empty truck is a value you choose — `{:stock {} :last-sold nil}` — not `nil` arrived at by accident. It's the answer to *what was true before anything happened*, and `(replay [])` must return it.
 
-## evolve never says no
+The event helpers take `:event/id` as an argument. Identity is assigned before an event reaches this pure core — by a caller or, later, by an adapter at the edge. Keeping UUID generation out of event construction makes equal inputs produce equal events and keeps replay deterministic without hiding a side effect.
+
+## evolve does not re-decide recorded facts
 
 Sell a flavour that was never loaded:
 
 ```clojure
-(replay [(flavour-sold "pistachio")])
+(replay [(flavour-sold sale-id "pistachio")])
 ;; => {:stock {"pistachio" -1} :last-sold "pistachio"}
 ```
 
 Minus one cone. That is nonsense, and `evolve` applies it without complaint.
 
-This is deliberate, and it's the point people push back on hardest. `evolve` has no opinion about whether an event *should* have happened, because by the time an event exists, it already did — [lab2](../lab2) called this out as the whole difference between a command and an event. There's nothing left to refuse. An `evolve` that threw here would be a program that cannot read its own history, which is the one thing it must always be able to do.
+This is deliberate. `evolve` does not decide whether a **supported recorded fact** should have happened, because by the time that event exists, it already did — [lab2](../lab2) called this out as the difference between a command and an event. Replaying `:flavour-sold` must apply the fact rather than run the business decision again.
 
 Keeping the impossible out of the log is a different function's job, at a different moment: `decide`, which runs *before* the event exists and can still say no. Two responsibilities, cleanly split.
 
-## The fold must be total
+That does not mean every unknown event should be silently accepted. An event type whose semantics this reader does not know is a schema compatibility problem, not a business refusal.
 
-`evolve` will meet events it has no opinion about, and it has to return the state unchanged:
+## Handle every supported fact explicitly
+
+Some supported events do not affect this particular state. Make that decision explicit:
 
 ```clojure
-(defmethod evolve :default
+(defmethod evolve :stock-depleted
+  [state _event]
+  state)
+
+(defmethod evolve :truck-repainted
   [state _event]
   state)
 ```
 
-Two different situations both land here.
+`stock-depleted` is derivable from the count, so applying it again would double-count. `truck-repainted` is a real fact but colour has no bearing on this stock projection. Replaying either event leaves this state unchanged because the projection says so deliberately.
 
-**Facts this fold doesn't care about.** `stock-depleted` is in the history, and this fold ignores it — the count already says the stock ran out, so applying it would be double-counting. Replaying with it and without it gives the same state, which the tests assert.
+An event type this code has never heard of is different:
 
-**Facts this code has never heard of.** A stream outlives the code reading it. Someone adds `:truck-repainted` next year; this namespace has never seen it and must still be able to fold a history containing it. Crashing on an unknown event type means every new event type breaks every existing reader.
+```clojure
+(defmethod evolve :default
+  [_state event]
+  (throw (ex-info "Unknown event type"
+                  {:event/type (:event/type event)})))
+```
 
-Neither case is exceptional. A fold has an opinion about a handful of event types and shrugs at the rest — that's normal, and it's why the default branch is a design decision rather than defensive padding.
+A blanket no-op would make an old reader appear successful while silently omitting new semantics that might affect its invariants. Instead, deploy readers that understand a new event before writers can append it, as [lab13](../lab13) develops. A reader may tolerate unknown fields, but it must not silently guess that an unknown event is irrelevant.
 
 ## Order, honestly
 
@@ -105,15 +118,15 @@ The lesson isn't "folds are order-sensitive" — it's that **you cannot rely on 
 
 Fold the morning, keep the result, carry on with the afternoon. Same answer.
 
-That property is worth noticing early because it's what makes replay affordable at scale. A stream of a million events doesn't have to be folded from zero every time — a stored intermediate state plus the events since is equivalent. That's a **snapshot** ([lab17](../lab17)), and it's an optimisation rather than a new idea: nothing about the model changes, because the snapshot is derived and can be deleted at any time.
+That property is worth noticing early because it's what makes replay affordable at scale. A stream of a million events doesn't have to be folded from zero every time — a stored intermediate state plus the events since is equivalent. That's a **snapshot** ([lab17](../lab17)), and it's an optimisation rather than a new source of record: the snapshot is derived and can be deleted and rebuilt.
 
 ## What's next
 
-`replay` takes *a* vector of events. Which raises the question this lab quietly dodged by having one truck: fold **which** events?
+`replay` takes an ordered collection of events. Which raises the question this lab quietly dodged by having one truck: fold **which** events?
 
 With a fleet, the log holds every truck's events interleaved, and folding all of them gives the stock of a truck that doesn't exist. Each history has to be identified and separated before it can be folded — that's `:stream/id`, and the version numbering that comes with it, in [lab7](../lab7).
 
-Then `decide` in lab8, holding both the state it decides against and the version it appends with.
+Then `decide` arrives in lab8 and takes the command and current state. The handler surrounding it carries the expected version from the read into the append.
 
 ## Running it
 

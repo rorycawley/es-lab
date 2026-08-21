@@ -26,7 +26,11 @@
 (defn- read-body [request]
   (when-let [body (:body request)]
     (let [text (slurp body)]
-      (when (seq text) (json/read-str text :key-fn keyword)))))
+      (when (seq text)
+        (try
+          (json/read-str text :key-fn keyword)
+          (catch Exception failure
+            (throw (ex-info "Malformed JSON" {:reason :malformed-json} failure))))))))
 
 (defn- respond [status body]
   {:status  status
@@ -38,17 +42,14 @@
 ;;
 ;;   400  malformed  the schema refused it; the domain never saw it   (lab 22)
 ;;   422  refused    well-formed, and the domain said no              (lab 8)
-;;   409  conflict   the stream moved under you; re-read and retry    (lab 7)
+;;   409  conflict   the stream moved under you; re-read and re-decide (lab 7)
 ;;
 ;; 400 and 422 are the distinction lab 2 drew, and most APIs collapse them into
 ;; one number — which tells a client nothing about whether retrying could ever
 ;; help. 400 will never succeed unchanged. 422 might, tomorrow.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private status-for
-  {:malformed 400
-   :refused   422
-   :conflict  409})
+(def ^:private status-for {:malformed 400 :refused 422})
 
 (defn- outcome->response
   [{:keys [accepted rejected because]}]
@@ -60,8 +61,10 @@
                                            :version (:stream/version e)
                                            :data    (:data e)})
                                   accepted)})
-    (respond (status-for rejected 400)
-             {:error rejected :detail (if (map? because) because (str because))})))
+    (if-let [status (status-for rejected)]
+      (respond status
+               {:error rejected :detail (if (map? because) because (str because))})
+      (throw (ex-info "Unknown intake outcome" {:rejected rejected :because because})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Routes.
@@ -77,11 +80,23 @@
 (def ^:private truck-id #uuid "0f1c2b3a-0000-4000-8000-000000000001")
 
 (defn- command-route
-  "Every command endpoint is the same three lines, which is the point."
+  "Translate one HTTP act into an untrusted message for intake.
+
+  Only failures with an explicit transport meaning are translated here.
+  Identity, corruption and infrastructure failures remain failures rather
+  than being mislabeled as malformed input or a business refusal."
   [deps command-type]
   (fn [request]
-    (outcome->response
-     (intake/submit deps truck-id {:type command-type :data (read-body request)}))))
+    (try
+      (outcome->response
+       (intake/submit deps truck-id {:type command-type :data (read-body request)}))
+      (catch clojure.lang.ExceptionInfo failure
+        (case (:reason (ex-data failure))
+          :malformed-json (respond 400 {:error :malformed
+                                        :detail "Request body is not valid JSON"})
+          :concurrent-modification (respond 409 {:error :conflict
+                                                 :detail "Stream changed; read and retry"})
+          (throw failure))))))
 
 (defn routes
   "The API surface. A test asserts this table and the command registry are the
@@ -95,6 +110,8 @@
                          :handler (command-route deps :buy-flavour)}}]
     ["/restocks" {:post {:command :load-truck
                          :handler (command-route deps :load-truck)}}]
+    ["/replenishments" {:post {:command :ensure-stock
+                               :handler (command-route deps :ensure-stock)}}]
     ;; Queries — GET, because they are safe and idempotent, and saying so in
     ;; the method is information rather than ceremony. The archive's ROADMAP
     ;; forbids this; the README argues both sides.

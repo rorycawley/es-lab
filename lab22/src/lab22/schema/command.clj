@@ -2,10 +2,9 @@
   "Inbound-message and command schemas — **closed**, because they guard a door.
 
   The message schemas describe what may arrive from outside: an HTTP body, a
-  queue message, a form post. The internal command schemas reuse the same
-  closed data declarations for trusted callers and tests. An unexpected key
-  at the boundary is a client bug, a version mismatch or an attack, and none
-  of those should be waved through. So `{:closed true}`.
+  queue message, a form post. Internal commands additionally permit the
+  application-owned target address used by policies. Both shapes are closed:
+  an unexpected key is a client bug, version mismatch or attack.
 
   Contrast `lab22.schema.event`, which is open for exactly the opposite
   reason. Same library, opposite setting, and the direction of travel decides."
@@ -27,9 +26,20 @@
   [:map {:closed true}
    [:flavour Flavour]])
 
+(def AddressedLoadTruckData
+  [:map {:closed true}
+   [:truck-id {:optional true} :uuid]
+   [:flavour Flavour]
+   [:quantity Quantity]])
+
 (def LoadTruckMessage
   [:map {:closed true}
    [:type [:= :load-truck]]
+   [:data LoadTruckData]])
+
+(def EnsureStockMessage
+  [:map {:closed true}
+   [:type [:= :ensure-stock]]
    [:data LoadTruckData]])
 
 (def BuyFlavourMessage
@@ -40,12 +50,21 @@
 (def LoadTruck
   [:map {:closed true}
    [:command/id :uuid]
+   [:correlation-id :uuid]
    [:command/type [:= :load-truck]]
-   [:data LoadTruckData]])
+   [:data AddressedLoadTruckData]])
+
+(def EnsureStock
+  [:map {:closed true}
+   [:command/id :uuid]
+   [:correlation-id :uuid]
+   [:command/type [:= :ensure-stock]]
+   [:data AddressedLoadTruckData]])
 
 (def BuyFlavour
   [:map {:closed true}
    [:command/id :uuid]
+   [:correlation-id :uuid]
    [:command/type [:= :buy-flavour]]
    [:data BuyFlavourData]])
 
@@ -67,10 +86,12 @@
 
 (def by-type
   {:load-truck  LoadTruck
+   :ensure-stock EnsureStock
    :buy-flavour BuyFlavour})
 
 (def message-by-type
   {:load-truck  LoadTruckMessage
+   :ensure-stock EnsureStockMessage
    :buy-flavour BuyFlavourMessage})
 
 (defn schema-for [command] (get by-type (:command/type command)))
@@ -80,8 +101,8 @@
 (defn validate-message
   "`nil` if an inbound message is well-formed, otherwise an explanation.
 
-  This runs before the adapter allocates an id or constructs the internal
-  command value."
+  This runs before the adapter allocates command/correlation ids or constructs
+  the internal command value."
   [message]
   (if-let [schema (message-schema-for message)]
     (when-not (m/validate schema message)

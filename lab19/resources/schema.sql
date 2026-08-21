@@ -3,9 +3,19 @@
 -- Every column here is argued for somewhere in that document; this file is
 -- where those arguments become a schema.
 
+-- The compare-and-set token. A UNIQUE event constraint rejects stale writers
+-- but cannot reject a caller that claims a version ahead of the stream. This
+-- row is updated conditionally inside the append transaction.
+CREATE TABLE IF NOT EXISTS stream_head (
+  stream_id       UUID   PRIMARY KEY,
+  stream_version  BIGINT NOT NULL,
+
+  CONSTRAINT stream_head_version_non_negative CHECK (stream_version >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS event (
-  -- Assigned by the single writer. Orders the whole log across streams, and
-  -- exists for exactly one job: letting a reader resume (lab 9).
+  -- Assigned by one database authority across concurrent writers. Exists for
+  -- one job: letting a reader resume (lab 9). Gaps after rollback are valid.
   global_position BIGSERIAL   PRIMARY KEY,
 
   -- The transaction that wrote this row. Not domain data — it is what lets a
@@ -13,8 +23,9 @@ CREATE TABLE IF NOT EXISTS event (
   xid             xid8        NOT NULL DEFAULT pg_current_xact_id(),
 
   -- Minted by the application, before the write (lab 4), so a retry after an
-  -- ambiguous failure carries the same id and the UNIQUE makes it idempotent.
-  event_id        UUID        NOT NULL UNIQUE,
+  -- ambiguous failure carries the same id. UNIQUE detects repetition; the
+  -- adapter verifies an exact retry before returning the original row.
+  event_id        UUID        NOT NULL,
 
   event_type      TEXT        NOT NULL,
 
@@ -26,19 +37,21 @@ CREATE TABLE IF NOT EXISTS event (
   occurred_at     TIMESTAMPTZ NOT NULL,
 
   -- When the store wrote it down. `now()` is transaction-start and constant
-  -- for the transaction, so a batch shares one value — which is truthful,
-  -- because they committed together.
+  -- for the transaction, so every row in one append batch shares one value.
   recorded_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   data            JSONB       NOT NULL,
   metadata        JSONB       NOT NULL DEFAULT '{}'::jsonb,
 
-  -- Optimistic concurrency (lab 7), enforced by the database rather than by
-  -- the application reading and hoping.
-  UNIQUE (stream_id, stream_version),
+  -- Defense-in-depth integrity constraints. The complete expected-version
+  -- compare-and-set is the conditional stream_head update in `store/append`;
+  -- uniqueness alone cannot reject a future expected version.
+  CONSTRAINT event_id_unique UNIQUE (event_id),
+  CONSTRAINT stream_version_unique UNIQUE (stream_id, stream_version),
 
   CONSTRAINT stream_version_positive CHECK (stream_version > 0),
-  CONSTRAINT data_is_object CHECK (jsonb_typeof(data) = 'object')
+  CONSTRAINT data_is_object CHECK (jsonb_typeof(data) = 'object'),
+  CONSTRAINT metadata_is_object CHECK (jsonb_typeof(metadata) = 'object')
 );
 
 CREATE INDEX IF NOT EXISTS event_stream_idx ON event (stream_id, stream_version);
