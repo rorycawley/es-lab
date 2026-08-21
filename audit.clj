@@ -24,7 +24,6 @@
        (filter fs/directory?)
        (map (comp str fs/file-name))
        (filter #(re-matches #"lab\d+" %))
-       (filter #(pos? (parse-long (subs % 3))))
        (sort-by #(parse-long (subs % 3)))
        vec))
 

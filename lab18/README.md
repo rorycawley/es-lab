@@ -115,7 +115,7 @@ Runtime reads go to projections. As-of queries are for the support call, the aud
 
 ## What's next
 
-Eighteen labs of pure functions, and not one of them has met a database. [Lab19](../lab19) runs the same domain against a real Postgres, and shows the gap that opens when a position stops being an index.
+Nineteen labs of pure functions, and not one of them has met a database. [Lab19](../lab19) runs the same domain against a real Postgres, and shows the gap that opens when a position stops being an index.
 
 ## Running it
 

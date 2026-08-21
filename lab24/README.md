@@ -151,7 +151,7 @@ Lab 1 said it when nothing could disobey:
 
 > Store an opaque actor id. Never JWTs, tokens, or credentials.
 
-Twenty-three labs had no token to be tempted by. Now there is one, and a test greps every recorded event for it:
+Twenty-four labs had no token to be tempted by. Now there is one, and a test greps every recorded event for it:
 
 ```clojure
 (is (nil? (re-find #"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+" text))

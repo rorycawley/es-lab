@@ -1,6 +1,6 @@
 # Lab 21: functional core, imperative shell
 
-Twenty labs are verified by tests and **none of them starts.** This one does:
+Twenty-one labs are verified by tests and **none of them starts.** This one does:
 
 ```bash
 bb demo      # no Docker, no configuration, no container

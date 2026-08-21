@@ -1,6 +1,6 @@
 # Lab 19: persistence
 
-Every store in eighteen labs was `[]`. Meanwhile [REFERENCE.md](../REFERENCE.md) spends pages on `bigserial`, `timestamptz`, `now()` versus `clock_timestamp()`, unique constraints and a visibility gap — with no lab behind any of it.
+Every store in the sequence so far was `[]`. Meanwhile [REFERENCE.md](../REFERENCE.md) spends pages on `bigserial`, `timestamptz`, `now()` versus `clock_timestamp()`, unique constraints and a visibility gap — with no lab behind any of it.
 
 This lab is that evidence. It runs against a real Postgres 18 in a container, and it is where two things happen: a claim gets tested, and a warning gets demonstrated.
 

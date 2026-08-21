@@ -13,10 +13,11 @@
             (->> (fs/list-dir ".")
                  (filter fs/directory?)
                  (map (fn [p] (str (fs/file-name p))))
+                 ;; `some?`, not `pos?` — lab0 is a lab, and `parse-long`
+                 ;; returns nil rather than a number for a non-numeric suffix.
                  (filter (fn [d]
                            (and (str/starts-with? d "lab")
-                                (some? (lab-n d))
-                                (pos? (lab-n d)))))
+                                (some? (lab-n d)))))
                  (sort-by lab-n))))
 
   help
