@@ -46,20 +46,17 @@
 (defn- save-events-tx! [db aggregate-id events]
   (jdbc/with-transaction [tx db]
     (let [current-seq (current-sequence-number tx aggregate-id)]
-      (dorun
-       (map-indexed
-        (fn [i event]
-          (sql/insert! tx :registration_events
-                       {:id              (:event/id event)
-                        :aggregate_id    (uuid/parse aggregate-id)
-                        :sequence_number (+ current-seq i 1)
-                        :event_type      (name (:event/type event))
-                        :event_data      (serialise-event event)
-                        :occurred_at     (:occurred-at event)
-                        :causation_id    (:event/causation-id event)
-                        :correlation_id  (:event/correlation-id event)
-                        :published       false}))
-        events)))))
+      (doseq [[i event] (map-indexed vector events)]
+        (sql/insert! tx :registration_events
+                     {:id              (:event/id event)
+                      :aggregate_id    (uuid/parse aggregate-id)
+                      :sequence_number (+ current-seq i 1)
+                      :event_type      (name (:event/type event))
+                      :event_data      (serialise-event event)
+                      :occurred_at     (:occurred-at event)
+                      :causation_id    (:event/causation-id event)
+                      :correlation_id  (:event/correlation-id event)
+                      :published       false})))))
 
 (defn fetch-unpublished-events [db batch-size]
   (->> (jdbc/execute!

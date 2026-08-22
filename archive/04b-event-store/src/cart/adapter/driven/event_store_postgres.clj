@@ -124,7 +124,10 @@
                 ;; SPEC R4.4 — three modes, two parameters
                 expected
                 require-new?
-                (->uuid-array conn (repeatedly n #(UUID/randomUUID)))
+                (->uuid-array conn
+                              (reduce (fn [ids _] (conj ids (UUID/randomUUID)))
+                                      []
+                                      (range n)))
                 (->text-array conn (map (comp kw->str :type) events))
                 (->jsonb-array conn (map :data events))
                 (->jsonb-array conn (map #(:metadata % {}) events))]

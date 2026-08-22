@@ -34,8 +34,10 @@ checkouts/
 .idea/
 *.iml
 .calva/
-.lsp/.cache/
-.clj-kondo/.cache/
+# Anchored patterns only match at the repository root, and from lab26 a lab
+# has its own .clj-kondo config directory too.
+**/.clj-kondo/.cache/
+**/.lsp/.cache/
 
 # Claude Code
 .claude/settings.local.json

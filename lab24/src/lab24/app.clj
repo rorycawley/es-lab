@@ -47,8 +47,7 @@
   [{:keys [store] :as app} checkpoint]
   (let [batch    (driven/read-since store checkpoint)
         commands (policy/react-to-all batch)
-        applied  (doall (for [command commands]
-                          (handle app (get-in command [:data :truck-id]) command)))]
+        applied  (reduce #(conj %1 (handle app (get-in %2 [:data :truck-id]) %2)) [] commands)]
     {:checkpoint (->> batch (map :event/position) (apply max checkpoint))
      :commands   (vec commands)
      :events     (vec (apply concat applied))}))

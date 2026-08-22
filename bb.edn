@@ -25,7 +25,7 @@
    :override-builtin true
    :task (do (println "")
              (println "  bb audit      consistency checks across every lab and document")
-             (println "  bb test-all   run every lab's suite (labs 19-20 need Docker)")
+             (println "  bb test-all   run every lab's suite (labs 19-30 need Docker)")
              (println "")
              (println "Each lab is also self-contained: cd lab1 && bb all")
              (println ""))}

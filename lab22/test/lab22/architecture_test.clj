@@ -75,7 +75,12 @@
     (let [files (->> (file-seq (io/file "src/lab22"))
                      (filter #(str/ends-with? (str %) ".clj"))
                      (remove #(str/includes? (str %) "/adapter/")))
-          namers (filter #(str/includes? (slurp %) "lab22.adapter.postgres") files)]
+          namers (reduce (fn [found file]
+                           (cond-> found
+                             (str/includes? (slurp file) "lab22.adapter.postgres")
+                             (conj file)))
+                         []
+                         files)]
       (is (= ["system.clj"] (mapv #(.getName %) namers))
           "swapping an adapter should be a one-line change, not an audit"))))
 

@@ -82,10 +82,14 @@
 
 (deftest jetty-is-named-only-by-the-composition-root-test
   (testing "a web server has a lifecycle, so Component owns it — in one file"
-    (let [namers (->> (file-seq (io/file "src/lab23"))
-                      (filter #(str/ends-with? (str %) ".clj"))
-                      (filter #(str/includes? (slurp %) "ring.adapter.jetty"))
-                      (mapv #(.getName %)))]
+    (let [files (filter #(str/ends-with? (str %) ".clj")
+                        (file-seq (io/file "src/lab23")))
+          namers (reduce (fn [found file]
+                           (cond-> found
+                             (str/includes? (slurp file) "ring.adapter.jetty")
+                             (conj (.getName file))))
+                         []
+                         files)]
       (is (= ["system.clj"] namers)))))
 
 (deftest schemas-live-in-the-shell-test
@@ -123,7 +127,12 @@
     (let [files (->> (file-seq (io/file "src/lab23"))
                      (filter #(str/ends-with? (str %) ".clj"))
                      (remove #(str/includes? (str %) "/adapter/")))
-          namers (filter #(str/includes? (slurp %) "lab23.adapter.postgres") files)]
+          namers (reduce (fn [found file]
+                           (cond-> found
+                             (str/includes? (slurp file) "lab23.adapter.postgres")
+                             (conj file)))
+                         []
+                         files)]
       (is (= ["system.clj"] (mapv #(.getName %) namers))
           "swapping an adapter should be a one-line change, not an audit"))))
 

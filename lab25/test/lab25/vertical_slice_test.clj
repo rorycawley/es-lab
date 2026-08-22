@@ -167,12 +167,13 @@
                         message-id fact-id (random-uuid) (random-uuid)
                         vanilla "vanilla" 300)
             gate       (promise)
-            attempts   (doall
-                        (repeatedly
-                         8
-                         #(future
-                            @gate
-                            (ordering/receive! ordering message))))]
+            attempts   (reduce (fn [started _]
+                                 (conj started
+                                       (future
+                                         @gate
+                                         (ordering/receive! ordering message))))
+                               []
+                               (range 8))]
         (deliver gate true)
         (let [results (mapv deref attempts)]
           (is (= 1 (count (filter :accepted results))))
@@ -187,12 +188,13 @@
                       :product-name "vanilla"
                       :price-cents 300}
             gate     (promise)
-            attempts (doall
-                      (repeatedly
-                       8
-                       #(future
-                          @gate
-                          (catalog/change-price! catalog request))))]
+            attempts (reduce (fn [started _]
+                               (conj started
+                                     (future
+                                       @gate
+                                       (catalog/change-price! catalog request))))
+                             []
+                             (range 8))]
         (deliver gate true)
         (let [results (mapv deref attempts)]
           (is (apply = results))

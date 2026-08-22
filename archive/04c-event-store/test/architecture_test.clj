@@ -52,11 +52,18 @@
    "cart.adapter.out.persistence"])
 
 (defn- violations [path-fragment forbidden]
-  (for [file (clojure-source-files)
-        :when (str/includes? (relative-path file) path-fragment)
-        dependency forbidden
-        :when (str/includes? (slurp file) dependency)]
-    [(relative-path file) dependency]))
+  (reduce (fn [violations file]
+            (if-not (str/includes? (relative-path file) path-fragment)
+              violations
+              (let [source (slurp file)]
+                (reduce (fn [violations dependency]
+                          (cond-> violations
+                            (str/includes? source dependency)
+                            (conj [(relative-path file) dependency])))
+                        violations
+                        forbidden))))
+          []
+          (clojure-source-files)))
 
 (deftest namespaces-match-source-paths
   (doseq [file (clojure-source-files)]

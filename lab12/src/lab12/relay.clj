@@ -46,9 +46,13 @@
   position *read*, for the reason lab 10 gives."
   [log checkpoint broker gen-id]
   (let [batch (store/since log checkpoint)
-        sends (for [event batch
-                    message (contract/announce event)]
-                (stamp gen-id event message))]
+        sends (reduce (fn [sent event]
+                        (reduce (fn [sent message]
+                                  (conj sent (stamp gen-id event message)))
+                                sent
+                                (contract/announce event)))
+                      []
+                      batch)]
     {:broker     (reduce deliver-message broker sends)
      :checkpoint (->> batch (map :event/position) (apply max checkpoint))
-     :sent       (vec sends)}))
+     :sent       sends}))

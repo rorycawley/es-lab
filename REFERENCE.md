@@ -145,7 +145,7 @@ So treat it as an opaque grouping token that happens to have been minted by the 
 
 There *is* a real argument for keeping a command log, and it isn't this one. See [What it won't answer](#what-it-wont-answer) below.
 
-**What larger process — correlation id.** The case that earns it: a transfer debits A, the credit to B fails, and a compensating step refunds A. (This is *saga* in its original 1987 sense — a long-lived transaction whose steps each have a compensating transaction. [Below](#is-saga-a-third-thing) covers why the word is best avoided in its other senses.) Months later — *why did A receive this deposit?* The refund sits in A's stream looking unexplained; only the correlation id ties it to a failure in a different stream. Set it once at the boundary and propagate everywhere. Seed it from your trace id, so you can pivot to telemetry without merging the two worlds.
+**What larger process — correlation id.** The case that earns it: a transfer debits A, the credit to B fails, and a compensating step refunds A. (This is *saga* in its original 1987 sense — a long-lived transaction whose steps each have a compensating transaction. [Below](#is-saga-a-third-thing) covers why the word is best avoided in its other senses.) Months later — *why did A receive this deposit?* The refund sits in A's stream looking unexplained; only the correlation id ties it to a failure in a different stream. Set it once at the boundary and propagate everywhere. Seed it from your trace id, so you can pivot to telemetry without merging the two worlds — seed, not alias: the trace is sampled and expires, while this question is still being asked years later. [lab26](lab26) keeps both in one message and persists only one of them.
 
 **Which schema version — the year-three problem.** A supported history reader must handle every historical schema version it claims to support and reject future versions or semantics it does not understand. Microsoft gives two places to put the version: **as metadata in the envelope**, or **as part of the event type name** (`:flavour-sold-v2`). The envelope is usually the better of the two, because it leaves the type name meaning one thing forever — but the type-name form has the advantage of being impossible to ignore.
 
@@ -161,6 +161,10 @@ Then a ladder of strategies, in Microsoft's order of preference:
 Pod name, handler class, SQL timings, exceptions, stack traces. These go to logs and traces.
 
 The correlation id is the **bridge** between the two worlds. Don't merge them — an event store that accumulates operational detail becomes unreadable to the domain experts whose language it was supposed to be written in.
+
+The rule runs in the other direction too, and costs more when broken. Telemetry is sampled, buffered, dropped under load and retained for days; every one of those is a feature there and a defect in a business number, so business counts come from the event log and its projections rather than from a metric. And a telemetry backend is a copy of your data outside the store you control: a personal field that [lab15](lab15)'s crypto-shredding can erase from an append-only history is not erased from a span attribute sitting in a vendor's retention window. Choose what leaves as an allow-list, not by dumping the request.
+
+Trace context is the mechanism for the pivot, not a substitute for the correlation id. A W3C `traceparent` names one request's execution and belongs to the transport — inject it into the message headers, not into the event's own data — while the correlation id names a business conversation and is persisted. If you carry trace context through an outbox, capture it in the transaction that wrote the row, or the consumer joins the relay's trace rather than the request's. [lab26](lab26) builds both sides and asserts them.
 
 ---
 
@@ -448,6 +452,11 @@ So: **there is no coherent third thing.** There is a coordinator, which either h
 - [lab17](lab17) — disposable snapshots, coherent cursors, and fold compatibility
 - [lab18](lab18) — the two time axes and the rules required to reconstruct a decision
 - [lab19](lab19) — the Postgres schema and a demonstrated `global_position` visibility gap
+- [lab26](lab26) — the other record: logs, traces and metrics, and the line between them and this one
+- [lab27](lab27) — a search index as a projection, and the configuration that is its fold version
+- [lab28](lab28) — network fallacies: bounded retries, deadlines, circuit breaking, provider-bounded idempotency, secure webhooks, and dead letters
+- [lab29](lab29) — WebSub at the external boundary: topics as public resources, verified subscriptions, leases, and isolated fan-out
+- [lab30](lab30) — multilingual legal-name lookup: Unicode folding, language-specific text search, German compounds, and a staged search cascade
 - [lab20](lab20) — command ledgers, outboxes, and inboxes where metadata alone is insufficient
 - [lab24](lab24) — actor metadata, authentication, and why authority does not propagate
 - [lab25](lab25) — vertical slices, closed module APIs, module-owned schemas, and idempotent contracts between capabilities

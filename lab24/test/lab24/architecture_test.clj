@@ -91,10 +91,13 @@
     (let [files  (->> (file-seq (io/file "src/lab24"))
                       (filter #(str/ends-with? (str %) ".clj")))
           namers (->> files
-                      (filter (fn [f] (some (fn [required]
-                                              (some #(str/includes? required %) token-libraries))
-                                            (requires (slurp f)))))
-                      (mapv #(.getName %))
+                      (reduce (fn [found file]
+                                (cond-> found
+                                  (some (fn [required]
+                                          (some #(str/includes? required %) token-libraries))
+                                        (requires (slurp file)))
+                                  (conj (.getName file))))
+                              [])
                       sort)]
       (is (= ["auth.clj" "oidc.clj"] namers)
           "a token library reaching further than the edge is authentication leaking inward"))))
@@ -153,10 +156,14 @@
 
 (deftest jetty-is-named-only-by-the-composition-root-test
   (testing "a web server has a lifecycle, so Component owns it — in one file"
-    (let [namers (->> (file-seq (io/file "src/lab24"))
-                      (filter #(str/ends-with? (str %) ".clj"))
-                      (filter #(str/includes? (slurp %) "ring.adapter.jetty"))
-                      (mapv #(.getName %)))]
+    (let [files (filter #(str/ends-with? (str %) ".clj")
+                        (file-seq (io/file "src/lab24")))
+          namers (reduce (fn [found file]
+                           (cond-> found
+                             (str/includes? (slurp file) "ring.adapter.jetty")
+                             (conj (.getName file))))
+                         []
+                         files)]
       (is (= ["system.clj"] namers)))))
 
 (deftest schemas-live-in-the-shell-test
@@ -194,7 +201,12 @@
     (let [files (->> (file-seq (io/file "src/lab24"))
                      (filter #(str/ends-with? (str %) ".clj"))
                      (remove #(str/includes? (str %) "/adapter/")))
-          namers (filter #(str/includes? (slurp %) "lab24.adapter.postgres") files)]
+          namers (reduce (fn [found file]
+                           (cond-> found
+                             (str/includes? (slurp file) "lab24.adapter.postgres")
+                             (conj file)))
+                         []
+                         files)]
       (is (= ["system.clj"] (mapv #(.getName %) namers))
           "swapping an adapter should be a one-line change, not an audit"))))
 

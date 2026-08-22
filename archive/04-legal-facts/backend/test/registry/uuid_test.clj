@@ -14,7 +14,9 @@
 
 (deftest v7-is-monotonically-increasing
   (testing "1000 sequential UUIDs are sorted"
-    (let [ids (repeatedly 1000 uuid/v7)]
+    (let [ids (reduce (fn [generated _] (conj generated (uuid/v7)))
+                      []
+                      (range 1000))]
       (is (= ids (sort ids))))))
 
 (deftest v7-str-is-string
@@ -25,5 +27,7 @@
 
 (deftest no-duplicates
   (testing "10000 UUIDs are unique"
-    (let [ids (repeatedly 10000 uuid/v7)]
+    (let [ids (reduce (fn [generated _] (conj generated (uuid/v7)))
+                      []
+                      (range 10000))]
       (is (= (count ids) (count (distinct ids)))))))

@@ -14,4 +14,7 @@
 
            ;; 03-task-persistence: both return a reified protocol instance.
            spy.protocol/mock clojure.core/reify
-           spy.protocol/spy  clojure.core/reify}}
+           spy.protocol/spy  clojure.core/reify
+
+           ;; lab26: binds a name to the new context and evaluates a body.
+           steffan-westcott.clj-otel.api.trace.span/with-span-binding clojure.core/let}}

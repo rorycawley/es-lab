@@ -224,6 +224,8 @@ HTTP endpoints for the new slices; Lab 23 already established how to add them wi
 
 Do not extract a microservice merely because the module can be extracted. The next useful experiment is to measure a reason: deployment frequency, asymmetric load, failure isolation or team ownership. Without one, the modular monolith is the destination, not a waiting room.
 
+Measuring anything, though, requires the system to say what it is doing — and `behaviour/observation` above puts a keyword in an atom. [Lab26](../lab26) replaces it with OpenTelemetry, and finds that the interesting problem is not instrumentation but separation: the event log says what the business did and keeps it forever, telemetry says what the machine did and discards it, and the price change here becomes one trace across both modules only because its trace context was frozen into the outbox row in the same transaction.
+
 ## Running it
 
 ```bash

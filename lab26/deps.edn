@@ -1,0 +1,44 @@
+{:paths ["src" "resources"]
+ :deps  {org.clojure/clojure               {:mvn/version "1.12.5"}
+         metosin/malli                     {:mvn/version "0.16.4"}
+         com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
+         org.postgresql/postgresql         {:mvn/version "42.7.3"}
+
+         ;; ---------------------------------------------------------------
+         ;; Telemetry. `clj-otel-api` is named by `platform/telemetry.clj`
+         ;; and `clj-otel-sdk` by `system.clj` — nowhere else, and
+         ;; `architecture_test.clj` fails the build if that changes.
+         ;;
+         ;; OpenTelemetry Java deliberately publishes no logging API for
+         ;; applications: you keep your logging library and bridge it. So
+         ;; Logback stays the logging implementation and the appender turns
+         ;; each event into an OpenTelemetry log record stamped with the
+         ;; trace and span it happened inside.
+         ;; ---------------------------------------------------------------
+         com.github.steffan-westcott/clj-otel-api {:mvn/version "0.2.10"}
+         com.github.steffan-westcott/clj-otel-sdk {:mvn/version "0.2.10"}
+         ch.qos.logback/logback-classic           {:mvn/version "1.5.38"}
+         io.opentelemetry.instrumentation/opentelemetry-logback-appender-1.0
+         {:mvn/version "2.20.1-alpha"}}
+ ;; ---------------------------------------------------------------------------
+ ;; Note what is NOT above: the exporters the tests and demo read telemetry
+ ;; back through. `opentelemetry-sdk-testing` supplies in-memory span, log and
+ ;; metric collectors, and it belongs beside `dev/` for the same reason lab24's
+ ;; identity provider did — it is a dependency of your tests, never of your
+ ;; application. `architecture_test.clj` asserts nothing under `src/` names it.
+ ;; ---------------------------------------------------------------------------
+ :aliases
+ {:test {:extra-paths ["test" "dev"]
+         ;; Telemetry is asserted, not read. Silence the console appender so
+         ;; the suite's output is test results.
+         :jvm-opts    ["-Dlab26.console.level=OFF"]
+         :extra-deps  {lambdaisland/kaocha                        {:mvn/version "1.91.1392"}
+                       io.opentelemetry/opentelemetry-sdk-testing {:mvn/version "1.54.1"}
+                       org.testcontainers/postgresql              {:mvn/version "1.20.4"}
+                       org.testcontainers/testcontainers          {:mvn/version "1.20.4"}}
+         :main-opts   ["-m" "kaocha.runner"]}
+  :demo {:extra-paths ["dev"]
+         :extra-deps  {io.opentelemetry/opentelemetry-sdk-testing {:mvn/version "1.54.1"}
+                       org.testcontainers/postgresql              {:mvn/version "1.20.4"}
+                       org.testcontainers/testcontainers          {:mvn/version "1.20.4"}}
+         :main-opts   ["-m" "lab26.demo"]}}}

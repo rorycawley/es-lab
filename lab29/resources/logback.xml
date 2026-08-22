@@ -1,0 +1,39 @@
+<!--
+  Two destinations for one log event.
+
+  OTEL turns the event into an OpenTelemetry log record, stamped with the trace
+  and span that were current when it was written, and with its key-value pairs
+  as log-record attributes. CONSOLE is the same event for a human reading a
+  terminal; `%X{trace_id}` is there because a text log nobody can join to a
+  trace is the thing this lab is trying to stop writing.
+
+  Only the `lab29` logger reaches OTEL. Testcontainers and the JDBC driver are
+  somebody else's telemetry, and letting them into the same pipeline would make
+  every assertion in `telemetry_test.clj` depend on how chatty Docker felt.
+-->
+<configuration>
+
+  <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
+    <captureCodeAttributes>true</captureCodeAttributes>
+  </appender>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+      <level>${lab29.console.level:-INFO}</level>
+    </filter>
+    <encoder>
+      <pattern>%-5level %-28msg trace=%X{trace_id:-none} %kvp%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="lab29" level="INFO" additivity="false">
+    <appender-ref ref="OTEL"/>
+    <appender-ref ref="CONSOLE"/>
+  </logger>
+
+  <root level="WARN">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+
+</configuration>

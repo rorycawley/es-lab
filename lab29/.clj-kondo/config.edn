@@ -1,0 +1,4 @@
+;; `with-span-binding` binds a name to a value and evaluates a body, which is
+;; exactly `let`'s shape. Without this, clj-kondo reports the bound context as
+;; an unresolved symbol.
+{:lint-as {steffan-westcott.clj-otel.api.trace.span/with-span-binding clojure.core/let}}

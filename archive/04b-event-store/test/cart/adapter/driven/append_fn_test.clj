@@ -39,7 +39,10 @@
      conn
      [append-sql
       stream-id "shopping_cart" expected require-new
-      (->uuid-array conn (repeatedly n #(UUID/randomUUID)))
+      (->uuid-array conn
+                    (reduce (fn [ids _] (conj ids (UUID/randomUUID)))
+                            []
+                            (range n)))
       (->text-array conn (map :type events))
       (->text-array conn (map :data events))
       (->text-array conn (repeat n "{}"))]

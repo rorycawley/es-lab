@@ -137,17 +137,24 @@
 
 (deftest config-edn-is-the-only-place-the-service-reads-its-environment
   (testing "a stray System/getenv in src is config that escaped aero"
-    (let [offenders (->> (file-seq (io/file "src"))
-                         (filter #(.isFile ^java.io.File %))
-                         (filter #(str/ends-with? (.getName ^java.io.File %) ".clj"))
-                         (keep (fn [f]
-                                 (let [hits (->> (str/split-lines (slurp f))
-                                                 (map-indexed vector)
-                                                 (filter (fn [[_ line]]
-                                                           (re-find #"System/getenv|System/getProperty" line))))]
-                                   (when (seq hits)
-                                     [(str f) (mapv (fn [[i l]] [(inc i) (str/trim l)]) hits)]))))
-                         (into {}))]
+    (let [files (->> (file-seq (io/file "src"))
+                     (filter #(.isFile ^java.io.File %))
+                     (filter #(str/ends-with? (.getName ^java.io.File %) ".clj")))
+          offenders (reduce (fn [offenders f]
+                              (let [hits (->> (str/split-lines (slurp f))
+                                              (map-indexed vector)
+                                              (filter (fn [[_ line]]
+                                                        (re-find #"System/getenv|System/getProperty"
+                                                                 line)))
+                                              vec)]
+                                (cond-> offenders
+                                  (seq hits)
+                                  (assoc (str f)
+                                         (mapv (fn [[i line]]
+                                                 [(inc i) (str/trim line)])
+                                               hits)))))
+                            {}
+                            files)]
       (is (= {} offenders)
           "every environment read belongs in resources/config.edn"))))
 

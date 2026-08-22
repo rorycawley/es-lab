@@ -20,16 +20,17 @@
 (use-fixtures :once db/with-postgres)
 
 (defn- counts []
-  (into {}
-        (for [[label table] [[:streams "streams"]
-                             [:events "events"]
-                             [:commands "command_requests"]]]
-          [label
-           (:row-count
-            (jdbc/execute-one!
-             db/*datasource*
-             [(str "SELECT count(*) AS row_count FROM " table)]
-             {:builder-fn rs/as-unqualified-kebab-maps}))])))
+  (reduce (fn [counts [label table]]
+            (assoc counts label
+                   (:row-count
+                    (jdbc/execute-one!
+                     db/*datasource*
+                     [(str "SELECT count(*) AS row_count FROM " table)]
+                     {:builder-fn rs/as-unqualified-kebab-maps}))))
+          {}
+          [[:streams "streams"]
+           [:events "events"]
+           [:commands "command_requests"]]))
 
 (defn- new-context []
   (db/reset-database!)
