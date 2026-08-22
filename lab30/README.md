@@ -270,11 +270,13 @@ not decorations copied from a schema example.
 
 ## What's next
 
-The next work is evidence: settle the jurisdiction, load a representative
-corpus, measure each rung and its fall-through rate, and replace the teaching
-German lexicon with a pinned dictionary validated against real filings. Only
-then can thresholds, cross-language index size, transliteration, and access
-controls be chosen from the workload rather than from examples.
+[Lab 31](../lab31) is about proving performance. It takes this lab's refusal to
+claim latency from an index plan and builds the missing discipline: a declared
+workload and budget, a correctness oracle, held-out inputs, paired trials, an
+environment record, and an end-to-end experiment that can fail. The next
+Registry-specific evidence still needs a representative corpus, each rung's
+latency and fall-through rate, and a pinned German dictionary validated against
+real filings.
 
 ## Running it
 

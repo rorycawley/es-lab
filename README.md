@@ -13,7 +13,9 @@ Lab 0 starts with executable business rules in a pure domain namespace and contr
 The running example through Lab 29 is an Ice Cream truck selling flavours.
 Lab 30 deliberately changes domain to a corporate Registry because multilingual
 legal-name lookup needs real French, German, and Italian names rather than
-translated ice-cream labels.
+translated ice-cream labels. Lab 31 keeps one exact Registry lookup but reduces
+the system to a controlled workload so compute and boundary latency can be
+measured independently and together.
 
 Labs build on each other in order, and each one points to what follows; later labs link back whenever they spend an earlier idea. Changes are never silent: when a later lab changes a shape introduced earlier, the earlier examples are brought forward and the later lab preserves the old shape where history requires it, then explains what changed its mind.
 
@@ -52,6 +54,7 @@ Labs build on each other in order, and each one points to what follows; later la
 | [28](lab28) | network fallacies | retries, deadlines, breakers, idempotency, webhooks, and dead letters |
 | [29](lab29) | external publication | WebSub topics, verified subscriptions, leases, and per-consumer delivery |
 | [30](lab30) | multilingual names | one legal name, four search keys, three languages, and an explainable lookup cascade |
+| [31](lab31) | proving performance | a correct held-out workload, paired trials, declared budgets, and end-to-end evidence |
 
 **Lab 0 is the one with no events in it.** Before a fact is recorded there is a model, and if that is wrong nothing above it can be right. A model is a *reduction* — a toy train is not a small real train, and what its builder threw away is what makes it useful — so the lab turns that into a criterion you can run: **an attribute that cannot change any answer is not part of the model.** Everything true about a truck one morning in August, varied across every plausible value, and not one answer moves; nine attributes come out and `{:stock …}` remains. Then the same two business rules written the way a framework's `models/` folder would have you write them — a record whose fields are a table's columns, methods that read and write, and `snake_case` leaking upward into the thing the business calls its truck. It is not a straw man and it works. The bill is in the tests: asking the domain model a question costs a map literal and asking the persistence model costs a store, a row and an id; ask twice and only one of them answers the same way, because the other has a clock in it. And the expensive one, which turned out to be mechanically checkable — `(is (nil? (resolve 'lab0.models.truck/sellable?)))`. The rule is not missing, it is *in there*, as an `if` between a read and a write, with nowhere to put a name. A rule with no name cannot be pointed at, tested alone, or read back to the person who asked for it.
 
@@ -126,13 +129,15 @@ Most of the difficulty in an event-sourced design is keeping these three straigh
 
 **Lab 30 treats multilingual names as several projections of one legal value.** A Registry module preserves the NFC filed name and structures the legal form separately, then lets PostgreSQL derive a case-folded exact key, an accent-and-punctuation-folded trigram key, and a `tsvector` analyzed under French, German, and Italian together. The lookup API is an explainable cascade—registration number or EUID, exact name, prefix, phrase, then strict-word fuzziness—and refuses to send one- or two-character queries into the trigram rung. PostgreSQL is initialized with `PG_UNICODE_FAST`, because the default container locale does not fold `ß` to `ss`; tests also correct the source guide by proving that PostgreSQL 18.4 still marks `unaccent` stable while the schema's immutable wrapper is an explicit rebuild promise. Legal-form suffixes are removed at the query edge and rendered in the UI language. German Snowball cannot split compounds, so a pure, versioned word-list fallback derives searchable components and exposes its incompleteness rather than hiding it. Thirty tests exercise the public Registry API, the pure splitter, generated-column rebuilds, Unicode behavior, and actual B-tree and GIN plans against PostgreSQL 18.
 
+**Lab 31 makes performance a falsifiable claim.** Cheap coding agents make bounded, workload-specific optimizations economical, but they do not make experimental design, correctness, or end-to-end bottlenecks disappear. A deterministic Registry workload compares a linear scan with a prebuilt exact index, then holds that fast compute constant while comparing twelve controlled-latency gateway calls with one batch. Every journey must return the same ordered answer before timing begins; proof keys are held out from design keys; warmups and alternating paired trials reduce positional bias; median, p95, paired speedup, and win rate are reported with the JVM and machine context. `bb prove` checks thresholds declared in code and fails rather than moving them. The synthetic latency model proves only its scoped claim, while tests separately establish the exact boundary-crossing counts. The result reconciles inner-loop and architectural optimization: make local work cheaper, then measure whether another floor still owns the user journey.
+
 ## Reference
 
 The labs stay small on purpose. [REFERENCE.md](REFERENCE.md) is where the detail lives — what belongs in an event's `:data` versus its envelope versus neither, which identity and idempotency boundary to use, `recorded_at`, `global_position`, sharding, and what a stream can and cannot tell you. Read the labs first; reach for it when you're designing a real store.
 
 ## Keeping it honest
 
-Thirty-one labs written in sequence drift. A forward pointer outlives the lab it named; a docstring says *copied from lab 8, unchanged* about a file that has since changed; a prerequisites list written when only one lab needed Docker. Two manual audits of this repository found the same failure mode both times, and most of it was mechanically checkable.
+Thirty-two labs written in sequence drift. A forward pointer outlives the lab it named; a docstring says *copied from lab 8, unchanged* about a file that has since changed; a prerequisites list written when only one lab needed Docker. Two manual audits of this repository found the same failure mode both times, and most of it was mechanically checkable.
 
 ```bash
 bb audit      # consistency checks across every lab and document
@@ -156,7 +161,7 @@ bb test     # just the tests
 
 Prerequisites are [mise](https://mise.jdx.dev) and [babashka](https://babashka.org); `bb setup` installs everything else the lab pins.
 
-[Lab 19](lab19), [lab 20](lab20), [lab 21](lab21), [lab 22](lab22), [lab 23](lab23), [lab 24](lab24), [lab 25](lab25), [lab 26](lab26), [lab 27](lab27), [lab 28](lab28), [lab 29](lab29) and [lab 30](lab30) use Docker — they run against a real Postgres in a container. Labs 0–18 are pure Clojure and need nothing running, and `cd lab24 && bb serve` starts the whole system on `:3000` in memory — with an identity provider beside it on its own port — and no Docker at all.
+[Lab 19](lab19), [lab 20](lab20), [lab 21](lab21), [lab 22](lab22), [lab 23](lab23), [lab 24](lab24), [lab 25](lab25), [lab 26](lab26), [lab 27](lab27), [lab 28](lab28), [lab 29](lab29) and [lab 30](lab30) use Docker — they run against a real Postgres in a container. Labs 0–18 and [Lab 31](lab31) are pure Clojure and need nothing running, and `cd lab24 && bb serve` starts the whole system on `:3000` in memory — with an identity provider beside it on its own port — and no Docker at all.
 
 ## `archive/`
 

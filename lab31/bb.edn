@@ -1,0 +1,55 @@
+{:paths ["src" "dev" "test"]
+ :tasks
+ {:requires ([babashka.process :refer [shell]])
+
+  :init (defn sh [& args]
+          (binding [*out* *err*]
+            (apply println "+" (remove map? args)))
+          (apply shell args))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task             (do (println "")
+                         (println "Prerequisites:")
+                         (println "  1. Install mise: curl https://mise.run | sh")
+                         (println "  2. Run: mise install")
+                         (println "")
+                         (println "Then:")
+                         (println "  bb prove           (run the performance experiment)")
+                         (println "  bb all             (install tools + run checks, tests and proof)")
+                         (println "  bb tasks           (list all available tasks)")
+                         (println ""))}
+
+  setup
+  {:doc  "Trust mise.toml and install all declared tools"
+   :task (do (sh "mise" "trust")
+             (sh "mise" "install"))}
+
+  lint
+  {:doc  "Lint with clj-kondo"
+   :task (sh "clj-kondo" "--parallel" "--lint" "src:dev:test")}
+
+  fmt:check
+  {:doc  "Check code format with cljfmt"
+   :task (sh "cljfmt" "check" "src" "dev" "test")}
+
+  fmt:fix
+  {:doc  "Reformat code with cljfmt"
+   :task (sh "cljfmt" "fix" "src" "dev" "test")}
+
+  check
+  {:doc     "Run static checks"
+   :depends [lint fmt:check]}
+
+  test
+  {:doc  "Run correctness and experiment-harness tests"
+   :task (sh "clojure" "-M:test")}
+
+  prove
+  {:doc  "Run the held-out performance proof"
+   :task (sh "clojure" "-M:prove")}
+
+  all
+  {:doc     "Setup, check, test and prove the performance claims"
+   :depends [setup check test prove]}}}
