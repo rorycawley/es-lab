@@ -5,6 +5,28 @@
             [lab29.recorder :as recorder]
             [lab29.system :as system]))
 
+(defn idle
+  "A consumer that accepts everything and does nothing.
+
+  Substituted for a module whose real handler the test intends to call itself,
+  so that draining the queue does not do the work first."
+  [_]
+  {:accepted true})
+
+(defn capture
+  "A consumer that records what it was handed instead of acting on it.
+
+  Returns `[handler seen]`. Substituting it for a module lets a test take a
+  delivery off the queue and then drive the real consumer by hand, as many
+  times as it likes -- which is how you assert what happens on the second
+  delivery without waiting for one."
+  []
+  (let [seen (atom [])]
+    [(fn [delivery]
+       (swap! seen conj (select-keys delivery [:headers :message]))
+       {:accepted true})
+     seen]))
+
 (defn with-system
   "The whole system, with in-memory providers. Fast, no sockets."
   ([f] (with-system {} f))

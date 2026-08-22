@@ -323,6 +323,10 @@ The suite is divided by the claim being proved:
 
 | Test | Proves |
 |---|---|
+| dispatcher tests | a command has one destination, an event may have none, and four ways a contract set can fail to add up |
+| fan-out tests | one broken consumer delays neither the other consumers of that message nor the messages behind it |
+| process tests | a process manager refuses a step that already happened; a policy does not care what order facts arrive in |
+| websub tests | verification of intent, leases, per-subscriber signatures, and what a stranger is never shown |
 | vertical-slice tests | public module behavior and atomic outcomes against PostgreSQL |
 | contract tests | both implementations of each provider port honor the same promises |
 | integration tests | commands and events traverse four modules without shared transactions |
@@ -330,6 +334,10 @@ The suite is divided by the claim being proved:
 | delivery tests | fan-out failures and dead letters are isolated per consumer |
 | architecture tests | code, framework, provider and database boundaries remain intact |
 | pure tests | calculations and translations remain values in, values out |
+
+The first four are new in this lab, and the first two exist because the
+designs they check are the ones lab 28 got wrong: a single `publish` that hid
+cardinality, and a delivery record shared by every consumer of a message.
 
 The tests interact through public APIs and contracts. Pure business rules and
 translation functions are also tested directly because a pure core is useful

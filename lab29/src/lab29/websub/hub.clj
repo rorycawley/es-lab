@@ -25,7 +25,16 @@
   (:import (java.net URI)
            (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
                           HttpRequest$Builder HttpResponse$BodyHandlers)
-           (java.time Duration Instant)))
+           (java.time Duration Instant OffsetDateTime ZoneOffset)))
+
+(defn- ->timestamptz
+  "An `Instant` the JDBC driver will accept for a `timestamptz` column.
+
+  The clock deals in instants because a lease is a moment in time and not a
+  moment in a timezone. The driver wants an offset, so the conversion happens
+  here rather than leaking a database type into the clock."
+  [^Instant instant]
+  (OffsetDateTime/ofInstant instant ZoneOffset/UTC))
 
 (def ^:private opts {:builder-fn rs/as-unqualified-kebab-maps})
 
@@ -127,7 +136,8 @@
                  expires_at = EXCLUDED.expires_at,
                  attempts = 0, last_error = NULL"
           (new-id) topic callback secret lease
-          now now (Instant/ofEpochSecond (+ (.getEpochSecond ^Instant now) lease))])
+          (->timestamptz now) (->timestamptz now)
+          (->timestamptz (Instant/ofEpochSecond (+ (.getEpochSecond ^Instant now) lease)))])
         {:accepted {:topic topic :callback callback :lease-seconds lease}}))))
 
 (defn unsubscribe!
@@ -152,7 +162,7 @@
        FROM websub.subscription
       WHERE topic = ? AND verified_at IS NOT NULL AND expires_at > ?
       ORDER BY callback"
-    topic (clock)]
+    topic (->timestamptz (clock))]
    opts))
 
 ;; ---------------------------------------------------------------------------

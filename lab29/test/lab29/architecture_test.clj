@@ -302,6 +302,85 @@
     (is (not (str/includes? source "jdbc")))
     (is (not (re-find #"(?i)INSERT|UPDATE|SELECT" source)))))
 
+;; ---------------------------------------------------------------------------
+;; Messaging
+;; ---------------------------------------------------------------------------
+
+(deftest there-is-no-generic-publish-test
+  ;; The rule the messaging document asks to be visible in code. A single
+  ;; `publish` hides whether a message needs one handler or many, and lab 28's
+  ;; `platform/bus.clj` is gone precisely because it did.
+  (is (not (.exists (io/file "src/lab29/platform/bus.clj"))))
+  (doseq [file (clj-files "src/lab29")
+          :let [source (code-only (slurp file))]]
+    (is (not (re-find #"\(publish!\s" source))
+        (str file " calls a generic publish"))))
+
+(deftest every-module-declares-its-contract-test
+  ;; The routing table is derived from these, so a module that does not
+  ;; declare one cannot be routed to -- which makes the declaration load
+  ;; bearing rather than documentation.
+  (doseq [path ["src/lab29/catalog/api.clj" "src/lab29/ordering/api.clj"
+                "src/lab29/payments/api.clj" "src/lab29/notifications/api.clj"
+                "src/lab29/websub/adapter.clj"]]
+    (let [source (slurp (io/file path))]
+      (is (str/includes? source "(def contract") (str path " declares no contract"))
+      (doseq [k [":handles-commands" ":consumes-events"
+                 ":publishes-events" ":provides-queries"]]
+        (is (str/includes? source k) (str path " omits " k))))))
+
+(deftest a-module-knows-only-other-modules-contracts-test
+  ;; Lab 25's rule, generalised: a requester may depend on the requestee's
+  ;; public contract namespace and on nothing else it owns.
+  (doseq [module ["catalog" "ordering" "payments" "notifications"]
+          file (clj-files (str "src/lab29/" module))
+          required (requires (slurp file))
+          :when (and (str/starts-with? required "lab29.")
+                     (not (str/starts-with? required (str "lab29." module)))
+                     (not (str/starts-with? required "lab29.platform")))]
+    (is (str/ends-with? required ".contract")
+        (str (.getName file) " reaches past a public contract to " required))))
+
+(deftest queries-are-not-on-the-message-bus-test
+  ;; A query is synchronous and has one result. Putting one through the
+  ;; dispatcher would make it a command with a different name.
+  (let [routes (slurp (io/file "src/lab29/platform/contract.clj"))]
+    (is (str/includes? routes ":queries")
+        "queries are declared, so the contract is complete"))
+  (doseq [file (clj-files "src/lab29")
+          :let [source (code-only (slurp file))]]
+    (is (not (re-find #"(send-command!|publish-event!)[^\n]*get-(product|order|payment)"
+                      source))
+        (str file " dispatches a query"))))
+
+;; ---------------------------------------------------------------------------
+;; WebSub is not the internal bus
+;; ---------------------------------------------------------------------------
+
+(deftest no-business-module-knows-websub-exists-test
+  (doseq [module ["catalog" "ordering" "payments" "notifications"]
+          file (clj-files (str "src/lab29/" module))]
+    (is (not (re-find #"(?i)websub|hub\.|X-Hub" (code-only (slurp file))))
+        (str (.getName file) " names the external publication mechanism"))))
+
+(deftest websub-knows-contracts-and-nothing-behind-them-test
+  (doseq [file (clj-files "src/lab29/websub")
+          required (requires (slurp file))
+          :when (and (str/starts-with? required "lab29.")
+                     (not (str/starts-with? required "lab29.websub"))
+                     (not (str/starts-with? required "lab29.platform")))]
+    (is (str/ends-with? required ".contract")
+        (str (.getName file) " reaches into a module through " required))))
+
+(deftest the-public-projection-never-selects-star-test
+  ;; The one projection in the system whose readers are strangers. A column
+  ;; added to it later must not become public by accident.
+  ;; `code-only` again: the docstring in that file explains why it does not
+  ;; select a star, and prose about a rule is not a breach of it.
+  (let [source (code-only (slurp (io/file "src/lab29/websub/topics.clj")))]
+    (is (not (re-find #"SELECT \*" source)))
+    (is (not (str/includes? source "supplier_cost")))))
+
 (deftest the-pure-rule-stays-pure-test
   ;; Lab 0's criterion, still holding at lab 28 -- but the assertion had to
   ;; move, and saying so is the point.

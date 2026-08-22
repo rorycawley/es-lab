@@ -27,18 +27,23 @@
             [lab29.recorder :as recorder]
             [lab29.system :as system]))
 
+(def ^:private idle-consumers
+  "Payments and Notifications accept and do nothing, so these tests can call
+  their real handlers themselves and control exactly how often."
+  {:payments fixture/idle :notifications fixture/idle})
+
 (def vanilla #uuid "0f1c2b3a-0000-4000-8000-000000000026")
 
 (defn- delivered-to [summary consumer]
   (filterv #(= consumer (:consumer %)) (:delivered summary)))
 
 (defn- stocked-order!
-  "An order, and the delivery Payments would receive for it.
+  "An order, and the command Payments would receive for it.
 
-  These tests run with `:subscribe? false`, so the relay publishes to an empty
-  bus and hands the delivery back instead. That is not a test trick: it is the
-  state a deployment is in whenever a consumer is down, and it is the only way
-  to drive the consumer by hand and control exactly how often."
+  These tests substitute a capturing consumer for Payments, so the relay hands
+  the command over and nothing charges anything. That is not a test trick: it
+  is the state a deployment is in whenever a consumer is down, and it is the
+  only way to drive the consumer by hand and control exactly how often."
   [{:keys [catalog ordering] :as app} order-id]
   (catalog/change-price! catalog {:command-id (random-uuid)
                                   :correlation-id (random-uuid)
@@ -68,7 +73,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest a-redelivered-order-charges-once-test
-  (fixture/with-providers {:subscribe? false}
+  (fixture/with-providers {:handlers idle-consumers}
     (fn [{:keys [app stripe]}]
       (let [order-id (random-uuid)
             delivery (stocked-order! app order-id)]
@@ -82,7 +87,7 @@
 (deftest the-same-fact-in-a-new-envelope-charges-once-test
   ;; Lab 25's warning: an inbox keyed by message id would miss this. Ours is
   ;; keyed by the fact, and the payment row's state is the second guard.
-  (fixture/with-providers {:subscribe? false}
+  (fixture/with-providers {:handlers idle-consumers}
     (fn [{:keys [app stripe]}]
       (let [order-id (random-uuid)
             delivery (stocked-order! app order-id)]
@@ -110,7 +115,7 @@
                                           :gateway {:provider :given
                                                     :instance (chaos/crash-after-authorize healthy)}
                                           :emailer {:provider :memory})
-                                   {:subscribe? false})
+                                   {:handlers idle-consumers})
             order-id (random-uuid)
             delivery (stocked-order! app order-id)]
 
@@ -148,7 +153,7 @@
         app (system/start (assoc (postgres/config)
                                  :gateway {:provider :given :instance unreachable}
                                  :emailer {:provider :memory})
-                          {:subscribe? false})]
+                          {:handlers idle-consumers})]
     (try
       (let [order-id (random-uuid)
             delivery (stocked-order! app order-id)]
@@ -168,7 +173,7 @@
                 back    (system/start (assoc (postgres/config)
                                              :gateway {:provider :given :instance healthy}
                                              :emailer {:provider :memory})
-                                      {:subscribe? false})]
+                                      {:handlers idle-consumers})]
             (is (:accepted (payments/charge! (:payments back) delivery)))
             (is (= 1 (count (fake-stripe/intents provider))))
             (is (= "authorized" (:status (:found (payments/get-payment
@@ -186,7 +191,7 @@
                                  :emailer {:provider :sendgrid
                                            :base-url (:base-url provider)
                                            :api-key "SG.lab29"})
-                          {:subscribe? false})]
+                          {:handlers idle-consumers})]
     (try
       (let [order-id (random-uuid)
             delivery (stocked-order! app order-id)]
@@ -223,7 +228,7 @@
                                          :gateway {:provider :memory}
                                          :emailer {:provider :given
                                                    :instance (chaos/crash-after-send healthy)})
-                                  {:subscribe? false})
+                                  {:handlers idle-consumers})
             order-id (random-uuid)
             delivery (stocked-order! app order-id)]
         (payments/charge! (:payments app) delivery)
@@ -258,7 +263,7 @@
   ;; Two relays, two workers, one message picked up twice at the same instant.
   ;; Both threads reach the gateway; what saves the customer is that the
   ;; database, not the process, chose the payment id they both present.
-  (fixture/with-providers {:subscribe? false}
+  (fixture/with-providers {:handlers idle-consumers}
     (fn [{:keys [app stripe]}]
       (let [order-id (random-uuid)
             delivery (stocked-order! app order-id)
@@ -291,7 +296,7 @@
 (deftest what-the-provider-gives-you-bounds-what-you-can-promise-test
   ;; The lab in one assertion. Same architecture, same discipline, two
   ;; different guarantees -- and the difference is not in our code.
-  (fixture/with-providers {:subscribe? false}
+  (fixture/with-providers {:handlers idle-consumers}
     (fn [{:keys [app stripe sendgrid]}]
       (let [order-id (random-uuid)
             delivery (stocked-order! app order-id)]
