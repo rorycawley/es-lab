@@ -1,0 +1,25 @@
+{:paths ["src"]
+ ;; ---------------------------------------------------------------------------
+ ;; Clojure, and nothing else.
+ ;;
+ ;; That is a statement about the subject rather than minimalism for its own
+ ;; sake. This lab argues that configuration must not grow into a second
+ ;; programming language, and the closed check in `rules.clj` that enforces it
+ ;; is fifteen lines of `clojure.core`. Reaching for a schema library to police
+ ;; the shape of configuration would make the argument in prose while
+ ;; contradicting it in `deps.edn` -- and it would hide the check behind an
+ ;; abstraction, when the whole point is that you can read it.
+ ;;
+ ;; Everything here is also pure and deterministic. No clock, no `random-uuid`,
+ ;; no I/O. That is load bearing rather than tidy: a lab whose claim is *an
+ ;; unstamped decision re-runs differently* has to be able to re-run a decision
+ ;; and get a byte-identical answer, or it cannot tell you which difference was
+ ;; the configuration's fault.
+ ;; ---------------------------------------------------------------------------
+ :deps  {org.clojure/clojure {:mvn/version "1.12.5"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps  {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
+         :main-opts   ["-m" "kaocha.runner"]}
+  :demo {:extra-paths ["dev"]
+         :main-opts   ["-m" "lab33.demo"]}}}

@@ -237,12 +237,21 @@ more useful than a universal claim supported by a convenient benchmark.
 
 ## What's next
 
-Take the same proof shape to the real Lab 30 module: retain an anonymized query
-distribution, generate a representative filing corpus, measure each cascade
-rung and fall-through, record index build and memory cost, exercise concurrency
-and cold caches, and run from the geographies that use the service. Only that
-evidence can set a production latency objective or decide whether a local
-projection, batching, a different index, or less work is the right change.
+[Lab 32](../lab32) puts the sequence back on infrastructure and takes this
+lab's discipline with it. It makes PostgreSQL the event bus between two
+modules — one transaction for the state change and the event, a reconciler
+that polls, and `LISTEN`/`NOTIFY` for latency — and it refuses to claim the
+fast path is free: the whole correctness suite is replayed with the trigger
+disabled, and its one latency number is an improvement measured on the same
+machine in the same minute rather than an absolute anybody could quote.
+
+Before that, take the same proof shape to the real Lab 30 module: retain an
+anonymized query distribution, generate a representative filing corpus,
+measure each cascade rung and fall-through, record index build and memory cost,
+exercise concurrency and cold caches, and run from the geographies that use the
+service. Only that evidence can set a production latency objective or decide
+whether a local projection, batching, a different index, or less work is the
+right change.
 
 ## Sources
 

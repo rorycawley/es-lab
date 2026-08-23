@@ -6,7 +6,7 @@ It assumes the definition from [lab1](lab1):
 
 > **A domain event is a business fact that has already happened, published to nobody in particular, which cannot be refused.**
 
-Read Lab0 for the model and lab1 for the event definition. Come here when you need to decide what goes in an envelope, which id to use, or what to tell a DBA.
+Read [lab0](lab0) for the model and [lab1](lab1) for the event definition. Come here when you need to decide what goes in an envelope, which id to use, how a fact gets from one module to another without a dual write, or what to tell a DBA.
 
 [Lab0](lab0) is deliberately upstream of that definition. It establishes the pure business model whose changes later become events: a reduction to the rules that can change an answer, free of persistence, clocks and framework-shaped records. This reference starts at the first recorded fact, but every envelope and storage rule below exists to protect that model rather than replace it.
 
@@ -19,9 +19,11 @@ Claims are attributed to Evans, Young, Dahan, Microsoft or Fowler where they are
 - [Where does the aggregate boundary go?](#where-does-the-aggregate-boundary-go) — true invariants, atomicity, and contention
 - [What makes a snapshot safe?](#what-makes-a-snapshot-safe) — coherent cursors, fold versions, and rebuilds
 - [Identity](#identity) — which id, and who generates it
+- [How does the fact leave the store?](#how-does-the-fact-leave-the-store) — the dual write, at-least-once, ordering, and retention
 - [What the stream answers that no single event does](#what-the-stream-answers-that-no-single-event-does)
 - [What it won't answer](#what-it-wont-answer)
 - [Coordinators: policy, process manager, and "saga"](#coordinators-policy-process-manager-and-saga) — and why one of those words is best avoided
+- [Where the business rules live](#where-the-business-rules-live) — and the two that constrain the architecture
 
 ---
 
@@ -169,6 +171,20 @@ Trace context is the mechanism for the pivot, not a substitute for the correlati
 ---
 
 ## Where does the aggregate boundary go?
+
+**First, what an aggregate is here.** There is no object and no base class. An aggregate in these labs is a triple of pure values and functions:
+
+```clojure
+initial-state                    ; what is true before anything happened
+(evolve state event)   -> state  ; what a fact means             (lab6)
+(decide state command) -> [event] ; what may happen next          (lab8)
+```
+
+That is the whole of it, and the two labs introducing the halves are six apart, so the assembled thing is easy to miss — [lab8](lab8)'s `truck.clj` is where all three first sit together, and no lab stops to name what they add up to.
+
+`evolve` and `decide` are inseparable: `decide` checks a balance, `evolve` is what makes a balance, and neither is meaningful alone. A "domain model" holding one without the other has either rules with nothing to check them against, or state nobody is allowed to constrain.
+
+What the triple must not acquire is a clock, a database, an id generator or a logger. Those belong to the caller that builds the envelope, which is why [lab21](lab21) separates them and why [lab32](lab32) asserts the rule with a fitness function over its own source rather than trusting review.
 
 An event stream can implement an aggregate's history and optimistic-concurrency token, but the store cannot discover the aggregate for you. Start with a **true invariant**: a business rule that must hold when one transaction commits. Choose the smallest boundary whose own state can decide that rule, and modify one aggregate instance per transaction as the usual goal. Vernon presents “model true invariants,” “design small aggregates,” “reference by identity,” and “use eventual consistency outside the boundary” as rules of thumb, not a mechanical partitioning algorithm. [Lab16](lab16) measures the trade-off.
 
@@ -351,6 +367,51 @@ Because that's the only job, the question under sharding isn't "how do I preserv
 
 ---
 
+## How does the fact leave the store?
+
+Everything above concerns one appended fact. This is the other half of a working system: a fact recorded in one place has to reach whoever reacts to it, and the mechanisms are not interchangeable. [Lab12](lab12) introduces the problem, [lab20](lab20) adds the receiving side, and [lab32](lab32) makes the whole path a single code path.
+
+**The dual write is the failure to design against.** Append the event, then publish it, and there is a window where the state changed and nobody was told. Publish first and the window inverts. No retry policy closes it, because the process can stop between the two writes. The fix is that there is no second write: the event and a row in an outbox table commit in **one transaction against one database**.
+
+This is worth stating as a property of a function signature rather than as a principle, because that is where it is enforced or lost:
+
+```clojure
+(outbox/enqueue! tx message)     ; correct — joins the caller's transaction
+(outbox/enqueue! datasource msg) ; a dual write, with no flag to turn it off
+```
+
+Two events in the same aggregate, an outbox row, and a command-ledger entry are all one commit. Whatever the transaction cannot reach — an email, a card charge, a remote service — is outside the guarantee and needs its own idempotency boundary; an inbox claim is atomic with an effect only when that effect is a local write.
+
+**Delivery is at-least-once, and that is the honest ceiling.** Exactly-once delivery across a boundary is not available; exactly-once *effect* is, and it is bought at the receiving end. An inbox keyed by the **fact's** `event_id` and a unique constraint turns redelivery into a no-op:
+
+```sql
+INSERT INTO consumer.inbox (event_id, …) VALUES (…) ON CONFLICT (event_id) DO NOTHING
+```
+
+Key it on the fact and never on the envelope. A republished message arrives in a new envelope carrying a new `message_id`, so deduplicating on that lets the second copy straight through. [Lab4](lab4#three-shapes-three-ids) draws the distinction and [lab12](lab12#at-least-once-and-who-pays-for-it) has a test for the version that gets it wrong.
+
+This is also why the same id has to work at both ends. An ambiguous append retry must carry the id the first attempt used, which is the argument for generating `event_id` in the application rather than in the DDL — and it is that same stable id the consumer's unique constraint later recognises. Two requirements, one column, and it stops working if either end mints its own.
+
+**Latency is a separate question from correctness, and mixing them is the common design error.** A relay that polls is correct and slow; its worst case is one polling interval. `LISTEN`/`NOTIFY` makes it fast, and it is tempting to treat the notification as the delivery mechanism. It is not one:
+
+- `NOTIFY` is **at-most-once**. If no session is subscribed when it fires, the signal is discarded and nothing raises an error. Every deployment passes through that state on every restart.
+- A notification arrives only after commit and only between transactions, so a long-running dispatcher transaction delays every signal behind it.
+- The JDBC driver has no asynchronous callback and must poll the backend, on a dedicated connection that cannot come from a pool — `LISTEN` is session state, and a pooled connection is reset and handed to somebody else.
+
+So the reconciler is not a fallback that a mature system outgrows; it is what makes a lost signal cost latency instead of an event. The property worth designing for is that **the notification and the timer trigger the same drain function**, so the fast path holds no delivery logic of its own and can be removed to prove it. [Lab32](lab32) runs its whole correctness suite three times — trigger absent, trigger present with nobody listening, and listener running — and requires identical outcomes.
+
+Keep the signal empty. Postgres may fold identical notifications emitted in one transaction into a single delivery, which is exactly what a doorbell wants and would silently lose events if the signal identified a particular row.
+
+**Ordering is not free and is not the default.** Claiming rows with `FOR UPDATE SKIP LOCKED` gives throughput and no ordering guarantee whatsoever: a concurrent relay takes the rows this one stepped over. To get per-aggregate order, claim the *partition* rather than the row — an advisory lock on a hash of the aggregate id, held for the transaction so it releases on commit or crash with no cleanup path.
+
+The price is worth knowing before paying it: **in-order delivery and per-message failure isolation are not both available.** If a partition's messages are handled in one transaction and the third of five throws, the first two roll back with it. Committing the first two and dead-lettering the third would let the fourth and fifth apply to a state that never saw the third, which is the outcome the lock exists to prevent. What survives is isolation *between* partitions. A system claiming both properties has quietly stopped providing one.
+
+**The queue and the history have opposite lifetimes.** An outbox row and an event row can hold nearly the same bytes and are not the same kind of thing. The outbox is a work list: once every consumer is finished with a row it is rubbish, and processed rows are pruned — 24 hours is the usual window. The event stream is the record, and nothing prunes it. A system that cannot tell the two apart either keeps its queues forever or prunes its history.
+
+Two consequences follow. Prune by status *and* age, never age alone: a message pending for a day is the single most interesting row in the table, and deleting it turns a visible backlog into a silent loss. And a read model stays rebuildable after the queues are gone, because it is derived from facts rather than recovered from transport — which is the argument for this whole arrangement over a broker whose retention window is the only durability it has.
+
+---
+
 ## What the stream answers that no single event does
 
 **What was true at a point in time.** A stream prefix through version N is exact. Wall-clock questions require choosing transaction time or valid time, which are not the same question ([lab18](lab18)). Filtering and reordering events by effective time is safe only for a projection designed for that operation; it is not a general way to rehydrate an aggregate. Rare investigations may replay, while runtime temporal requirements deserve a purpose-built bitemporal projection or database model.
@@ -419,6 +480,44 @@ Use a local ACID transaction whenever the invariant fits inside one consistency 
 
 So: **there is no coherent third thing.** There is a coordinator, which either holds state or doesn't, and there is compensation, which you need when you can't have a transaction. Those are the two ideas. `Policy` and `process manager` name the first pair with stable definitions; `compensating transaction` names the second without ambiguity. [Lab14](lab14) implements the compensating action and shows that compensation can itself fail. Reach for those three, and if someone says "saga", ask which axis they mean.
 
+---
+
+## Where the business rules live
+
+With the aggregate and the coordinator both defined, the question of where a business rule is allowed to sit has a short answer:
+
+> **Aggregates and policies.** Aggregates hold the rules that can *refuse*; policies hold the rules that *cause*.
+
+Those two are the ones that constrain the architecture, and it is worth being explicit about why, because it is not symmetry:
+
+- An **invariant** must be checked inside the transaction that appends, against state folded from real history, or it is decoration. That is what forces a consistency boundary, and why `UNIQUE (stream_id, version)` is load bearing rather than hygiene — without it, two commands both read a balance of 100, both permit a withdrawal of 100, and both commit.
+- A **policy** must survive running twice, because delivery is at-least-once. That is what forces the inbox.
+
+Neither constraint applies to the other two places domain knowledge legitimately sits. `evolve` is a total function of state and a fact that already happened; it cannot refuse and has nothing to make idempotent. A projection keyed on `event_id` absorbs repetition for free, which is why a **classification rule** — *a movement over 10,000 is reportable* — can live in a projection without ceremony. It is a real business rule and it needs no aggregate, because it decides how a fact is described rather than whether it may occur.
+
+That last case is worth recognising rather than fixing. A module whose only rule cannot find an aggregate to live in is telling you it is read-side, and [lab9](lab9)'s rule applies instead: drop the read model, rebuild it, and every answer must be identical. [Lab32](lab32)'s compliance module is exactly this shape — no `decide`, no `evolve`, one threshold, and a replay test holding it to that promise.
+
+What should never hold a business rule is the transport. A dispatcher, relay, inbox worker or listener that knows what a reportable amount is has taken a rule out of the domain and put it somewhere nobody thinks to read.
+
+### Which of them may be configuration
+
+A second question cuts across the same locations, and it is not "is this rule stable?" — nothing is. It is **what happens to answers already given when somebody changes the setting.**
+
+| Location | Configurable? | Because |
+|---|---|---|
+| `evolve` | **never** | the same stream folds differently, nothing throws, and lab 17's fold version cannot detect it because the code did not change |
+| `decide`, `isTerminal` | parameters only, **recorded** | a decision must stay reproducible, so whatever it read belongs on the event |
+| policies | **yes — the best home** | the output is a request the target aggregate validates anyway, and a policy is forward-only |
+| projections | current views yes; as-of views no | rebuild and reclassify are the same operation, which is right for *now* and wrong for *then* |
+
+Two consequences are worth carrying even if you never build [lab33](lab33). A parameter that `decide` used goes in `:data` when it is part of what happened and in `:metadata` when it is only why the decision went that way — otherwise re-running the decision later reaches a different verdict and presents as a discrepancy rather than a defect. And a parameter that must be correct *as of* a past date has stopped being configuration: it needs its own history with effective dates, which is to say a stream, at which point the "configuration" is a projection and everything above applies to it.
+
+The line underneath all of it is **values, not structure**. A threshold is a value. A predicate expressed as data needs an interpreter, and an interpreter makes the configuration a programming language with no type checker, no tests, no review and no `git blame` — whose characteristic failure is a misspelled field that matches nothing forever and reads as a quiet month.
+
+**One kind of structure earns an exemption**, and the reason is narrow enough to state as a test. A process manager's transition table needs no interpreter — only a lookup — and every way of getting it wrong is decidable before it runs: a transition landing nowhere, an unreachable step, a dead end, a state both terminal and not, a command no module handles. If a shape can be checked exhaustively it may be data; if it cannot, it is a rules engine wearing a different hat. [Lab34](lab34) builds the five checks and the guard clause it refuses to add.
+
+The price of that exemption is the thing a policy never has to pay. A process manager has **instances already running**, so a definition change reaches them — and the fix is the stamping rule again, one level up: an instance pins the version it started under, two definitions run at once, and a change that would strand somebody is refused rather than applied. Publishing a breaking version and migrating the instances inside it turn out to be inseparable, because each order is blocked by the other.
+
 ## Sources
 
 - **Eric Evans**, *Domain-Driven Design Reference* (2015) — the Domain Event pattern: full-fledged part of the domain model, the selection filter, distinctness from system events, derived identity.
@@ -436,27 +535,56 @@ So: **there is no coherent third thing.** There is a coordinator, which either h
 - **Microsoft**, [*A Saga on Sagas*](https://learn.microsoft.com/en-us/previous-versions/msp-n-p/jj591569(v=pandp.10)) (CQRS Journey) — why they refused the word for coordinators.
 - **Oskar Dudycz**, [*Saga and Process Manager*](https://event-driven.io/en/saga_process_manager_distributed_transactions/) — the stateless/stateful split, opposite to the NServiceBus usage.
 - **Jimmy Bogard**, [*Modularizing the Monolith*](https://www.youtube.com/watch?v=fc6_NtD9soI) — vertical slices, strict module contracts, database ownership, and refactoring towards extractable boundaries.
+- **Revolut Tech**, [*Recording more events… But where will we store them?*](Recording_more_events…_But_where_will_we_store_them.md) — a transactional log table rather than a broker, `LISTEN`/`NOTIFY` for the low-latency path, a reconciler resending anything unpublished, and 24-hour retention on the queue while the history is kept. Their stated reasons for rejecting Kafka were ad-hoc queries, querying by time, and guaranteed consistency between a state change and the event announcing it — not throughput.
+- **PostgreSQL 18 documentation**, [`NOTIFY`](https://www.postgresql.org/docs/18/sql-notify.html) — at-most-once delivery, the folding of identical notifications within a transaction, and the size limit; [`SKIP LOCKED`](https://www.postgresql.org/docs/18/sql-select.html#SQL-FOR-UPDATE-SHARE) and [advisory locks](https://www.postgresql.org/docs/18/explicit-locking.html#ADVISORY-LOCKS) for queue claiming; and [READ COMMITTED](https://www.postgresql.org/docs/18/transaction-iso.html#XACT-READ-COMMITTED) on what is re-checked when a blocked update is unblocked, which is not what most people assume.
+- **pgjdbc**, [listening for notifications](https://jdbc.postgresql.org/documentation/server-prepare/#listen--notify) — the driver cannot receive asynchronous notifications and must poll, which is why a listener is a thread and a dedicated connection rather than a callback.
 
 ## Where to go next
 
+Every lab, in order, with what it contributes to the material above. The [README](README.md) has the same list as a table with the one idea each lab introduces.
+
+**The vocabulary** — what the words mean before any of them is stored.
+
 - [lab0](lab0) — the reduced, pure business model whose changes the event history records
 - [lab1](lab1) — what an event is, and the envelope/data split this document builds on
+- [lab2](lab2) — a command: addressed to one handler, and refusable
+- [lab3](lab3) — an integration message, and where `:payload` is the right word for something in transit
 - [lab4](lab4) — identity versus identifiers in code: UUIDv7, and why allocating one is an effect
+- [lab5](lab5) — cardinality: one command, zero-to-many events, zero-to-many messages
+
+**The mechanics** — the aggregate, assembled from two halves six labs apart.
+
+- [lab6](lab6) — `evolve`, and state as a fold rather than a thing you keep
 - [lab7](lab7) — `:stream/id` and `:stream/version`, with optimistic concurrency
+- [lab8](lab8) — `decide`, and the read-fold-decide-append loop the rest of this document assumes
 - [lab9](lab9) — projections, checkpointing, and rebuilds
 - [lab10](lab10) and [lab11](lab11) — causation, correlation, policies, and process managers
+- [lab12](lab12) — the dual write, the outbox, and who pays for at-least-once
+
+**The hard cases** — the sections above exist because of these.
+
 - [lab13](lab13) — tolerant reads, schema versions, and upcasters
 - [lab14](lab14) — compensating actions and observable refusals
 - [lab15](lab15) — personal data and erasure in an append-only history
 - [lab16](lab16) — aggregate boundaries, true invariants, and structural contention
 - [lab17](lab17) — disposable snapshots, coherent cursors, and fold compatibility
 - [lab18](lab18) — the two time axes and the rules required to reconstruct a decision
+
+**Against a real database and a real network.**
+
 - [lab19](lab19) — the Postgres schema and a demonstrated `global_position` visibility gap
+- [lab20](lab20) — command ledgers, outboxes, and inboxes where metadata alone is insufficient
+- [lab21](lab21) — ports, adapters, and the composition root that supplies identity and time
+- [lab22](lab22) — validating at the edge, and why a schema is not a business rule
+- [lab23](lab23) — HTTP as a driving adapter: name the act, not the entity
+- [lab24](lab24) — actor metadata, authentication, and why authority does not propagate
+- [lab25](lab25) — vertical slices, closed module APIs, module-owned schemas, and idempotent contracts between capabilities
 - [lab26](lab26) — the other record: logs, traces and metrics, and the line between them and this one
 - [lab27](lab27) — a search index as a projection, and the configuration that is its fold version
 - [lab28](lab28) — network fallacies: bounded retries, deadlines, circuit breaking, provider-bounded idempotency, secure webhooks, and dead letters
 - [lab29](lab29) — WebSub at the external boundary: topics as public resources, verified subscriptions, leases, and isolated fan-out
 - [lab30](lab30) — multilingual legal-name lookup: Unicode folding, language-specific text search, German compounds, and a staged search cascade
-- [lab20](lab20) — command ledgers, outboxes, and inboxes where metadata alone is insufficient
-- [lab24](lab24) — actor metadata, authentication, and why authority does not propagate
-- [lab25](lab25) — vertical slices, closed module APIs, module-owned schemas, and idempotent contracts between capabilities
+- [lab31](lab31) — why a latency claim needs a declared workload, held-out inputs and a budget before it means anything
+- [lab32](lab32) — the database as the event bus: one transaction, a doorbell that is removable, per-partition ordering, and the queries a retention window cannot answer
+- [lab33](lab33) — which of these places may hold a rule as *configuration*, decided by whether changing it can reach the past
+- [lab34](lab34) — the one exemption: a process definition as data, proved complete before it runs, and pinned once an instance is inside it

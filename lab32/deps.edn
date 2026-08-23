@@ -1,0 +1,61 @@
+{:paths ["src" "resources"]
+ :deps  {org.clojure/clojure               {:mvn/version "1.12.5"}
+
+         ;; ---------------------------------------------------------------
+         ;; The database is the architecture, so the driver is not an
+         ;; incidental choice.
+         ;;
+         ;; This is the standard pgjdbc, deliberately, and not `pgjdbc-ng`.
+         ;; The latter offers real asynchronous notification callbacks, which
+         ;; would make `messaging/listener.clj` shorter and less interesting.
+         ;; It is also a non-standard driver, and a lab arguing that you do
+         ;; not need a broker should not quietly acquire a second driver to
+         ;; make the argument work. The polling workaround is honest about
+         ;; what JDBC actually gives you.
+         ;; ---------------------------------------------------------------
+         com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
+         org.postgresql/postgresql         {:mvn/version "42.7.3"}
+
+         ;; A real pool, for the first time in the sequence. Labs 19 to 29 ran
+         ;; every query through an unpooled `jdbc/get-datasource`, which was
+         ;; fine because nothing in them held a connection for longer than a
+         ;; statement. This lab has a dispatcher, a reconciler, inbox workers
+         ;; and HTTP all wanting connections at once, and a listener that must
+         ;; NOT come from the pool at all -- see `messaging/listener.clj`.
+         com.zaxxer/HikariCP               {:mvn/version "6.2.1"}
+
+         ;; Component returns, after five labs without it.
+         ;;
+         ;; Labs 25 to 29 dropped it for a plain composition-root function,
+         ;; because nothing they built had a lifecycle worth managing: a module
+         ;; was a map of closures over a datasource, and "stopping" it meant
+         ;; nothing. This lab has a thread blocked on a socket, a scheduled
+         ;; executor, and a pool -- three things that must be started in an
+         ;; order and stopped in the reverse one, or the test suite leaks
+         ;; threads into the next test.
+         com.stuartsierra/component        {:mvn/version "1.1.0"}
+
+         org.clojure/data.json             {:mvn/version "2.5.0"}
+         metosin/malli                     {:mvn/version "0.16.4"}
+
+         org.clojure/tools.logging         {:mvn/version "1.3.0"}
+         ch.qos.logback/logback-classic    {:mvn/version "1.5.38"}
+
+         ;; Lab 23's rule, still enforced by `architecture_test.clj`: the web
+         ;; framework is named by the driving adapter and the composition root,
+         ;; and by nothing else.
+         metosin/reitit-ring               {:mvn/version "0.7.2"}
+         ring/ring-core                    {:mvn/version "1.12.2"}
+         ring/ring-jetty-adapter           {:mvn/version "1.12.2"}}
+
+ :aliases
+ {:test {:extra-paths ["test" "dev"]
+         :jvm-opts    ["-Dlab32.console.level=OFF"]
+         :extra-deps  {lambdaisland/kaocha               {:mvn/version "1.91.1392"}
+                       org.testcontainers/postgresql     {:mvn/version "1.20.4"}
+                       org.testcontainers/testcontainers {:mvn/version "1.20.4"}}
+         :main-opts   ["-m" "kaocha.runner"]}
+  :demo {:extra-paths ["dev"]
+         :extra-deps  {org.testcontainers/postgresql     {:mvn/version "1.20.4"}
+                       org.testcontainers/testcontainers {:mvn/version "1.20.4"}}
+         :main-opts   ["-m" "lab32.demo"]}}}

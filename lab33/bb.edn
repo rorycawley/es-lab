@@ -1,0 +1,57 @@
+{:paths ["src" "dev" "test"]
+ :tasks
+ {:requires ([babashka.process :refer [shell]])
+
+  :init (defn sh [& args]
+          (binding [*out* *err*]
+            (apply println "+" (remove map? args)))
+          (apply shell args))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task             (do (println "")
+                         (println "Prerequisites:")
+                         (println "  1. Install mise: curl https://mise.run | sh")
+                         (println "  2. Run: mise install")
+                         (println "")
+                         (println "No Docker. This lab is pure Clojure.")
+                         (println "")
+                         (println "Then:")
+                         (println "  bb demo            (what a threshold change reaches)")
+                         (println "  bb all             (install tools + check + test + demo)")
+                         (println "  bb tasks           (list all available tasks)")
+                         (println ""))}
+
+  setup
+  {:doc  "Trust mise.toml and install all declared tools"
+   :task (do (sh "mise" "trust")
+             (sh "mise" "install"))}
+
+  lint
+  {:doc  "Lint with clj-kondo"
+   :task (sh "clj-kondo" "--parallel" "--lint" "src:dev:test")}
+
+  fmt:check
+  {:doc  "Check code format with cljfmt"
+   :task (sh "cljfmt" "check" "src" "dev" "test")}
+
+  fmt:fix
+  {:doc  "Reformat code with cljfmt"
+   :task (sh "cljfmt" "fix" "src" "dev" "test")}
+
+  check
+  {:doc     "Run static checks"
+   :depends [lint fmt:check]}
+
+  test
+  {:doc  "Run the suite"
+   :task (sh "clojure" "-M:test")}
+
+  demo
+  {:doc  "Raise the reporting threshold and see what it reaches"
+   :task (sh "clojure" "-M:demo")}
+
+  all
+  {:doc     "Setup, check, test and demo"
+   :depends [setup check test demo]}}}

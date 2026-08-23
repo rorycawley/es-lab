@@ -29,6 +29,59 @@ Three things about that signature, each settled by an earlier lab.
 
 **It is where context-dependent business rules may say no.** [Lab 6](../lab6) made the point from the other side: `evolve` does not re-judge a supported recorded fact, because by the time that event exists the thing already happened. `decide` runs while the business answer is still open. Boundary validation, authorisation and an optimistic-concurrency conflict may also reject work, but those are different questions at different boundaries.
 
+## The shape has a name
+
+`decide` and `evolve` are not two functions that happen to share a namespace. Together with the state they start from they form a **Decider**, which Jérémie Chassaing gives as four parts:
+
+```fsharp
+type Decider<'c,'e,'s> =
+    { decide: 'c -> 's -> 'e list
+      evolve: 's -> 'e -> 's
+      initialState: 's
+      isTerminal: 's -> bool }
+```
+
+Three of them are in `truck.clj`, with the argument orders matching:
+
+| Decider | Here | Answers |
+|---|---|---|
+| `decide: 'c -> 's -> 'e list` | `(decide command state)` | what may happen next |
+| `evolve: 's -> 'e -> 's` | `(evolve state event)` | what a fact means |
+| `initialState: 's` | `(def initial-state {})` | what is true before anything happened |
+| `isTerminal: 's -> bool` | — | whether there is anything more to say |
+
+**`isTerminal` is the one missing, and its absence is a property of this domain rather than an omission to fix later.** It answers whether a state is final, so the thing can be archived and further commands refused. A truck's stock has no such state — it is loaded, sold from, and loaded again. A closed account, a completed order or a cancelled subscription does, and Chassaing's advice is to decide that up front rather than discover it when the store is full of streams nobody will ever append to again.
+
+The value of the name is that it tells you when you have half a model. A "domain object" with rules but no fold has nothing to check them against; one with a fold but no rules is a data structure. Neither is a Decider, and neither is enough.
+
+**And a Decider is one aggregate, not a system.** It says what may happen and what a fact means; it has nothing to say about what should happen *next*. Ismael Celis names that third step **react**, giving the trio *decide, evolve, react*:
+
+```clojure
+decide : command -> state -> [event]     ; here
+evolve : state -> event -> state         ; here, from lab 6
+react  : event -> [command]              ; lab 10
+```
+
+`react` is this repository's **policy** ([lab10](../lab10)), and the stateful variant that folds its own history first is the **process manager** ([lab11](../lab11)). Both return commands rather than performing effects, which keeps them as testable as `decide` — the dispatching is the application's job, and is the same choice this lab makes by having `decide` return proposals instead of writing them.
+
+## The invariants live in `decide`
+
+An **invariant** is a business rule that must hold whenever a change is committed — here, *the truck cannot sell a cone it does not have*. It goes in `decide`, and it is worth walking the places it cannot go, because each is somewhere people reasonably try to put it.
+
+**Not in `evolve`.** A fold is handed facts that already happened. An `evolve` that refused an event would be claiming something did not occur after it did, and the history would then disagree with the state derived from it.
+
+**Not at the edge as validation.** [Lab22](../lab22) draws the line, and it is a difference of inputs. Validation is a function of the request alone — *quantity must be a positive integer* needs nothing else to answer. An invariant is a function of the request **and the history**: whether this sale is allowed depends on every load and every sale before it. That is exactly why `decide` takes state and a validator does not.
+
+**Not in the database as a constraint.** A `CHECK` sees one row. The number this rule needs — how many vanillas remain — is a fold over the whole stream, and it is not stored anywhere for a constraint to look at.
+
+**Not in a projection.** A read model is derived and allowed to lag ([lab9](../lab9)). Deciding against one means deciding against a possibly stale answer, and nothing about a stale read stops the append that follows it.
+
+So: `decide` is the only place with both the rule and the state the rule is about, in the same pure function, before anything is recorded.
+
+**And the rule is only as good as the fold being current.** This is the part that is easy to miss, and [The loop](#the-loop) below is where it is paid for. `decide` checked its answer against a state folded from a particular history. If another writer appends between that fold and this append, the decision was made about a truck that no longer exists. Two tills both fold `{"vanilla" 1}`, both decide the sale is fine, both append — and the invariant held in both decisions while being false in the resulting history.
+
+The rule lives in `decide`. Its *enforcement* is `decide` plus the version condition on the append, and neither half is sufficient alone. [Lab16](../lab16) then asks the harder question: which invariants have to be immediate at all, and what a boundary costs when it is drawn to keep one.
+
 ## What decide returns, and what it doesn't
 
 Look closely at the event above. No `:event/id`, no `:stream/id`, no `:stream/version`:
@@ -105,6 +158,8 @@ The gap after the consistent read is where optimistic concurrency matters. Two t
 
 Note the second sale correctly emits `stock-depleted`, which the stale decision would have missed entirely. Retrying is not a formality — the answer genuinely changed.
 
+This is the enforcement half of the invariant. `decide` refuses a sale from an empty truck, and the version condition is what guarantees the truck it was told about is the truck being appended to. Take the condition away and `decide` still contains the rule, still returns the right answer for the state it was given, and the log still ends up holding two sales of one cone.
+
 As in Lab7, the immutable log is a deterministic model of compare-and-append rather than concurrent storage. It detects the stale version only when the second call receives the winner's updated log. A real store must make the version condition and write atomic.
 
 **The batch must land together.** `append` takes all of `decide`'s events and gives them consecutive versions under one version check. With immutable values that is naturally all-or-nothing: either a new value is returned or the old one remains. A production adapter needs a transaction providing the same guarantee. Otherwise another writer could interleave an event between `flavour-sold` and `stock-depleted`, or only half the decision could be recorded.
@@ -123,3 +178,10 @@ The four-step decision loop is complete, not the production write side. A comman
 bb all      # setup, check, test
 bb test     # just the tests
 ```
+
+## Sources
+
+- **Jérémie Chassaing**, [*Functional Event Sourcing Decider*](https://thinkbeforecoding.com/post/2021/12/17/functional-event-sourcing-decider) (2021) — the four-part Decider, the insistence that `decide` stays pure and that `evolve` does only simple state application, and the argument for designing terminal states up front rather than discovering you need them.
+- **Ismael Celis**, [*The Decide, Evolve, React pattern*](https://ismaelcelis.com/posts/decide-evolve-react-pattern-in-ruby/) — names the third step and, in its later form, has `react` return commands for the application to dispatch rather than perform effects itself. That is the form [lab10](../lab10) implements; the article shows the effectful version first, which is worth seeing to know what it costs in testability.
+- **Vaughn Vernon**, [*Effective Aggregate Design*](https://www.dddcommunity.org/library/vernon_2011/) (2011) — true invariants as the thing that decides a consistency boundary, which is what [lab16](../lab16) measures.
+- [REFERENCE.md](../REFERENCE.md#where-does-the-aggregate-boundary-go) collects the aggregate, invariant and identity material in one place.

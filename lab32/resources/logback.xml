@@ -1,0 +1,31 @@
+<!--
+  One destination, and a switch for the suite.
+
+  Lab 26 bridged logging into OpenTelemetry, because that lab was about
+  telemetry. This one is not, so logging here is what it was before: a way for
+  the listener supervisor to say it lost its connection and is reconnecting.
+
+  The suite sets lab32.console.level=OFF, because a reconnect is expected in
+  listener_test.clj, which kills the connection on purpose, and a stack trace
+  printed by a passing test teaches the reader to ignore stack traces.
+-->
+<configuration>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+      <level>${lab32.console.level:-INFO}</level>
+    </filter>
+    <encoder>
+      <pattern>%-5level %-30logger{0} %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="lab32" level="INFO" additivity="false">
+    <appender-ref ref="CONSOLE"/>
+  </logger>
+
+  <root level="WARN">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+
+</configuration>

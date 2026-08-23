@@ -1,0 +1,24 @@
+{:paths ["src"]
+ ;; ---------------------------------------------------------------------------
+ ;; Clojure, and nothing else. Lab 33's constraint, kept for a sharper reason.
+ ;;
+ ;; This lab's claim is that a process definition may be data *because it can
+ ;; be proved complete before it runs*. The five checks in `definition.clj` are
+ ;; that proof, and they are ordinary functions over ordinary maps. A workflow
+ ;; library would supply them and hide them, which would leave the argument
+ ;; resting on somebody else's implementation instead of on something a reader
+ ;; can check in one sitting.
+ ;;
+ ;; Everything is pure and deterministic. No clock, no `random-uuid`, no I/O,
+ ;; and time is an argument (lab 11). That is load bearing rather than tidy: a
+ ;; lab whose claim is *this instance would have landed in a different state*
+ ;; has to be able to fold the same events twice and get the same answer, or it
+ ;; cannot tell you which difference the definition caused.
+ ;; ---------------------------------------------------------------------------
+ :deps  {org.clojure/clojure {:mvn/version "1.12.5"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps  {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
+         :main-opts   ["-m" "kaocha.runner"]}
+  :demo {:extra-paths ["dev"]
+         :main-opts   ["-m" "lab34.demo"]}}}

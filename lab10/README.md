@@ -27,6 +27,8 @@ Three things about that signature, each settled by an earlier lab.
 
 **It takes an event and nothing else.** No store, no state, no clock. A policy is a pure function, and the tests assert that the same event produces the same commands. (A policy that needs to remember where it has got to is a *process manager* — same idea plus state, and the subject of lab 11.)
 
+The name is not local to this repository. [Lab8](../lab8#the-shape-has-a-name) introduces the Decider — `decide` and `evolve` together — and `react` is the third step that completes it: an aggregate says what may happen, a policy says what happens next. Note what it returns. A `react` that sent the email itself would be untestable without a mail server, which is the same reason [lab8](../lab8)'s `decide` returns proposals rather than writing them.
+
 **It returns a vector**, because [lab5](../lab5)'s counting applies one message further along: an event may provoke no commands, one, or several.
 
 **It has no opinion about most known events.** Those deliberately irrelevant facts have explicit methods returning `[]`. The `:default` method throws: an event type this reader does not understand might require a reaction, so silently checkpointing past it would lose work. Deploy readers that understand a new event before writers begin recording it, just as in [lab6](../lab6) and [lab9](../lab9).

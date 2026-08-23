@@ -21,7 +21,11 @@ decide : command -> state -> [event]
 decide : state -> now -> [command]
 ```
 
-Same shape, two substitutions: it emits **commands** rather than events, and it takes **time** as an input. The state comes from a fold, exactly as in [lab6](../lab6):
+Same shape, two substitutions: it emits **commands** rather than events, and it takes **time** as an input.
+
+That reuse has a name. [Lab8](../lab8#the-shape-has-a-name) calls `decide` plus `evolve` a Decider; a process manager is one whose decisions come out as commands, which makes it [lab10](../lab10)'s `react` with a fold in front of it and a clock beside it.
+
+The state comes from that fold, exactly as in [lab6](../lab6):
 
 ```clojure
 (defmethod evolve :stock-depleted   [_ event] {:status :awaiting-unload …})
