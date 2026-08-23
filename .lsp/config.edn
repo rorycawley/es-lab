@@ -6,22 +6,49 @@
 ;; every archived attempt has its own root, deps.edn and toolchain -- and a
 ;; namespace only resolves relative to the project that owns it.
 ;;
+;; ---------------------------------------------------------------------------
+;; Ignored trees
+;;
 ;; Analysed as a single workspace, the archived projects produce findings that
 ;; are not true. `registry.server/build-router is called with 0 args but
 ;; expects 3` names a function that takes none; `Unresolved var: post-json`
 ;; names a var defined nine lines above its use. Lint the same files from
 ;; their own roots and both report zero errors and zero warnings.
 ;;
-;; So clojure-lsp is told not to look at them. `.clj-kondo/config.edn` carries
-;; the matching `:output :exclude-files` for the command line, and the two must
-;; agree or the editor and CI are back to giving different answers -- which is
-;; the exact problem that file already exists to solve.
+;; `.clj-kondo/config.edn` carries the matching `:output :exclude-files` for
+;; the command line, and the two must agree or the editor and CI are back to
+;; giving different answers -- which is the exact problem that file exists to
+;; solve. `target.*` is clojure-lsp's own default and has to be repeated,
+;; because setting this key replaces it rather than adding to it.
 ;;
-;; The labs are deliberately not ignored. A finding in lab0..lab34 is real and
-;; should stay loud; a Problems panel that is permanently red is one nobody
-;; reads, which costs more than the warnings it is hiding.
+;; ---------------------------------------------------------------------------
+;; unused-public-var, and why it is off
+;;
+;; This one is switched off knowing the findings were accurate. They were
+;; checked: `lab29.payments.api/dead-letters` really has no caller, and so do
+;; another fifty-odd vars across labs 15 to 29.
+;;
+;; What is wrong is the linter's premise, not its analysis. It assumes an
+;; unreferenced public var is dead code to delete. In a teaching repository it
+;; usually is not. Lab 29 gives Catalog, Ordering and Payments the same
+;; nine-function API -- `dead-letters`, `revive!`, `audit-log` and the rest --
+;; *because the symmetry is the lesson*, and the suite happens to exercise
+;; dead-lettering through Catalog only. Deleting Payments' copy to satisfy the
+;; linter would damage the thing the lab is demonstrating.
+;;
+;; The cost of leaving it on is worse than the noise it reports: fifty-nine
+;; permanent entries train a reader to ignore the panel, and the next real
+;; finding arrives into a list nobody looks at. clj-kondo still runs over every
+;; lab, and `bb lint` in each lab is still zero errors and zero warnings.
+;;
+;; If you want the report anyway, it is one command and no configuration:
+;;
+;;     clojure-lsp diagnostics
+;; ---------------------------------------------------------------------------
 {:source-paths-ignore-regex ["target.*"
                              "archive.*"
                              ".*\\.clj-kondo/imports.*"
                              ".*\\.clj-kondo/\\.cache.*"
-                             ".*\\.lsp/\\.cache.*"]}
+                             ".*\\.lsp/\\.cache.*"]
+
+ :linters {:clojure-lsp/unused-public-var {:level :off}}}
