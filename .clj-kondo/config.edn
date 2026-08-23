@@ -9,7 +9,37 @@
 ;;
 ;; So this file mirrors the per-lab :lint-as entries. Adding one to a lab means
 ;; adding it here too, or the editor and CI will disagree again.
-{:lint-as {;; 04b-event-store: defspec defines a var named by its first argument.
+;;
+;; ---------------------------------------------------------------------------
+;; :exclude-files is the same disagreement, one level up.
+;;
+;; This repository is not one project. It is forty-odd independent ones, each
+;; with its own root, deps.edn and toolchain, and a namespace only resolves
+;; relative to the project that owns it. Linting them all from here reports
+;; things that are not true: `registry.server/build-router is called with 0
+;; args but expects 3` about a function that takes none, and `Unresolved var:
+;; post-json` about a var defined nine lines above the use. Both vanish when
+;; the same files are linted from their own roots, which is how `bb lint`
+;; runs them.
+;;
+;; So the editor is told to skip the two trees it cannot reason about:
+;;
+;;   archive/              earlier full-stack projects, each with its own root.
+;;                         Kept for reference and outside the lab sequence, and
+;;                         provably clean when linted where they live.
+;;   .clj-kondo/imports/   config exported by a library. Not ours, and not
+;;                         fixable by us.
+;;
+;; The labs themselves are deliberately not excluded. A finding in lab0..lab34
+;; is a real finding and should stay loud — a Problems panel that is always
+;; red is one nobody reads.
+;; ---------------------------------------------------------------------------
+;; Unanchored on purpose: clj-kondo reports `./archive/...` when linting `.`
+;; and `archive/...` when given the path directly, so a `^` anchor matches one
+;; invocation and silently not the other. Neither string occurs anywhere else
+;; in the tree.
+{:output {:exclude-files ["archive/" "\\.clj-kondo/imports/"]}
+ :lint-as {;; 04b-event-store: defspec defines a var named by its first argument.
            clojure.test.check.clojure-test/defspec clojure.test/deftest
 
            ;; 03-task-persistence: both return a reified protocol instance.

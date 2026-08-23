@@ -1,0 +1,27 @@
+;; clojure-lsp, for the editor.
+;;
+;; The Problems panel is driven by clojure-lsp rather than by the `clj-kondo`
+;; binary, and the two disagree about this repository for a structural reason:
+;; it is not one project. It is forty-odd independent ones -- every lab and
+;; every archived attempt has its own root, deps.edn and toolchain -- and a
+;; namespace only resolves relative to the project that owns it.
+;;
+;; Analysed as a single workspace, the archived projects produce findings that
+;; are not true. `registry.server/build-router is called with 0 args but
+;; expects 3` names a function that takes none; `Unresolved var: post-json`
+;; names a var defined nine lines above its use. Lint the same files from
+;; their own roots and both report zero errors and zero warnings.
+;;
+;; So clojure-lsp is told not to look at them. `.clj-kondo/config.edn` carries
+;; the matching `:output :exclude-files` for the command line, and the two must
+;; agree or the editor and CI are back to giving different answers -- which is
+;; the exact problem that file already exists to solve.
+;;
+;; The labs are deliberately not ignored. A finding in lab0..lab34 is real and
+;; should stay loud; a Problems panel that is permanently red is one nobody
+;; reads, which costs more than the warnings it is hiding.
+{:source-paths-ignore-regex ["target.*"
+                             "archive.*"
+                             ".*\\.clj-kondo/imports.*"
+                             ".*\\.clj-kondo/\\.cache.*"
+                             ".*\\.lsp/\\.cache.*"]}
