@@ -8,24 +8,42 @@
           (defn sh [& args]
             (binding [*out* *err*] (apply println "+" (remove map? args)))
             (apply shell args))
-          (defn lab-n [d] (parse-long (subs d 3)))
-          (defn labs []
-            (->> (fs/list-dir ".")
+          (defn lab-n [p] (parse-long (subs (str (fs/file-name p)) 3)))
+          (defn labs-in
+            "Lab directories directly under `root`, numerically ordered, as
+             paths relative to this file: `lab1`, `human/lab1`. The path is
+             what `test-all` needs for :dir, so `fs/file-name` is used only to
+             read the number off the end."
+            [root]
+            (->> (fs/list-dir root)
                  (filter fs/directory?)
-                 (map (fn [p] (str (fs/file-name p))))
                  ;; `some?`, not `pos?` — lab0 is a lab, and `parse-long`
                  ;; returns nil rather than a number for a non-numeric suffix.
-                 (filter (fn [d]
-                           (and (str/starts-with? d "lab")
-                                (some? (lab-n d)))))
-                 (sort-by lab-n))))
+                 (filter (fn [p]
+                           (and (str/starts-with? (str (fs/file-name p)) "lab")
+                                (some? (lab-n p)))))
+                 (sort-by lab-n)
+                 (map (fn [p] (str (fs/normalize p))))))
+          ;; Two tracks, kept apart on purpose. `labs` is the numbered
+          ;; sequence, and it is what `audit` checks against the root README's
+          ;; table and "What's next" chain. The human track is a separate
+          ;; narrative on a statutory registry with its own documents, so it
+          ;; is run by `test-all` and deliberately not audited by those rules.
+          (defn labs [] (labs-in "."))
+          (defn human-labs [] (labs-in "human")))
 
   help
   {:doc              "Repository-level tasks. Each lab has its own bb.edn too."
    :override-builtin true
    :task (do (println "")
-             (println "  bb audit      consistency checks across every lab and document")
-             (println "  bb test-all   run every lab's suite (labs 19-30 need Docker)")
+             (println "  bb audit       consistency checks across every lab and document")
+             (println "  bb test-all    run every lab's suite (labs 19-30 need Docker)")
+             (println "  bb test-human  the human/ track only — no Docker")
+             (println "")
+             (println "Two tracks: lab0..lab34 build event sourcing concept by")
+             (println "concept; human/lab1.. model a statutory registry, where")
+             (println "getting the record wrong is unrecoverable rather than")
+             (println "merely expensive.")
              (println "")
              (println "Each lab is also self-contained: cd lab1 && bb all")
              (println ""))}
@@ -35,7 +53,13 @@
    :task (exec 'audit/-main)}
 
   test-all
-  {:doc  "Run every lab's suite in order"
-   :task (doseq [d (labs)]
+  {:doc  "Run every lab's suite in order, both tracks"
+   :task (doseq [d (concat (labs) (human-labs))]
+           (println (str "\n=== " d))
+           (sh {:dir d} "bb" "test"))}
+
+  test-human
+  {:doc  "Run the human track only — no Docker, no containers"
+   :task (doseq [d (human-labs)]
            (println (str "\n=== " d))
            (sh {:dir d} "bb" "test"))}}}
