@@ -3,6 +3,7 @@
    [clojure.pprint :refer [pprint]]
    [decider.bundle :as bundle]
    [decider.core :as decider]
+   [decider.fixtures :as fixtures]
    [decider.identity :as identity]))
 
 (comment
@@ -222,6 +223,6 @@
   (pprint (decider/prepare-and-decide secret-santa santa-state santa-command))
 
   ;; Load and inspect all bundles.
-  (mapv identity/specification-ref (bundle/load-all))
+  (mapv identity/specification-ref (fixtures/load-all))
 
   :rcf)

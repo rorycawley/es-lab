@@ -165,31 +165,26 @@ decide-rules-data/
 │       ├── identity.clj
 │       └── schema.clj
 │
-├── resources/
-│   └── semantic-bundles/
-│       ├── ebay-place-bid.edn
-│       ├── airline-reserve-seat.edn
-│       ├── ticketmaster-reserve-tickets.edn
-│       ├── amazon-add-item.edn
-│       ├── land-registry-register-transfer.edn
-│       ├── property-bidding-place-bid.edn
-│       └── secret-santa-assign-recipient.edn
-│
 ├── dev/
 │   └── decider/
 │       └── playground.clj
 │
-└── test/
-    ├── bundle-fixtures/     ; deliberately malformed files, on the test classpath
-    │   ├── empty.edn
-    │   └── two-forms.edn
-    │
-    └── decider/
-        ├── bundle_test.clj
-        ├── identity_test.clj
-        ├── interpreter_test.clj
-        ├── validation_test.clj
-        └── generative_test.clj
+├── test/
+│   ├── resources/           ; examples and malformed fixtures, test-only
+│   │   ├── semantic-bundles/
+│   │   └── bundle-fixtures/
+│   └── decider/
+│       ├── fixtures.clj
+│       ├── bundle_test.clj
+│       ├── identity_test.clj
+│       ├── interpreter_test.clj
+│       ├── validation_test.clj
+│       └── generative_test.clj
+│
+└── consumer-test/           ; isolated external-consumer contract check
+    ├── deps.edn
+    ├── resources/
+    └── src/
 ```
 
 The dependencies are intentionally small:
@@ -218,14 +213,77 @@ Then:
 ```bash
 bb test        # run the suite
 bb check       # clj-kondo and cljfmt, both must be silent
+bb consumer:smoke # exercise the external consumer contract
+bb verify      # check, test, and consumer smoke test
 bb dev         # JVM REPL with dev/ and test/ on the classpath
-bb all         # setup, check, test
+bb all         # setup, then verify
 bb tasks       # everything available
 ```
 
 Each of these is a thin wrapper over the underlying command, printed with a
 leading `+` before it runs, so nothing is hidden and any of them can be typed
 directly instead.
+
+### Production support contract
+
+This project is supported as an **internal source library**, not as a published
+Maven or Clojars artifact. A sibling project can depend on it locally:
+
+```clojure
+{decide-rules-data/decide-rules-data
+ {:local/root "../decide-rules-data"}}
+```
+
+A consumer outside this checkout should use a Git dependency pinned to a full,
+immutable commit SHA rather than a branch:
+
+```clojure
+{io.github.rorycawley/decide-rules-data
+ {:git/url "https://github.com/rorycawley/es-lab.git"
+  :git/sha "<full-commit-sha>"
+  :deps/root "decide-rules-data"}}
+```
+
+The supported runtime matrix is Java 21 and Java 25. CI exercises both. The
+supported compatibility surface is:
+
+- `decider.core/prepare`, `prepared?`, `specification`, `decide`, and
+  `prepare-and-decide`;
+- `decider.bundle/load` and `load-prepared`;
+- `decider.schema/problems`, `assert-valid-bundle!`, the documented schema
+  values, and the documented DSL/result data shapes.
+
+Other public vars and the implementation namespaces `decider.dsl`,
+`decider.hash`, and `decider.identity` are inspectable but are not independent
+compatibility promises. Change the supported data shapes and functions only as
+an intentional internal API revision.
+
+Semantic bundles are **trusted, code-reviewed application artifacts**. This
+library validates their structure and bounds the work performed after parsing;
+it does not claim hostile-input isolation. Do not accept arbitrary user-uploaded
+EDN as a bundle. Load and prepare each reviewed bundle during application
+startup, fail startup if preparation throws, and reuse the opaque prepared value
+for requests.
+
+The consuming application owns coherent state, concurrency control, persistence,
+effects, exception reporting, logging, metrics, and deployment. A `:spec/hash`
+is content identity, not proof of authorship or approval.
+
+The seven branded bundles are executable documentation and test fixtures. They
+live under `test/resources`, are available to `bb test` and `bb dev`, and are
+deliberately absent from a consumer's production classpath. Applications supply
+their own reviewed resources; `consumer-test` proves that boundary.
+
+Dependency scanning is separate from the offline verification suite:
+
+```bash
+GITHUB_TOKEN=... bb vuln:github
+CLJ_WATSON_NVD_API_KEY=... bb vuln:nvd
+```
+
+CI runs the GitHub advisory check for changes and the NVD check on a schedule.
+The NVD API key belongs in the repository secret
+`CLJ_WATSON_NVD_API_KEY`; never commit it.
 
 ---
 
@@ -556,10 +614,10 @@ exists to catch that before it ships; see section 16.
 
 ## 12. EDN is the authoritative business-rule representation
 
-Each domain command has a semantic bundle under:
+Each example domain command has a test-only semantic bundle under:
 
 ```text
-resources/semantic-bundles/
+test/resources/semantic-bundles/
 ```
 
 There is deliberately **no parallel rules-as-code implementation** in the repository.
@@ -1590,7 +1648,7 @@ So far the interpreter has remained generic while the bundles contain the domain
 Bundle:
 
 ```text
-resources/semantic-bundles/ebay-place-bid.edn
+test/resources/semantic-bundles/ebay-place-bid.edn
 ```
 
 Identity:
@@ -1634,7 +1692,7 @@ This domain introduced the need for conditional derivation and arithmetic while 
 Bundle:
 
 ```text
-resources/semantic-bundles/airline-reserve-seat.edn
+test/resources/semantic-bundles/airline-reserve-seat.edn
 ```
 
 Identity:
@@ -1682,7 +1740,7 @@ This domain demonstrates dynamic lookup paths based on command data.
 Bundle:
 
 ```text
-resources/semantic-bundles/ticketmaster-reserve-tickets.edn
+test/resources/semantic-bundles/ticketmaster-reserve-tickets.edn
 ```
 
 Identity:
@@ -1728,7 +1786,7 @@ This domain demonstrates a business default (`0` tickets previously reserved) an
 Bundle:
 
 ```text
-resources/semantic-bundles/amazon-add-item.edn
+test/resources/semantic-bundles/amazon-add-item.edn
 ```
 
 Identity:
@@ -1777,7 +1835,7 @@ This domain reused the existing language without adding any Amazon-specific inte
 Bundle:
 
 ```text
-resources/semantic-bundles/land-registry-register-transfer.edn
+test/resources/semantic-bundles/land-registry-register-transfer.edn
 ```
 
 Identity:
@@ -1828,7 +1886,7 @@ It demonstrates set/key membership while preserving the same generic decision ma
 Bundle:
 
 ```text
-resources/semantic-bundles/property-bidding-place-bid.edn
+test/resources/semantic-bundles/property-bidding-place-bid.edn
 ```
 
 Identity:
@@ -1875,7 +1933,7 @@ This domain demonstrates conditional rules and explicit eligibility while reusin
 Bundle:
 
 ```text
-resources/semantic-bundles/secret-santa-assign-recipient.edn
+test/resources/semantic-bundles/secret-santa-assign-recipient.edn
 ```
 
 Identity:
@@ -1971,8 +2029,7 @@ Responsibilities:
 - parse EDN, insisting on exactly one form;
 - validate the semantic bundle;
 - compute and associate `:spec/hash`;
-- provide `load-prepared` for the common case, and `load-all` for the seven
-  examples.
+- provide `load-prepared` for the common case.
 
 ### One form, not the first form
 
@@ -1996,14 +2053,11 @@ by weakening either: it reads the resource and prepares it, validating once.
 A test asserts it produces exactly what `load` then `prepare` does, so it cannot
 become a second way of building a prepared specification.
 
-`resource-paths` is written out rather than discovered, because a classpath
-directory can only be listed when it is a directory — from inside a jar it
-cannot be — and a function whose result depends on packaging is worse than a
-list. The risk of a hand-maintained list is that a bundle added without being
-listed is a bundle nothing tests, since `load-all` is what the generative suite
-iterates. `decider.bundle-test` asserts the list matches
-`resources/semantic-bundles` exactly, in both directions, so that is a build
-failure rather than a silence.
+The runtime namespace deliberately has no example catalog. The hand-maintained
+list of example paths and its `load-all` helper live in `decider.fixtures` on
+the test classpath. `decider.bundle-test` asserts that list matches
+`test/resources/semantic-bundles` exactly in both directions, so an untested
+example is a build failure without adding demo assets to consumer applications.
 
 `specification-ref` used to live here and now lives in `decider.identity`. This
 namespace is the project's I/O edge, and a pure projection over a map already
@@ -2382,6 +2436,19 @@ clojure -M:test --focus decider.interpreter-test
 clojure -M:test --focus decider.interpreter-test/first-failure-semantics-are-explicit
 ```
 
+The isolated consumer check starts from its own `deps.edn`, depends on this
+project through `:local/root`, loads a consumer-owned resource, exercises all
+three result classes, and proves that test examples are not runtime assets:
+
+```bash
+bb consumer:smoke
+```
+
+`bb verify` runs format, lint, the full unit/property suite, and that consumer
+check. The repository-root GitHub Actions workflow runs it on Java 21 and 25,
+then performs the dependency checks described in the production support
+contract.
+
 ---
 
 ## 50. Example tests
@@ -2461,13 +2528,13 @@ now reported, and both are pinned here.
 
 ### The bundle list matches the bundle directory
 
-`bundle_test.clj` compares `decider.bundle/resource-paths` against the contents
-of `resources/semantic-bundles`, in both directions. It guards the one place
+`bundle_test.clj` compares `decider.fixtures/resource-paths` against the contents
+of `test/resources/semantic-bundles`, in both directions. It guards the one place
 where a mistake produces no symptom at all: a bundle file that exists, loads,
 and is tested by nothing.
 
 It also covers the reading itself — a file holding two forms, and a file holding
-none — using fixtures in `test/bundle-fixtures/` rather than files written into
+none — using fixtures in `test/resources/bundle-fixtures/` rather than files written into
 the resource directory at test time, which would have raced with the listing
 test above.
 
@@ -2566,13 +2633,14 @@ When adding a new domain decision:
 13. Load the bundle at the REPL.
 14. Exercise accepted, rejected, invalid-command, and invalid-state examples.
 15. Add focused tests.
-16. Add the resource path to `decider.bundle/resource-paths` if it should participate in `load-all` and the generic tests.
+16. For a repository example, add the resource path to `decider.fixtures/resource-paths` so it participates in the generic tests.
 17. Add a rich-comment example to the playground if the domain is part of the teaching/demo set.
 
-Step 16 used to be easy to forget and silent when forgotten: `load-all` is what
-the generative test iterates, so a bundle missing from `resource-paths` is a
-bundle nothing tests. `decider.bundle-test` now compares the list against the
-directory in both directions, so forgetting it fails the build instead.
+Step 16 used to be easy to forget and silent when forgotten: the fixture
+`load-all` is what the generative test iterates, so a bundle missing from
+`resource-paths` is a bundle nothing tests. `decider.bundle-test` compares the
+test-only list against the test resource directory in both directions, so
+forgetting it fails the build instead.
 
 Do **not** begin by adding DSL operators. Try to model the domain with the existing language first.
 
@@ -3126,7 +3194,7 @@ Avoid cleverness whose primary benefit is fewer characters.
 
 The primary optimization target is semantic clarity.
 
-Before finishing a change, `bb check && bb test` should be silent and green.
+Before finishing a change, `bb verify` should be silent and green.
 The lint and format configuration is deliberately unconfigured — no suppressed
 warnings, no per-file exceptions — so a finding is a finding, and the right
 response is to fix the code rather than to widen the configuration.

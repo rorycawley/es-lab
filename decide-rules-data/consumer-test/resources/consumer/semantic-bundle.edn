@@ -1,0 +1,39 @@
+{:spec/id :consumer/reserve-capacity
+ :spec/version 1
+
+ :rule-evaluation
+ {:strategy :first-failure}
+
+ :state/schema
+ [:map
+  [:resource-id :string]
+  [:remaining [:int {:min 0}]]]
+
+ :command/schema
+ [:map
+  [:command/type [:enum :reserve-capacity]]
+  [:data
+   [:map
+    [:quantity :int]]]]
+
+ :derive []
+
+ :rules
+ [{:rule/id :BR-1
+   :rule/text "At least one unit must be requested."
+   :require [:expr/<= 1 [:expr/get :command [:data :quantity]]]
+   :otherwise :invalid-quantity}
+
+  {:rule/id :BR-2
+   :rule/text "The requested capacity must be available."
+   :require
+   [:expr/<=
+    [:expr/get :command [:data :quantity]]
+    [:expr/get :state [:remaining]]]
+   :otherwise :insufficient-capacity}]
+
+ :events
+ [{:event/type :capacity-reserved
+   :data
+   {:resource-id [:expr/get :state [:resource-id]]
+    :quantity [:expr/get :command [:data :quantity]]}}]}

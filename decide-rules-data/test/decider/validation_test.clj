@@ -13,6 +13,7 @@
    [decider.bundle :as bundle]
    [decider.core :as decider]
    [decider.dsl :as dsl]
+   [decider.fixtures :as fixtures]
    [decider.schema :as schema]))
 
 (def base
@@ -262,7 +263,7 @@
     (is (thrown? clojure.lang.ExceptionInfo (decider/prepare wide))))
 
   (testing "and real bundles are nowhere near the limit"
-    (doseq [specification (bundle/load-all)]
+    (doseq [specification (fixtures/load-all)]
       (is (empty? (schema/problems specification))))))
 
 (deftest a-bundle-too-deep-to-walk-is-refused-rather-than-walked

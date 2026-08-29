@@ -5,6 +5,7 @@
    [decider.bundle :as bundle]
    [decider.core :as decider]
    [decider.dsl :as dsl]
+   [decider.fixtures :as fixtures]
    [decider.schema :as schema]
    [malli.core :as m]))
 
@@ -27,7 +28,7 @@
                           :quantity quantity}}))
 
 (deftest every-bundle-is-valid
-  (doseq [specification (bundle/load-all)]
+  (doseq [specification (fixtures/load-all)]
     (is (empty? (schema/problems specification)))
     (is (string? (:spec/hash specification)))
     (is (str/starts-with? (:spec/hash specification) "sha256:"))))

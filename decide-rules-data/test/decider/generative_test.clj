@@ -11,6 +11,7 @@
    [clojure.test.check.properties :as prop]
    [decider.bundle :as bundle]
    [decider.core :as decider]
+   [decider.fixtures :as fixtures]
    [decider.schema :as schema]
    [malli.core :as m]
    [malli.generator :as mg]))
@@ -22,7 +23,7 @@
         (map (fn [path]
                (let [prepared (bundle/load-prepared path)]
                  [(:spec/id (decider/specification prepared)) prepared])))
-        bundle/resource-paths))
+        fixtures/resource-paths))
 
 (def generators-by-id
   "State and command generators, built once per bundle. `mg/generator` compiles
@@ -32,7 +33,7 @@
                [(:spec/id specification)
                 {:state   (mg/generator (:state/schema specification))
                  :command (mg/generator (:command/schema specification))}]))
-        (bundle/load-all)))
+        (fixtures/load-all)))
 
 (def decision-input
   "A `[spec-id state command]` triple.

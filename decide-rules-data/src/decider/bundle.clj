@@ -14,28 +14,6 @@
   (:import
    [java.io PushbackReader]))
 
-(def resource-directory
-  "Where the bundles live on the classpath."
-  "semantic-bundles")
-
-(def resource-paths
-  "The bundles `load-all` reads, and therefore the bundles the generative suite
-   exercises.
-
-   Written out rather than discovered, because a classpath directory can only be
-   listed when it is a directory — from inside a jar it cannot be — and a
-   function whose result depends on how the project was packaged is worse than a
-   list. `decider.bundle-test` asserts this matches the contents of
-   `resources/semantic-bundles` exactly, in both directions, so a bundle added
-   without being listed fails the build instead of silently going untested."
-  ["semantic-bundles/ebay-place-bid.edn"
-   "semantic-bundles/airline-reserve-seat.edn"
-   "semantic-bundles/ticketmaster-reserve-tickets.edn"
-   "semantic-bundles/amazon-add-item.edn"
-   "semantic-bundles/land-registry-register-transfer.edn"
-   "semantic-bundles/property-bidding-place-bid.edn"
-   "semantic-bundles/secret-santa-assign-recipient.edn"])
-
 (defn- read-specification
   "Parse the single EDN form at `resource-path`. No validation, no hash.
 
@@ -87,8 +65,3 @@
    rather than by weakening either."
   [resource-path]
   (core/prepare (read-specification resource-path)))
-
-(defn load-all
-  "Every bundle in `resource-paths`, in order, as data."
-  []
-  (mapv load resource-paths))

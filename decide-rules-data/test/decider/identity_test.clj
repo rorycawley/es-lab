@@ -11,6 +11,7 @@
    [clojure.test :refer [deftest is testing]]
    [decider.bundle :as bundle]
    [decider.core :as decider]
+   [decider.fixtures :as fixtures]
    [decider.hash :as hash]
    [decider.identity :as identity]
    [decider.schema :as schema]
@@ -32,7 +33,7 @@
           :quantity 1}})
 
 (deftest constructed-reference-matches-its-schema
-  (doseq [specification (bundle/load-all)]
+  (doseq [specification (fixtures/load-all)]
     (testing (str (:spec/id specification))
       (let [reference (identity/specification-ref specification)]
         ;; `SpecificationRef` is `{:closed true}`, so this now catches a fourth

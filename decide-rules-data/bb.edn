@@ -2,14 +2,17 @@
  :tasks
  {:requires ([babashka.process :refer [shell]])
 
-  :init (defn sh [& args]
-          (binding [*out* *err*]
-            (apply println "+" (remove map? args)))
-          ;; These tasks wait for short-lived child processes, so no
-          ;; process-tree shutdown hook is needed. Skipping one also keeps them
-          ;; working in restricted macOS environments where the process-tree
-          ;; sysctl is denied.
-          (apply shell {:shutdown nil} args))
+  :init (defn sh [& raw-args]
+          (let [[options args] (if (map? (first raw-args))
+                                 [(first raw-args) (rest raw-args)]
+                                 [{} raw-args])]
+            (binding [*out* *err*]
+              (apply println "+" args))
+            ;; These tasks wait for short-lived child processes, so no
+            ;; process-tree shutdown hook is needed. Skipping one also keeps them
+            ;; working in restricted macOS environments where the process-tree
+            ;; sysctl is denied.
+            (apply shell (assoc options :shutdown nil) args)))
 
   help
   {:doc              "Show setup prerequisites and available tasks"
@@ -25,8 +28,10 @@
                          (println "Then:")
                          (println "  bb test            run the suite")
                          (println "  bb check           lint and format check")
+                         (println "  bb consumer:smoke  test the external consumer contract")
+                         (println "  bb verify          run every offline production check")
                          (println "  bb dev             REPL for dev/decider/playground.clj")
-                         (println "  bb all             install tools + check + test")
+                         (println "  bb all             install tools + verify")
                          (println "  bb tasks           list all available tasks")
                          (println ""))}
 
@@ -37,15 +42,16 @@
 
   lint
   {:doc  "Lint with clj-kondo"
-   :task (sh "clj-kondo" "--parallel" "--lint" "src:dev:test")}
+   :task (sh "clj-kondo" "--parallel" "--lint"
+             "src:dev:test:consumer-test/src")}
 
   fmt:check
   {:doc  "Check code format with cljfmt"
-   :task (sh "cljfmt" "check" "src" "dev" "test")}
+   :task (sh "cljfmt" "check" "src" "dev" "test" "consumer-test/src")}
 
   fmt:fix
   {:doc  "Reformat code with cljfmt"
-   :task (sh "cljfmt" "fix" "src" "dev" "test")}
+   :task (sh "cljfmt" "fix" "src" "dev" "test" "consumer-test/src")}
 
   check
   {:doc     "Run static checks"
@@ -55,6 +61,23 @@
   {:doc  "Run the suite"
    :task (sh "clojure" "-M:test")}
 
+  consumer:smoke
+  {:doc  "Exercise the library from an isolated consumer project"
+   :task (sh {:dir "consumer-test"} "clojure" "-Srepro" "-M:run")}
+
+  vuln:github
+  {:doc  "Scan dependencies with the GitHub Advisory Database"
+   :task (sh "clojure" "-M:vuln" "scan" "-p" "deps.edn"
+             "-t" "github-advisory" "-f")}
+
+  vuln:nvd
+  {:doc  "Scan dependencies with NVD (requires CLJ_WATSON_NVD_API_KEY)"
+   :task (sh "clojure" "-M:vuln" "scan" "-p" "deps.edn" "-f")}
+
+  verify
+  {:doc     "Run every offline production check"
+   :depends [check test consumer:smoke]}
+
   ;; Named `dev` rather than `repl` because `bb repl` is a babashka built-in,
   ;; and this starts a JVM Clojure REPL — a different thing wearing the name.
   dev
@@ -62,5 +85,5 @@
    :task (sh "clojure" "-M:dev")}
 
   all
-  {:doc     "Setup, check and test"
-   :depends [setup check test]}}}
+  {:doc     "Install tools and run every offline production check"
+   :depends [setup verify]}}}

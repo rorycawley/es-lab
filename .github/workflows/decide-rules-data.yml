@@ -1,0 +1,72 @@
+name: Decide rules data
+
+on:
+  pull_request:
+    paths:
+      - "decide-rules-data/**"
+      - ".github/workflows/decide-rules-data.yml"
+  push:
+    branches: [main]
+    paths:
+      - "decide-rules-data/**"
+      - ".github/workflows/decide-rules-data.yml"
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event_name != 'schedule'
+    name: Verify / Java ${{ matrix.java }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [temurin-21, temurin-25]
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: jdx/mise-action@v4.2.1
+        with:
+          version: 2026.8.14
+          working_directory: decide-rules-data
+          install_args: java@${{ matrix.java }}
+      - name: Run offline production checks
+        working-directory: decide-rules-data
+        run: mise exec java@${{ matrix.java }} -- bb verify
+
+  advisory-scan:
+    if: github.event_name != 'schedule'
+    name: Dependency scan / GitHub Advisory Database
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: jdx/mise-action@v4.2.1
+        with:
+          version: 2026.8.14
+          working_directory: decide-rules-data
+      - name: Scan dependencies
+        working-directory: decide-rules-data
+        run: bb vuln:github
+
+  nvd-scan:
+    if: github.event_name == 'schedule'
+    name: Dependency scan / NVD
+    runs-on: ubuntu-latest
+    env:
+      CLJ_WATSON_NVD_API_KEY: ${{ secrets.CLJ_WATSON_NVD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: jdx/mise-action@v4.2.1
+        with:
+          version: 2026.8.14
+          working_directory: decide-rules-data
+      - name: Require the NVD API key
+        run: test -n "$CLJ_WATSON_NVD_API_KEY"
+      - name: Scan dependencies
+        working-directory: decide-rules-data
+        run: bb vuln:nvd

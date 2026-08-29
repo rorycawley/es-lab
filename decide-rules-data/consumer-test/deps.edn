@@ -1,0 +1,7 @@
+{:paths ["src" "resources"]
+
+ :deps
+ {decide-rules-data/decide-rules-data {:local/root ".."}}
+
+ :aliases
+ {:run {:main-opts ["-m" "consumer-smoke"]}}}
