@@ -32,6 +32,9 @@ jobs:
         with:
           version: 2026.8.14
           working_directory: decide-rules-data
+          # The cljfmt asdf plugin is not restored intact by the mise cache,
+          # which then fails to resolve cljfmt on every cache hit.
+          cache: false
       - name: Install the matrix JDK
         working-directory: decide-rules-data
         run: mise install java@${{ matrix.java }}
@@ -51,6 +54,9 @@ jobs:
         with:
           version: 2026.8.14
           working_directory: decide-rules-data
+          # The cljfmt asdf plugin is not restored intact by the mise cache,
+          # which then fails to resolve cljfmt on every cache hit.
+          cache: false
       - name: Scan dependencies
         working-directory: decide-rules-data
         run: bb vuln:github
@@ -67,6 +73,9 @@ jobs:
         with:
           version: 2026.8.14
           working_directory: decide-rules-data
+          # The cljfmt asdf plugin is not restored intact by the mise cache,
+          # which then fails to resolve cljfmt on every cache hit.
+          cache: false
       - name: Require the NVD API key
         run: test -n "$CLJ_WATSON_NVD_API_KEY"
       - name: Scan dependencies
