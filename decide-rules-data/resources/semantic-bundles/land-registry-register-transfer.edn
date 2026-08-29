@@ -1,0 +1,75 @@
+{:spec/id :land-registry/register-transfer
+ :spec/version 1
+
+ :rule-evaluation
+ {:strategy :first-failure}
+
+ :state/schema
+ [:map
+  [:title-id :string]
+  [:status [:enum :registered :closed :cancelled]]
+  [:registered-owner-id :string]
+  [:restrictions [:set :keyword]]]
+
+ :command/schema
+ [:map
+  [:command/type [:enum :register-transfer]]
+  [:data
+   [:map
+    [:transferor-id :string]
+    [:transferee-id :string]
+    [:instrument-executed? :boolean]
+    [:fee-paid? :boolean]]]]
+
+ :derive []
+
+ :rules
+ [{:rule/id :BR-1
+   :rule/text "The title must be registered and capable of being dealt with."
+   :require
+   [:expr/= [:expr/get :state [:status]] :registered]
+   :otherwise :title-not-registrable}
+
+  {:rule/id :BR-2
+   :rule/text "The transferor must be the currently registered owner."
+   :require
+   [:expr/=
+    [:expr/get :command [:data :transferor-id]]
+    [:expr/get :state [:registered-owner-id]]]
+   :otherwise :transferor-not-registered-owner}
+
+  {:rule/id :BR-3
+   :rule/text "The transferee must be different from the transferor."
+   :require
+   [:expr/not=
+    [:expr/get :command [:data :transferor-id]]
+    [:expr/get :command [:data :transferee-id]]]
+   :otherwise :transferor-and-transferee-identical}
+
+  {:rule/id :BR-4
+   :rule/text "The title must not contain a restriction prohibiting transfer."
+   :require
+   [:expr/not
+    [:expr/contains?
+     [:expr/get :state [:restrictions]]
+     :transfer-prohibited]]
+   :otherwise :transfer-prohibited}
+
+  {:rule/id :BR-5
+   :rule/text "The transfer instrument must have been validly executed."
+   :require
+   [:expr/get :command [:data :instrument-executed?]]
+   :otherwise :transfer-instrument-not-executed}
+
+  {:rule/id :BR-6
+   :rule/text "The required registration fee must have been paid."
+   :require
+   [:expr/get :command [:data :fee-paid?]]
+   :otherwise :registration-fee-not-paid}]
+
+ :events
+ [{:event/type :title-transferred
+   :data
+   {:title-id      [:expr/get :state [:title-id]]
+    :from-owner-id [:expr/get :command [:data :transferor-id]]
+    :to-owner-id   [:expr/get :command [:data :transferee-id]]}}]}

@@ -1,0 +1,71 @@
+{:spec/id :ticketmaster/reserve-tickets
+ :spec/version 1
+
+ :rule-evaluation
+ {:strategy :first-failure}
+
+ :state/schema
+ [:map
+  [:performance-id :string]
+  [:sale-status [:enum :open :closed]]
+  [:tickets-remaining [:int {:min 0}]]
+  [:max-tickets-per-customer [:int {:min 0}]]
+  [:customer-id->tickets-reserved
+   [:map-of :string [:int {:min 0}]]]]
+
+ :command/schema
+ [:map
+  [:command/type [:enum :reserve-tickets]]
+  [:data
+   [:map
+    [:customer-id :string]
+    [:quantity :int]]]]
+
+ :derive
+ [[:already-reserved
+   [:expr/get-or
+    :state
+    [:customer-id->tickets-reserved
+     [:expr/get :command [:data :customer-id]]]
+    0]]
+
+  [:resulting-quantity
+   [:expr/+
+    [:expr/get :derived [:already-reserved]]
+    [:expr/get :command [:data :quantity]]]]]
+
+ :rules
+ [{:rule/id :BR-1
+   :rule/text "The ticket sale must be open."
+   :require
+   [:expr/= [:expr/get :state [:sale-status]] :open]
+   :otherwise :ticket-sale-not-open}
+
+  {:rule/id :BR-2
+   :rule/text "At least one ticket must be requested."
+   :require
+   [:expr/<= 1 [:expr/get :command [:data :quantity]]]
+   :otherwise :invalid-ticket-quantity}
+
+  {:rule/id :BR-3
+   :rule/text "There must be enough tickets remaining to satisfy the request."
+   :require
+   [:expr/<=
+    [:expr/get :command [:data :quantity]]
+    [:expr/get :state [:tickets-remaining]]]
+   :otherwise :insufficient-tickets}
+
+  {:rule/id :BR-4
+   :rule/text "The reservation must not cause the customer to exceed the per-customer ticket limit."
+   :require
+   [:expr/<=
+    [:expr/get :derived [:resulting-quantity]]
+    [:expr/get :state [:max-tickets-per-customer]]]
+   :otherwise :ticket-limit-exceeded}]
+
+ :events
+ [{:event/type :tickets-reserved
+   :data
+   {:performance-id [:expr/get :state [:performance-id]]
+    :customer-id    [:expr/get :command [:data :customer-id]]
+    :quantity       [:expr/get :command [:data :quantity]]}}]}

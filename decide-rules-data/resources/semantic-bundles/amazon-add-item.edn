@@ -1,0 +1,99 @@
+{:spec/id :amazon/add-item-to-basket
+ :spec/version 1
+
+ :rule-evaluation
+ {:strategy :first-failure}
+
+ :state/schema
+ [:map
+  [:basket-id :string]
+  [:status [:enum :open :checked-out :abandoned]]
+  [:sku->product
+   [:map-of
+    :string
+    [:map
+     [:purchasable? :boolean]
+     [:unit-price [:int {:min 0}]]
+     [:stock-available [:int {:min 0}]]
+     [:max-per-order [:int {:min 0}]]]]]
+  [:sku->quantity
+   [:map-of :string [:int {:min 0}]]]]
+
+ :command/schema
+ [:map
+  [:command/type [:enum :add-item]]
+  [:data
+   [:map
+    [:sku :string]
+    [:quantity :int]]]]
+
+ :derive
+ [[:product
+   [:expr/get
+    :state
+    [:sku->product
+     [:expr/get :command [:data :sku]]]]]
+
+  [:already-in-basket
+   [:expr/get-or
+    :state
+    [:sku->quantity
+     [:expr/get :command [:data :sku]]]
+    0]]
+
+  [:resulting-quantity
+   [:expr/+
+    [:expr/get :derived [:already-in-basket]]
+    [:expr/get :command [:data :quantity]]]]]
+
+ :rules
+ [{:rule/id :BR-1
+   :rule/text "The basket must be open for modification."
+   :require
+   [:expr/= [:expr/get :state [:status]] :open]
+   :otherwise :basket-not-open}
+
+  {:rule/id :BR-2
+   :rule/text "The product must exist."
+   :require
+   [:expr/not [:expr/nil? [:expr/get :derived [:product]]]]
+   :otherwise :product-not-found}
+
+  {:rule/id :BR-3
+   :rule/text "The product must currently be purchasable."
+   :rule/after [:BR-2]
+   :require
+   [:expr/get :derived [:product :purchasable?]]
+   :otherwise :product-not-purchasable}
+
+  {:rule/id :BR-4
+   :rule/text "At least one unit must be requested."
+   :require
+   [:expr/<= 1 [:expr/get :command [:data :quantity]]]
+   :otherwise :invalid-quantity}
+
+  {:rule/id :BR-5
+   :rule/text "Adding the requested quantity must not exceed the maximum quantity permitted per customer order."
+   :rule/after [:BR-2]
+   :require
+   [:expr/<=
+    [:expr/get :derived [:resulting-quantity]]
+    [:expr/get :derived [:product :max-per-order]]]
+   :otherwise :maximum-order-quantity-exceeded}
+
+  {:rule/id :BR-6
+   :rule/text "There must be sufficient stock for the resulting quantity in the basket."
+   :rule/after [:BR-2]
+   :require
+   [:expr/<=
+    [:expr/get :derived [:resulting-quantity]]
+    [:expr/get :derived [:product :stock-available]]]
+   :otherwise :insufficient-stock}]
+
+ :events
+ [{:event/type :item-added-to-basket
+   :data
+   {:basket-id  [:expr/get :state [:basket-id]]
+    :sku        [:expr/get :command [:data :sku]]
+    :quantity   [:expr/get :command [:data :quantity]]
+    :unit-price [:expr/get :derived [:product :unit-price]]}}]}

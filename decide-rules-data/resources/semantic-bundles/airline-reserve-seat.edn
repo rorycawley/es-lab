@@ -1,0 +1,92 @@
+{:spec/id :airline/reserve-seat
+ :spec/version 1
+
+ :rule-evaluation
+ {:strategy :first-failure}
+
+ :state/schema
+ [:map
+  [:flight-id :string]
+  [:status [:enum :open :closed]]
+  [:passenger-id->booking
+   [:map-of
+    :string
+    [:map
+     [:status [:enum :confirmed :pending :cancelled]]
+     [:cabin [:enum :economy :premium-economy :business :first]]]]]
+  [:seat-id->seat
+   [:map-of
+    :string
+    [:map
+     [:status [:enum :available :reserved :blocked]]
+     [:cabin [:enum :economy :premium-economy :business :first]]]]]]
+
+ :command/schema
+ [:map
+  [:command/type [:enum :reserve-seat]]
+  [:data
+   [:map
+    [:passenger-id :string]
+    [:seat-id :string]]]]
+
+ :derive
+ [[:booking
+   [:expr/get
+    :state
+    [:passenger-id->booking
+     [:expr/get :command [:data :passenger-id]]]]]
+
+  [:seat
+   [:expr/get
+    :state
+    [:seat-id->seat
+     [:expr/get :command [:data :seat-id]]]]]]
+
+ :rules
+ [{:rule/id :BR-1
+   :rule/text "The flight must be open for seat reservations."
+   :require
+   [:expr/= [:expr/get :state [:status]] :open]
+   :otherwise :seat-reservations-closed}
+
+  {:rule/id :BR-2
+   :rule/text "The passenger must have a booking on the flight."
+   :require
+   [:expr/not [:expr/nil? [:expr/get :derived [:booking]]]]
+   :otherwise :booking-not-found}
+
+  {:rule/id :BR-3
+   :rule/text "The passenger's booking must be confirmed."
+   :rule/after [:BR-2]
+   :require
+   [:expr/= [:expr/get :derived [:booking :status]] :confirmed]
+   :otherwise :booking-not-confirmed}
+
+  {:rule/id :BR-4
+   :rule/text "The requested seat must exist."
+   :require
+   [:expr/not [:expr/nil? [:expr/get :derived [:seat]]]]
+   :otherwise :seat-not-found}
+
+  {:rule/id :BR-5
+   :rule/text "The requested seat must be available."
+   :rule/after [:BR-4]
+   :require
+   [:expr/= [:expr/get :derived [:seat :status]] :available]
+   :otherwise :seat-not-available}
+
+  {:rule/id :BR-6
+   :rule/text "The requested seat must be in the cabin booked by the passenger."
+   :rule/after [:BR-2 :BR-4]
+   :require
+   [:expr/=
+    [:expr/get :derived [:booking :cabin]]
+    [:expr/get :derived [:seat :cabin]]]
+   :otherwise :seat-not-in-booked-cabin}]
+
+ :events
+ [{:event/type :seat-reserved
+   :data
+   {:flight-id    [:expr/get :state [:flight-id]]
+    :passenger-id [:expr/get :command [:data :passenger-id]]
+    :seat-id      [:expr/get :command [:data :seat-id]]}}]}

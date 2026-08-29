@@ -1,0 +1,44 @@
+{:bundle/id :ticket
+ :bundle/version 1
+ :rules
+ [{:rule/id :seat-must-be-held
+   :assert [:op :core/= [:state [:seat/status]] [:value :held]]
+   :reject {:code :seat-not-held}}
+  {:rule/id :customer-must-own-hold
+   :assert [:op :core/= [:state [:seat/customer]] [:input [:data :customer]]]
+   :reject {:code :hold-owned-by-someone-else}}]
+ :decisions
+ [{:decision/id :confirm-ticket-sale
+   :on :ticket/confirm-sale
+   :rules [:seat-must-be-held :customer-must-own-hold]
+   :emit [{:event/type :ticket/sold
+           :data {:seat [:input [:data :seat]]
+                  :customer [:input [:data :customer]]}}]}]
+ :fsms
+ [{:fsm/id :ticket/seat-lifecycle
+   :initial :available
+   :transitions [{:from :available :on :ticket/seat-held :to :held}
+                 {:from :held :on :ticket/sold :to :sold}
+                 {:from :held :on :ticket/hold-expired :to :available}]}]
+ :state-model
+ {:initial {:seat/status :available :seat/customer nil}
+  :fsm-paths {[:seat/status] :ticket/seat-lifecycle}
+  :on-events [{:on :ticket/seat-held
+               :updates [[:set [:seat/customer] [:input [:data :customer]]]]}
+              {:on :ticket/hold-expired
+               :updates [[:set [:seat/customer] [:value nil]]]}]}
+ :workflow
+ {:workflow/id :ticket/checkout
+  :workflow/version 1
+  :initial {:status :awaiting-payment}
+  :reactions [{:reaction/id :payment-confirmed
+               :on :payment/confirmed
+               :when [:op :core/= [:state [:status]] [:value :awaiting-payment]]
+               :emit-events [{:event/type :ticket-process/payment-observed}]
+               :emit-commands [{:command/type :ticket/confirm-sale
+                                :data {:seat [:input [:data :seat]]
+                                       :customer [:input [:data :customer]]}}]}]
+  :on-events [{:on :ticket-process/payment-observed
+               :updates [[:set [:status] [:value :payment-confirmed]]]}]}
+ :operator-set {:id :core :version 1}
+ :interpreter {:version 1}}

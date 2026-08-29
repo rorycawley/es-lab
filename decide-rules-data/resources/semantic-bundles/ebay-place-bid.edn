@@ -1,0 +1,64 @@
+{:spec/id :ebay/place-bid
+ :spec/version 1
+
+ :rule-evaluation
+ {:strategy :first-failure}
+
+ :state/schema
+ [:map
+  [:auction-id :string]
+  [:status [:enum :open :closed]]
+  [:seller-id :string]
+  [:starting-price [:int {:min 0}]]
+  [:minimum-increment [:int {:min 0}]]
+  [:highest-bid {:optional true}
+   [:map
+    [:bidder-id :string]
+    [:amount [:int {:min 0}]]]]]
+
+ :command/schema
+ [:map
+  [:command/type [:enum :place-bid]]
+  [:data
+   [:map
+    [:bidder-id :string]
+    [:amount :int]]]]
+
+ :derive
+ [[:minimum-bid
+   [:expr/if
+    [:expr/nil? [:expr/get :state [:highest-bid]]]
+    [:expr/get :state [:starting-price]]
+    [:expr/+
+     [:expr/get :state [:highest-bid :amount]]
+     [:expr/get :state [:minimum-increment]]]]]]
+
+ :rules
+ [{:rule/id :BR-1
+   :rule/text "The auction must be open."
+   :require
+   [:expr/= [:expr/get :state [:status]] :open]
+   :otherwise :auction-not-open}
+
+  {:rule/id :BR-2
+   :rule/text "The seller cannot bid on their own auction."
+   :require
+   [:expr/not=
+    [:expr/get :command [:data :bidder-id]]
+    [:expr/get :state [:seller-id]]]
+   :otherwise :seller-cannot-bid}
+
+  {:rule/id :BR-3
+   :rule/text "A bid must be at least the minimum acceptable bid."
+   :require
+   [:expr/<=
+    [:expr/get :derived [:minimum-bid]]
+    [:expr/get :command [:data :amount]]]
+   :otherwise :bid-too-low}]
+
+ :events
+ [{:event/type :bid-placed
+   :data
+   {:auction-id [:expr/get :state [:auction-id]]
+    :bidder-id  [:expr/get :command [:data :bidder-id]]
+    :amount     [:expr/get :command [:data :amount]]}}]}

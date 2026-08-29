@@ -1,0 +1,31 @@
+;; This project's clj-kondo config.
+;;
+;; clj-kondo treats the directory holding a `.clj-kondo` as a project root, so
+;; having one keeps `bb lint` analysing this project on its own terms and keeps
+;; its cache inside this directory instead of the workspace root's.
+;;
+;; `imports/metosin/malli/` is Malli's own exported config, refreshed with:
+;;
+;;     clj-kondo --lint "$(clojure -Spath -A:dev)" --dependencies --copy-configs
+;;
+;; It is picked up automatically, and it is what stops `malli.core/=>` being
+;; reported as an unresolved symbol. It is generated, so do not edit it.
+;;
+;; Mirror any `:lint-as` added here into the workspace-root
+;; `../.clj-kondo/config.edn` as well — editors resolve that one rather than
+;; this one, and the two disagreeing is exactly the failure mode that file was
+;; written to prevent. (The root already carries the `defspec` entry.)
+;;
+;; ---------------------------------------------------------------------------
+;; :missing-docstring is on because the README is not the only place a reader
+;; meets these functions. It is off by default in clj-kondo, and with it off
+;; every public var in the project except one had gone undocumented while the
+;; prose stayed excellent — a REPL and an editor tooltip show the docstring,
+;; not the README. Tests are exempt: a test name is its documentation.
+{:lint-as {clojure.test.check.clojure-test/defspec clojure.test/deftest}
+
+ :ns-groups [{:name test-namespaces :pattern ".*-test$"}]
+
+ :linters {:missing-docstring {:level :warning}}
+
+ :config-in-ns {test-namespaces {:linters {:missing-docstring {:level :off}}}}}

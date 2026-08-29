@@ -1,0 +1,45 @@
+{:bundle/id :land
+ :bundle/version 1
+ :rules
+ [{:rule/id :title-must-be-active
+   :assert [:op :core/= [:state [:title/status]] [:value :active]]
+   :reject {:code :title-not-active}}
+  {:rule/id :transferor-must-be-proprietor
+   :assert [:op :core/= [:state [:title/proprietor]] [:input [:data :from]]]
+   :reject {:code :transferor-not-proprietor}}]
+ :decisions
+ [{:decision/id :register-transfer
+   :on :land/register-transfer
+   :rules [:title-must-be-active :transferor-must-be-proprietor]
+   :emit [{:event/type :land/transfer-registered
+           :data {:title-id [:input [:data :title-id]]
+                  :from [:input [:data :from]]
+                  :to [:input [:data :to]]}}]}]
+ :fsms
+ [{:fsm/id :land/title-lifecycle
+   :initial :unregistered
+   :transitions [{:from :unregistered :on :land/title-created :to :active}
+                 {:from :active :on :land/title-closed :to :closed}]}]
+ :state-model
+ {:initial {:title/status :unregistered :title/proprietor nil}
+  :fsm-paths {[:title/status] :land/title-lifecycle}
+  :on-events [{:on :land/title-created
+               :updates [[:set [:title/proprietor] [:input [:data :proprietor]]]]}
+              {:on :land/transfer-registered
+               :updates [[:set [:title/proprietor] [:input [:data :to]]]]}]}
+ :workflow
+ {:workflow/id :land/registration
+  :workflow/version 1
+  :initial {:status :awaiting-approval}
+  :reactions [{:reaction/id :approved-transfer
+               :on :land/transfer-approved
+               :when [:op :core/= [:state [:status]] [:value :awaiting-approval]]
+               :emit-events [{:event/type :land-process/registration-requested}]
+               :emit-commands [{:command/type :land/register-transfer
+                                :data {:title-id [:input [:data :title-id]]
+                                       :from [:input [:data :from]]
+                                       :to [:input [:data :new-proprietor]]}}]}]
+  :on-events [{:on :land-process/registration-requested
+               :updates [[:set [:status] [:value :registration-requested]]]}]}
+ :operator-set {:id :core :version 1}
+ :interpreter {:version 1}}

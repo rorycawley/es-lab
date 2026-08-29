@@ -1,0 +1,63 @@
+{:paths ["src" "resources" "test"]
+ :tasks
+ {:requires ([babashka.process :refer [shell]])
+
+  :init (defn sh [& args]
+          (binding [*out* *err*]
+            (apply println "+" (remove map? args)))
+          ;; These tasks wait for short-lived child processes, so no process-tree
+          ;; shutdown hook is needed. Avoiding one also keeps execution clean in
+          ;; restricted macOS environments where process-tree sysctl is denied.
+          (apply shell {:shutdown nil} args))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task             (do (println "")
+                         (println "Prerequisites:")
+                         (println "  1. Install mise: curl https://mise.run | sh")
+                         (println "  2. Run: mise install")
+                         (println "")
+                         (println "Then:")
+                         (println "  bb demo    run all three semantic-bundle examples")
+                         (println "  bb lint    lint the Clojure source and tests")
+                         (println "  bb fmt:check  check Clojure formatting")
+                         (println "  bb fmt:fix    reformat Clojure files")
+                         (println "  bb test    run the full Clojure test suite")
+                         (println "  bb all     setup, check, test, and run the demo")
+                         (println ""))}
+
+  setup
+  {:doc  "Trust mise.toml and install all declared tools"
+   :task (do (sh "mise" "trust")
+             (sh "mise" "install"))}
+
+  demo
+  {:doc  "Run all three semantic-bundle examples"
+   :task (sh "clojure" "-M:demo")}
+
+  lint
+  {:doc  "Lint with clj-kondo"
+   :task (sh "clj-kondo" "--parallel"
+             "--cache-dir" ".clj-kondo/.cache"
+             "--lint" "src:test")}
+
+  fmt:check
+  {:doc  "Check code format with cljfmt"
+   :task (sh "cljfmt" "check" "src" "test")}
+
+  fmt:fix
+  {:doc  "Reformat Clojure files with cljfmt"
+   :task (sh "cljfmt" "fix" "src" "test")}
+
+  test
+  {:doc  "Run the full Clojure test suite via Kaocha"
+   :task (sh "clojure" "-M:test")}
+
+  check
+  {:doc     "Run static checks"
+   :depends [lint fmt:check]}
+
+  all
+  {:doc     "Setup, check, test, and run the demo"
+   :depends [setup check test demo]}}}

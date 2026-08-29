@@ -1,0 +1,48 @@
+{:bundle/id :corporate
+ :bundle/version 1
+ :rules
+ [{:rule/id :application-must-be-submitted
+   :assert [:op :core/= [:state [:application/status]] [:value :submitted]]
+   :reject {:code :application-not-submitted}}
+  {:rule/id :payment-must-be-confirmed
+   :assert [:op :core/= [:state [:payment/status]] [:value :confirmed]]
+   :reject {:code :payment-not-confirmed}}
+  {:rule/id :four-eyes
+   :assert [:op :core/not= [:state [:examination/first-examiner]] [:input [:data :examiner-id]]]
+   :reject {:code :four-eyes-violation}}]
+ :decisions
+ [{:decision/id :approve-application
+   :on :company/approve-application
+   :rules [:application-must-be-submitted :payment-must-be-confirmed :four-eyes]
+   :emit [{:event/type :company/application-approved
+           :data {:application-id [:input [:data :application-id]]
+                  :second-examiner [:input [:data :examiner-id]]}}]}]
+ :fsms
+ [{:fsm/id :company/application-lifecycle
+   :initial :draft
+   :transitions [{:from :draft :on :company/application-submitted :to :submitted}
+                 {:from :submitted :on :company/application-approved :to :approved}
+                 {:from :approved :on :company/company-incorporated :to :incorporated}]}]
+ :state-model
+ {:initial {:application/status :draft
+            :payment/status :unconfirmed
+            :examination/first-examiner nil}
+  :fsm-paths {[:application/status] :company/application-lifecycle}
+  :on-events [{:on :company/payment-noted
+               :updates [[:set [:payment/status] [:value :confirmed]]]}
+              {:on :company/first-examination-completed
+               :updates [[:set [:examination/first-examiner] [:input [:data :examiner-id]]]]}]}
+ :workflow
+ {:workflow/id :company/incorporation
+  :workflow/version 1
+  :initial {:status :awaiting-approval}
+  :reactions [{:reaction/id :create-company
+               :on :company/application-approved
+               :when [:op :core/= [:state [:status]] [:value :awaiting-approval]]
+               :emit-events [{:event/type :company-process/company-creation-requested}]
+               :emit-commands [{:command/type :company/create
+                                :data {:application-id [:input [:data :application-id]]}}]}]
+  :on-events [{:on :company-process/company-creation-requested
+               :updates [[:set [:status] [:value :company-requested]]]}]}
+ :operator-set {:id :core :version 1}
+ :interpreter {:version 1}}

@@ -1,0 +1,10 @@
+;; cljfmt does not know that `prop/for-all` binds names and then takes a body,
+;; so by default it indents the property under the binding vector as though the
+;; body were a second argument. Saying so here keeps a generative test looking
+;; like the `let` it reads as.
+;;
+;; `:extra-indents`, not `:indents`: the latter replaces cljfmt's default rules
+;; outright, which silently unsets the ones for `defn`, `let` and `ns` and
+;; reformats the whole project.
+{:extra-indents {clojure.test.check.properties/for-all [[:block 1]]
+                 prop/for-all                          [[:block 1]]}}

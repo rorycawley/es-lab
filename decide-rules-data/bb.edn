@@ -1,0 +1,66 @@
+{:paths ["src" "dev" "test"]
+ :tasks
+ {:requires ([babashka.process :refer [shell]])
+
+  :init (defn sh [& args]
+          (binding [*out* *err*]
+            (apply println "+" (remove map? args)))
+          ;; These tasks wait for short-lived child processes, so no
+          ;; process-tree shutdown hook is needed. Skipping one also keeps them
+          ;; working in restricted macOS environments where the process-tree
+          ;; sysctl is denied.
+          (apply shell {:shutdown nil} args))
+
+  help
+  {:doc              "Show setup prerequisites and available tasks"
+   :override-builtin true
+   :task             (do (println "")
+                         (println "Prerequisites:")
+                         (println "  1. Install mise: curl https://mise.run | sh")
+                         (println "  2. Run: bb setup")
+                         (println "")
+                         (println "No Docker, no database, no server. Business rules are EDN")
+                         (println "and a pure interpreter gives them meaning.")
+                         (println "")
+                         (println "Then:")
+                         (println "  bb test            run the suite")
+                         (println "  bb check           lint and format check")
+                         (println "  bb dev             REPL for dev/decider/playground.clj")
+                         (println "  bb all             install tools + check + test")
+                         (println "  bb tasks           list all available tasks")
+                         (println ""))}
+
+  setup
+  {:doc  "Trust mise.toml and install all declared tools"
+   :task (do (sh "mise" "trust")
+             (sh "mise" "install"))}
+
+  lint
+  {:doc  "Lint with clj-kondo"
+   :task (sh "clj-kondo" "--parallel" "--lint" "src:dev:test")}
+
+  fmt:check
+  {:doc  "Check code format with cljfmt"
+   :task (sh "cljfmt" "check" "src" "dev" "test")}
+
+  fmt:fix
+  {:doc  "Reformat code with cljfmt"
+   :task (sh "cljfmt" "fix" "src" "dev" "test")}
+
+  check
+  {:doc     "Run static checks"
+   :depends [lint fmt:check]}
+
+  test
+  {:doc  "Run the suite"
+   :task (sh "clojure" "-M:test")}
+
+  ;; Named `dev` rather than `repl` because `bb repl` is a babashka built-in,
+  ;; and this starts a JVM Clojure REPL — a different thing wearing the name.
+  dev
+  {:doc  "JVM REPL with dev/ and test/ on the classpath"
+   :task (sh "clojure" "-M:dev")}
+
+  all
+  {:doc     "Setup, check and test"
+   :depends [setup check test]}}}

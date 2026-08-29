@@ -119,6 +119,21 @@ Q3–Q8 discharge C3. Q9–Q10 discharge C2. Q11 discharges C4. Q7 discharges C5
 
 Stream positions, expected versions, message ids, correlation and causation ids, schema versions and encoding metadata are all necessary. **None of them is part of the act.**
 
+```
+┌─ envelope ───────────────────────────────────┐
+│  stream position · message id                │
+│  correlation id · causation id               │
+│  schema version · encoding                   │
+│                                              │
+│    ┌─ act ────────────────────────────┐      │
+│    │  Q1 … Q13 — the thirteen answers │      │
+│    └──────────────────────────────────┘      │
+└──────────────────────────────────────────────┘
+
+  strip the envelope and all thirteen answers
+  survive — which is what QA6 requires
+```
+
 > The envelope exists to make the software reliable. The act exists to make the institution intelligible.
 
 Keep them separable. A lawyer in a witness box does not care about stream position 41, and the moment machinery starts appearing among the thirteen answers, the discipline that makes them useful is gone.

@@ -1,0 +1,90 @@
+{:spec/id :property-bidding/place-bid
+ :spec/version 1
+
+ :rule-evaluation
+ {:strategy :first-failure}
+
+ :state/schema
+ [:map
+  [:listing-id :string]
+  [:status [:enum :open :closed :withdrawn]]
+  [:seller-id :string]
+  [:minimum-bid [:int {:min 0}]]
+  [:minimum-increment [:int {:min 0}]]
+  [:eligible-bidder-ids [:set :string]]
+  [:highest-bid {:optional true}
+   [:map
+    [:bidder-id :string]
+    [:amount [:int {:min 0}]]]]]
+
+ :command/schema
+ [:map
+  [:command/type [:enum :place-bid]]
+  [:data
+   [:map
+    [:bidder-id :string]
+    [:amount :int]]]]
+
+ :derive
+ [[:highest-bid-exists?
+   [:expr/not [:expr/nil? [:expr/get :state [:highest-bid]]]]]
+
+  [:required-bid
+   [:expr/if
+    [:expr/get :derived [:highest-bid-exists?]]
+    [:expr/+
+     [:expr/get :state [:highest-bid :amount]]
+     [:expr/get :state [:minimum-increment]]]
+    [:expr/get :state [:minimum-bid]]]]]
+
+ :rules
+ [{:rule/id :BR-1
+   :rule/text "The property must be open for bidding."
+   :require
+   [:expr/= [:expr/get :state [:status]] :open]
+   :otherwise :bidding-not-open}
+
+  {:rule/id :BR-2
+   :rule/text "The seller cannot bid on their own property."
+   :require
+   [:expr/not=
+    [:expr/get :command [:data :bidder-id]]
+    [:expr/get :state [:seller-id]]]
+   :otherwise :seller-cannot-bid}
+
+  {:rule/id :BR-3
+   :rule/text "The bidder must be eligible to bid."
+   :require
+   [:expr/contains?
+    [:expr/get :state [:eligible-bidder-ids]]
+    [:expr/get :command [:data :bidder-id]]]
+   :otherwise :bidder-not-eligible}
+
+  {:rule/id :BR-4
+   :rule/text "If there is no existing highest bid, the bid must meet the property's minimum bid."
+   :require
+   [:expr/if
+    [:expr/get :derived [:highest-bid-exists?]]
+    true
+    [:expr/<=
+     [:expr/get :state [:minimum-bid]]
+     [:expr/get :command [:data :amount]]]]
+   :otherwise :minimum-bid-not-met}
+
+  {:rule/id :BR-5
+   :rule/text "If a highest bid exists, the new bid must exceed it by at least the minimum increment."
+   :require
+   [:expr/if
+    [:expr/get :derived [:highest-bid-exists?]]
+    [:expr/<=
+     [:expr/get :derived [:required-bid]]
+     [:expr/get :command [:data :amount]]]
+    true]
+   :otherwise :minimum-increment-not-met}]
+
+ :events
+ [{:event/type :property-bid-placed
+   :data
+   {:listing-id [:expr/get :state [:listing-id]]
+    :bidder-id  [:expr/get :command [:data :bidder-id]]
+    :amount     [:expr/get :command [:data :amount]]}}]}
