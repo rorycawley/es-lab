@@ -32,7 +32,9 @@ jobs:
         with:
           version: 2026.8.14
           working_directory: decide-rules-data
-          install_args: java@${{ matrix.java }}
+      - name: Install the matrix JDK
+        working-directory: decide-rules-data
+        run: mise install java@${{ matrix.java }}
       - name: Run offline production checks
         working-directory: decide-rules-data
         run: mise exec java@${{ matrix.java }} -- bb verify
